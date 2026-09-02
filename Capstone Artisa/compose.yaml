@@ -1,0 +1,39 @@
+name: artisa
+
+services:
+  mariadb:
+    image: mariadb:11.8
+    container_name: artisa-mariadb
+    environment:
+      MARIADB_DATABASE: ${MARIADB_DATABASE:?Ejecuta python3 scripts/prepare_env.py}
+      MARIADB_USER: ${MARIADB_USER:?Ejecuta python3 scripts/prepare_env.py}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?Ejecuta python3 scripts/prepare_env.py}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Ejecuta python3 scripts/prepare_env.py}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build: .
+    image: artisa-docker-demo:local
+    container_name: artisa-docker-demo
+    environment:
+      DB_HOST: mariadb
+      DB_NAME: ${MARIADB_DATABASE:?Ejecuta python3 scripts/prepare_env.py}
+      DB_USER: ${MARIADB_USER:?Ejecuta python3 scripts/prepare_env.py}
+      DB_PASSWORD: ${MARIADB_PASSWORD:?Ejecuta python3 scripts/prepare_env.py}
+    ports:
+      - "127.0.0.1:8080:8000"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mariadb_data:
