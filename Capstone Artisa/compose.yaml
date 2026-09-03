@@ -1,5 +1,18 @@
 name: artisa
 
+x-db-environment: &db-environment
+  DB_HOST: mariadb
+  DB_NAME: ${MARIADB_DATABASE:?Ejecuta python3 scripts/prepare_env.py}
+  DB_USER: ${MARIADB_USER:?Ejecuta python3 scripts/prepare_env.py}
+  DB_PASSWORD: ${MARIADB_PASSWORD:?Ejecuta python3 scripts/prepare_env.py}
+
+x-python-health: &python-health
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
+  interval: 5s
+  timeout: 5s
+  start_period: 15s
+  retries: 12
+
 services:
   mariadb:
     image: mariadb:11.8
@@ -19,21 +32,65 @@ services:
       retries: 12
     restart: unless-stopped
 
-  api:
-    build: .
-    image: artisa-docker-demo:local
-    container_name: artisa-docker-demo
+  etl:
+    build:
+      context: .
+      dockerfile: ETLs/Dockerfile
+    container_name: artisa-etl
     environment:
-      DB_HOST: mariadb
-      DB_NAME: ${MARIADB_DATABASE:?Ejecuta python3 scripts/prepare_env.py}
-      DB_USER: ${MARIADB_USER:?Ejecuta python3 scripts/prepare_env.py}
-      DB_PASSWORD: ${MARIADB_PASSWORD:?Ejecuta python3 scripts/prepare_env.py}
-    ports:
-      - "127.0.0.1:8080:8000"
+      <<: *db-environment
+      SOURCE_FILE: /origen/viajes.csv
+      ETL_INTERVAL_SECONDS: "15"
+    volumes:
+      - ./origen:/origen:ro
     depends_on:
       mariadb:
         condition: service_healthy
+    healthcheck: *python-health
     restart: unless-stopped
+    init: true
+
+  machine:
+    build:
+      context: .
+      dockerfile: modelo_machine/Dockerfile
+    container_name: artisa-machine
+    environment: *db-environment
+    depends_on:
+      etl:
+        condition: service_healthy
+    healthcheck: *python-health
+    restart: unless-stopped
+    init: true
+
+  endpoints:
+    build:
+      context: .
+      dockerfile: endpoints/Dockerfile
+    container_name: artisa-endpoints
+    environment: *db-environment
+    depends_on:
+      machine:
+        condition: service_healthy
+    healthcheck: *python-health
+    restart: unless-stopped
+    init: true
+
+  front:
+    build:
+      context: .
+      dockerfile: front/Dockerfile
+    container_name: artisa-front
+    environment:
+      API_URL: http://endpoints:8000
+    ports:
+      - "127.0.0.1:8080:8000"
+    depends_on:
+      endpoints:
+        condition: service_healthy
+    healthcheck: *python-health
+    restart: unless-stopped
+    init: true
 
 volumes:
   mariadb_data:

@@ -8,6 +8,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 import uuid
+import check_pipeline
 
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -49,9 +50,8 @@ def wait_healthy():
 
 
 wait_healthy()
-root = request("/")
-assert root["servicio"] == "artisa-docker-demo"
-assert root["contenedor"]
+check_pipeline.BASE = base_url
+check_pipeline.main()
 assert request("/ruta-inexistente", expected=404)["error"] == "Ruta no encontrada"
 for invalid in ({}, {"texto": " "}, {"texto": 123}, {"texto": "x" * 256}, ["texto"]):
     request("/mensajes", "POST", invalid, expected=400)
@@ -78,4 +78,4 @@ request(message_path, expected=404)
 
 print("OK: API y MariaDB responden; escritura, lectura y eliminacion verificadas.")
 print("OK: entradas invalidas rechazadas; Unicode y comillas conservados.")
-print(f"Contenedor de la API: {root['contenedor']}")
+print(f"Frontend: {base_url}")

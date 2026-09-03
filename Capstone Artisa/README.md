@@ -1,180 +1,199 @@
-# Artisa: API con MariaDB en Docker
+# Artisa: cinco contenedores, un proyecto
 
-Proyecto local de prueba con dos contenedores:
+Demostración local de la arquitectura del proyecto de transporte. Todo se inicia
+con Docker Compose y se abre en [http://localhost:8080](http://localhost:8080).
 
-| Servicio | Contenedor | Función |
-| --- | --- | --- |
-| API Python | `artisa-docker-demo` | Responde en <http://localhost:8080> |
-| MariaDB 11.8 | `artisa-mariadb` | Guarda los mensajes en la base `artisa` |
+```mermaid
+flowchart LR
+    O[Origen: archivo CSV] --> E[1. ETL]
+    E --> D[(2. MariaDB)]
+    D --> M[3. Machine Learning]
+    M --> D
+    D --> A[4. Endpoints]
+    A --> F[5. Frontend]
+```
 
-La API usa PyMySQL para consultar MariaDB. Docker Compose espera a que MariaDB esté
-saludable antes de iniciar la API. Los datos se guardan en el volumen
-`artisa_mariadb_data`, separado del contenedor.
+El origen es un archivo externo a los contenedores, montado en modo de lectura.
+Los cinco servicios son `etl`, `mariadb`, `machine`, `endpoints` y `front`.
+Machine Learning y endpoints tienen contenedores distintos. El modelo lee la base
+y guarda allí sus resultados; la API consulta esos resultados para el frontend.
 
-Este proyecto es una demostración local sin autenticación, no la aplicación final.
+## Iniciar desde Visual Studio Code
 
-## Validación realizada
+1. Abre esta carpeta en VS Code.
+2. Presiona **Ctrl + Shift + B** o usa **Terminal > Ejecutar tarea > Docker: levantar proyecto completo**.
+3. Abre [http://localhost:8080](http://localhost:8080).
+4. Para comprobar el recorrido ejecuta **Docker: comprobar servicio**.
 
-El 2 de septiembre de 2026 se verificó lo siguiente en este equipo:
+La tarea genera `.env` si falta, construye las imágenes e inicia los cinco
+contenedores en orden, esperando sus comprobaciones de salud.
+Las tareas antiguas para levantar API y MariaDB también inician ahora el proyecto completo.
 
-- Ambos servicios quedaron en ejecución con estado `healthy`.
-- La API guardó, consultó y eliminó un registro real en MariaDB.
-- El registro sobrevivió a la recreación del contenedor MariaDB usando el volumen.
-- `/health` respondió correctamente desde Windows; al detener MariaDB devolvió
-  HTTP 503 y volvió a responder correctamente después de iniciarla.
-- Las entradas inválidas se rechazaron y se conservaron tildes, emoji y comillas.
+Desde **PowerShell**, en la carpeta del proyecto, basta este comando:
 
-El contenedor de la prueba anterior, sin base de datos, se conserva detenido con el
-nombre `artisa-docker-demo-sin-db`. El proyecto actual se controla con Compose.
+```powershell
+wsl -d Ubuntu --exec python3 scripts/start.py
+```
 
-## Ejecutar desde Visual Studio Code
+Desde una terminal **Ubuntu/WSL**:
 
-Abre esta carpeta en VS Code. Las tareas funcionan tanto en Windows como en una
-ventana conectada a WSL; desde Windows llaman explícitamente a Ubuntu.
+```bash
+python3 scripts/start.py
+```
 
-1. Presiona **Ctrl + Shift + P**.
-2. Busca **Tareas: Ejecutar tarea**.
-3. Selecciona **Docker: levantar API y MariaDB**. Construye la API, inicia ambos
-   servicios y espera hasta que estén saludables. También aplica cambios al código.
-4. Ejecuta **Docker: comprobar servicio**.
+Con `.env` ya preparado también se puede ejecutar directamente:
 
-La comprobación debe mostrar:
+```bash
+docker compose up --detach --build --wait --wait-timeout 180
+```
+
+Docker Engine, Compose y Buildx están instalados en Ubuntu en este equipo. La
+primera construcción descarga las dependencias de Machine Learning.
+
+## Organización
 
 ```text
-OK: API y MariaDB responden; escritura, lectura y eliminacion verificadas.
-OK: entradas invalidas rechazadas; Unicode y comillas conservados.
+Capstone Artisa/
+├── compose.yaml             # Orquesta los cinco contenedores
+├── front/                   # Pantalla HTML/CSS/JS y proxy a endpoints
+│   ├── Dockerfile
+│   ├── server.py
+│   └── static/
+├── endpoints/               # API; consulta y registra solicitudes en MariaDB
+│   ├── Dockerfile
+│   └── api.py
+├── modelo_machine/          # Entrena, predice y escribe los resultados
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── worker.py
+├── DB/
+│   └── schema.sql           # Tablas del flujo; imagen oficial MariaDB
+├── ETLs/
+│   ├── Dockerfile
+│   ├── worker.py
+│   └── transform.py
+├── origen/
+│   └── viajes.csv           # Origen sintético reemplazable
+├── common/                  # Conexión, HTTP y validación compartidos
+├── scripts/                 # Arranque, credenciales y comprobaciones
+├── tests/                   # Validación del ETL
+├── .vscode/tasks.json       # Una tarea para levantar todo
+├── .env.example             # Nombres de variables, sin contraseñas
+└── .env                     # Solo local; nunca subir a GitHub
 ```
 
-La prueba crea un registro temporal, lo consulta y elimina únicamente ese registro.
-Las tareas anteriores de crear o iniciar el servicio siguen disponibles y ahora
-levantan tanto la API como MariaDB.
+`app.py`, `schema.sql` y el `Dockerfile` de la raíz conservan la API inicial de
+mensajes como compatibilidad. Compose utiliza los Dockerfiles de las carpetas;
+los nuevos endpoints heredan las rutas de mensajes de `app.py`.
 
-Para detener ambos servicios usa **Docker: detener servicio**. Para consultar sus
-mensajes usa **Docker: ver ultimos logs**.
+## Qué hace la demostración
 
-## Terminal correcta
+1. **Origen:** `origen/viajes.csv` contiene 124 filas sintéticas: 120 viajes válidos,
+   un duplicado y tres filas inválidas para comprobar la limpieza. Las distancias
+   y duraciones son ficticias, aunque las ciudades tienen nombres reales.
+2. **ETL:** revisa el archivo cada 15 segundos. Normaliza nombres, espacios y comas
+   decimales, valida rangos y rechaza duplicados. La carga se confirma en una
+   transacción, con versión SHA-256, conteos y motivos de rechazo.
+3. **MariaDB:** conserva viajes, estado de la carga, metadatos del modelo,
+   predicciones y solicitudes en el volumen persistente `artisa_mariadb_data`.
+4. **Machine Learning:** entrena una regresión lineal con distancia, carga y paradas
+   para estimar duración en horas. Evalúa con una división reproducible 80/20,
+   reporta el error absoluto medio (MAE) y ajusta el modelo final con todos los
+   registros válidos. Guarda una predicción por viaje. Reentrena al cambiar la
+   versión del origen o reiniciarse el trabajador.
+5. **Endpoints y frontend:** la pantalla consulta datos, estado y predicciones a
+   través de la API. El formulario registra una solicitud pendiente en MariaDB;
+   Machine la procesa en su siguiente ciclo (cada 2 segundos), guarda el resultado
+   y la pantalla lo consulta por ID. Los endpoints no ejecutan el modelo.
 
-Si el prompt empieza con `PS C:\...>`, estás en PowerShell. Puedes ejecutar estos
-comandos desde la carpeta del proyecto:
+El modelo es demostrativo y no está validado para estimar operaciones reales.
+El MAE mostrado corresponde a las filas reservadas para evaluación, no al ajuste
+sobre todas las filas ni a viajes reales.
 
-```powershell
-wsl -d Ubuntu --exec python3 scripts/prepare_env.py
-wsl -d Ubuntu --exec docker compose up --detach --build --wait --wait-timeout 120
-wsl -d Ubuntu --exec python3 scripts/check.py
-wsl -d Ubuntu --exec docker compose ps
+## Cambiar el origen
+
+Edita `origen/viajes.csv` y guarda el archivo. No hace falta reconstruir las imágenes;
+el ETL lo relee automáticamente. Conserva estas columnas:
+
+```csv
+id,origen,destino,distancia_km,carga_kg,paradas,duracion_horas
+VIAJE-001,Antofagasta,Calama,220,8000,2,4.5
 ```
 
-La configuración de este proyecto abre Ubuntu al seleccionar **Terminal > Nueva
-terminal**. Una terminal PowerShell que ya estaba abierta conserva su shell.
+Se necesitan al menos 10 viajes válidos para entrenar el modelo. El ejemplo de una
+fila ilustra el formato. Rangos: distancia 1–2000 km, carga 1–40000 kg, paradas
+enteras 0–30 y duración observada 0,01–100 horas. Límite del archivo demo: 5 MB.
+La duración observada es la variable que el modelo aprende a predecir.
 
-Si el prompt se parece a `angelo@equipo:...$`, estás en Ubuntu y puedes ejecutar:
+Un CSV sin filas válidas o sin las columnas requeridas se rechaza y se conserva
+la carga anterior. Repetir el mismo archivo no duplica viajes. Si se retira un ID
+válido del archivo, deja de formar parte de la versión activa; su fila histórica
+permanece almacenada. La API muestra solo viajes de la versión activa.
 
-```bash
-cd "/mnt/c/Users/angel/Documents/ChatGPT/Capstone Artisa"
-python3 scripts/prepare_env.py
-docker compose up --detach --build --wait --wait-timeout 120
-python3 scripts/check.py
-docker compose ps
-```
+Si la próxima fuente es una API, Excel u otra base, el adaptador a reemplazar está
+en `ETLs/worker.py`; se mantiene el mismo contrato de datos transformados.
 
-Docker Engine, Compose y Buildx están instalados dentro de Ubuntu. Para abrir VS Code
-conectado a WSL puedes ejecutar `code .` desde la terminal de Ubuntu.
+## Endpoints
 
-## Comprobar MariaDB
+Todos se pueden consultar a través del frontend en `http://localhost:8080`.
 
-Abre <http://localhost:8080/health>. Además de `status: ok`, debe mostrar:
+| Método | Ruta | Uso |
+| --- | --- | --- |
+| GET | `/` | Pantalla del proyecto |
+| GET | `/health` | Salud del recorrido (503 si hay una etapa sin respuesta reciente) |
+| GET | `/api/estado` | Estado, versión del origen, rechazos y metadatos del modelo |
+| GET | `/api/resumen` | Totales de viajes, predicciones y destinos |
+| GET | `/api/viajes?limite=20` | Viajes de la carga activa con sus predicciones; máximo 500 |
+| GET | `/api/modelo` | Métricas de evaluación y coeficientes |
+| POST | `/api/predicciones` | Crea una solicitud; responde 202 con ID y URL de consulta |
+| GET | `/api/predicciones/{id}` | Estado y resultado persistido de una solicitud |
+| GET/POST | `/mensajes` | Demostración anterior de lectura y escritura |
+| GET/DELETE | `/mensajes/{id}` | Consulta o elimina un mensaje concreto |
+
+Cuerpo para solicitar una predicción:
 
 ```json
-"database": {
-  "engine": "MariaDB",
-  "status": "ok"
-}
+{"distancia_km":180,"carga_kg":8000,"paradas":2}
 ```
 
-Este resultado requiere una consulta SQL real a la tabla `mensajes`. Si la conexión
-falla, el endpoint responde HTTP 503 y `database.status` cambia a `unavailable`.
+## Comprobar y detener
 
-| Método | Ruta | Resultado |
-| --- | --- | --- |
-| GET | `/` | Información de la API |
-| GET | `/health` | Estado de la API y conexión con MariaDB |
-| GET | `/mensajes` | Hasta 100 mensajes, comenzando por el más reciente |
-| POST | `/mensajes` | Guarda un mensaje de 1 a 255 caracteres |
-| GET | `/mensajes/1` | Consulta el mensaje con ID 1 |
-| DELETE | `/mensajes/1` | Elimina únicamente el mensaje con ID 1 |
-
-Para guardar un mensaje desde **PowerShell**:
-
-```powershell
-Invoke-RestMethod -Uri 'http://localhost:8080/mensajes' -Method Post -ContentType 'application/json' -Body '{"texto":"Hola desde Artisa"}'
-```
-
-Abre <http://localhost:8080/mensajes> para verlo guardado. Conserva el `id` devuelto
-si después quieres consultar o eliminar ese mensaje.
-
-## Persistencia
-
-Detener, iniciar o reconstruir los contenedores conserva los datos del volumen.
-`docker compose stop` detiene ambos servicios. `docker compose up --detach --wait`
-los vuelve a iniciar. `docker compose down` retira los contenedores y la red,
-conservando el volumen. La opción `down --volumes` elimina los datos: no forma parte
-del flujo normal de este proyecto.
-
-Para comprobar la persistencia desde Ubuntu:
+En Ubuntu/WSL, desde esta carpeta:
 
 ```bash
-python3 scripts/check.py --persistence
+python3 -m unittest discover -s tests -v
+python3 scripts/check.py
+docker compose ps
+docker compose logs --tail 30
+docker compose stop
 ```
 
-Esta prueba guarda un registro temporal, recrea únicamente el contenedor MariaDB,
-comprueba que el registro sigue disponible y lo elimina al finalizar. La API puede
-estar unos segundos sin acceso a la base mientras se recrea MariaDB.
+En PowerShell antepone `wsl -d Ubuntu --exec` a cada comando.
+`check.py` comprueba el frontend, la carga ETL, el modelo y dos solicitudes reales
+procesadas por Machine y almacenadas en MariaDB. También mantiene la prueba de
+mensajes, que crea y elimina únicamente su propio mensaje temporal. Las dos
+solicitudes de predicción quedan como registros de demostración.
 
-## Configuración y credenciales
+`python3 scripts/check.py --persistence` opcionalmente recrea MariaDB y comprueba
+que un mensaje temporal sobreviva. Produce una interrupción breve mientras arranca
+la base; no es necesario para iniciar el proyecto.
 
-`scripts/prepare_env.py` crea `.env` una sola vez con contraseñas aleatorias distintas
-para el usuario de la API y para root. Conserva un `.env` existente. El archivo está
-excluido de Git y del contexto de construcción de la imagen.
+Detener o reconstruir los contenedores conserva los datos. No utilices
+`docker compose down --volumes` salvo que quieras eliminar la base.
 
-- Base: `artisa`.
-- Usuario de la API: `artisa_app`, con permisos sobre esa base.
-- Host desde la API: `mariadb`; puerto interno: `3306`.
-- MariaDB se comunica con la API por la red de Compose; su puerto no se publica en Windows.
-- La API se publica únicamente en `127.0.0.1:8080`.
+## Configuración local
 
-Para abrir la consola SQL desde Ubuntu:
+Solo el frontend publica un puerto: `127.0.0.1:8080`. MariaDB, ETL, Machine y endpoints
+se comunican por la red interna de Compose. La página es una demo local sin
+usuarios ni autenticación; no se publica en Internet.
 
-```bash
-docker compose exec mariadb mariadb --user=artisa_app --password artisa
-```
-
-Cuando pida la contraseña, usa el valor de `MARIADB_PASSWORD` de tu `.env` local.
-Dentro de la consola puedes ejecutar:
-
-```sql
-SHOW TABLES;
-SELECT id, texto FROM mensajes;
-```
-
-Los valores de inicialización de MariaDB se aplican al crear un volumen vacío.
-Cambiar las contraseñas de `.env` después no modifica las cuentas ya creadas:
-conserva el archivo para seguir accediendo a la base existente.
-
-## Archivos principales
-
-- `compose.yaml`: servicios, red, volumen y arranque coordinado.
-- `Dockerfile` y `requirements.txt`: imagen Python y conector MariaDB.
-- `app.py`: API y consultas SQL con parámetros.
-- `schema.sql`: tabla de prueba creada si todavía no existe.
-- `scripts/check.py`: pruebas reales por HTTP, incluida persistencia opcional.
-- `.vscode/tasks.json`: tareas para operar el proyecto desde VS Code.
-
-Si cambias el código, ejecuta nuevamente **Docker: levantar API y MariaDB**. La
-creación de tabla inicial no es un sistema de migraciones para cambios de esquema.
+`scripts/prepare_env.py` crea contraseñas aleatorias una sola vez y conserva `.env`
+si ya existe. No cambies estas contraseñas mientras uses el volumen actual sin
+actualizar también las cuentas de MariaDB. `.env` no entra en Git ni en las imágenes.
+La tabla de mensajes y el volumen de la prueba anterior se conservan.
 
 ## Referencias
 
-- [Imagen de MariaDB y variables de inicialización](https://mariadb.com/docs/server/server-management/automated-mariadb-deployment-and-administration/docker-and-mariadb/mariadb-server-docker-official-image-environment-variables)
-- [MariaDB 11.8 LTS](https://mariadb.org/11-8-is-lts/)
-- [PyMySQL](https://pymysql.readthedocs.io/en/latest/user/examples.html)
-- [Orden de arranque de Docker Compose](https://docs.docker.com/compose/how-tos/startup-order/)
+- [Docker Compose: dependencias y comprobaciones de salud](https://docs.docker.com/compose/how-tos/startup-order/)
+- [scikit-learn: regresión lineal](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LinearRegression.html)
+- [scikit-learn 1.7.2](https://pypi.org/project/scikit-learn/1.7.2/)

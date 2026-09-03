@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Artisa · Flujo de datos</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="brand-mark">A</span><span>ARTISA<small>LABORATORIO DE DATOS</small></span></a>
+    <div class="nav-label">ESPACIO DE TRABAJO</div>
+    <nav aria-label="Navegación principal">
+      <a class="active" href="#flujo"><span>▦</span> Vista general</a>
+      <a href="#viajes"><span>≡</span> Datos procesados</a>
+      <a href="#simulador"><span>↗</span> Simular un viaje</a>
+    </nav>
+    <div class="sidebar-note"><span class="dot"></span> Entorno local<p>Origen, transformación y predicciones en un mismo proyecto.</p><span class="tag">DEMO · DATOS SINTÉTICOS</span></div>
+  </aside>
+  <main>
+    <header class="topbar"><span>Proyecto Artisa <span class="slash">/</span> <strong>Vista general</strong></span><a href="/health" target="_blank" rel="noopener">Estado del sistema ↗</a></header>
+    <section class="heading">
+      <div><div class="eyebrow">INTELIGENCIA PARA EL TRANSPORTE</div><h1>De los datos a la decisión.</h1><p>Un recorrido completo: transforma viajes, aprende de ellos y consulta los resultados.</p></div>
+      <button class="button secondary" id="refresh" type="button">↻ Actualizar</button>
+    </section>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <section id="flujo" class="panel pipeline">
+      <div class="section-top"><div><span class="eyebrow">01 / ARQUITECTURA</span><h2>Todo conectado.</h2></div><span id="system-status" class="status neutral">Consultando servicios…</span></div>
+      <div class="origin"><span>ORIGEN EXTERNO</span><strong>viajes.csv</strong><span>→</span><small>Archivo de demostración</small></div>
+      <div class="flow">
+        <article class="node etl" data-service="etl"><span class="node-number">01</span><h3>ETL</h3><p>Extrae, limpia y carga</p><span class="node-status">Consultando…</span></article>
+        <div class="flow-arrow arrow-a" aria-hidden="true">→</div>
+        <article class="node db" data-service="mariadb"><span class="node-number">02</span><h3>MariaDB</h3><p>Datos y predicciones</p><span class="node-status">Consultando…</span></article>
+        <div class="flow-arrow arrow-b" aria-hidden="true">→</div>
+        <article class="node api" data-service="endpoints"><span class="node-number">04</span><h3>Endpoints</h3><p>Consulta de resultados</p><span class="node-status">Consultando…</span></article>
+        <div class="flow-arrow arrow-c" aria-hidden="true">→</div>
+        <article class="node front" data-service="front"><span class="node-number">05</span><h3>Frontend</h3><p>Visualiza y explora</p><span class="node-status">Consultando…</span></article>
+        <div class="machine-link">↕ <span>Lee datos · guarda resultados</span></div>
+        <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Aprende la duración de los viajes</p><span class="node-status">Consultando…</span></article>
+        <div class="flow-explanation"><strong>Cinco contenedores, un proyecto.</strong><p>El ETL carga el origen en MariaDB. El modelo lee esos datos y guarda sus predicciones. Los endpoints las entregan a esta pantalla.</p></div>
+      </div>
+      <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada 15 s</span></div>
+    </section>
+    <section class="metrics" aria-label="Resumen de datos">
+      <article><span>Viajes procesados</span><strong id="trip-count">—</strong><small id="source-count">Esperando el origen</small></article>
+      <article><span>Predicciones guardadas</span><strong id="prediction-count">—</strong><small>Disponibles en MariaDB</small></article>
+      <article><span>Error medio de evaluación</span><strong id="model-error">—</strong><small>En el 20 % de datos reservado</small></article>
+      <article><span>Destinos de ejemplo</span><strong id="destination-count">—</strong><small>Rutas del conjunto sintético</small></article>
+    </section>
+    <div class="workspace-grid">
+      <section id="viajes" class="panel data-panel">
+        <div class="section-top"><div><span class="eyebrow">02 / RESULTADOS</span><h2>Viajes procesados</h2></div><span class="tag">MARIA DB → API</span></div>
+        <label class="search"><span>⌕</span><input id="search" type="search" placeholder="Buscar origen, destino o ID…" aria-label="Buscar viajes"></label>
+        <div class="table-scroll"><table><thead><tr><th>Viaje / ruta</th><th>Distancia</th><th>Duración del dato</th><th>Estimación ML</th></tr></thead><tbody id="trip-rows"><tr><td colspan="4" class="empty">Cargando viajes…</td></tr></tbody></table></div>
+        <div class="table-footer"><span id="table-count">Consultando MariaDB…</span><button id="show-all" type="button" class="text-button">Ver todos</button></div>
+        <details><summary>¿Qué hizo el ETL con el origen?</summary><p id="etl-summary">Cargando trazabilidad…</p><ul id="rejections"></ul></details>
+      </section>
+      <section id="simulador" class="panel simulator">
+        <span class="eyebrow">03 / MACHINE LEARNING</span><h2>Simula un viaje</h2><p>Estima su duración con el modelo entrenado sobre los datos procesados.</p>
+        <form id="prediction-form">
+          <label for="distance">Distancia <span>km</span></label><input id="distance" name="distancia_km" type="number" min="1" max="2000" step="0.1" value="180" required>
+          <label for="load">Carga <span>kg</span></label><input id="load" name="carga_kg" type="number" min="1" max="40000" step="1" value="8000" required>
+          <label for="stops">Paradas</label><input id="stops" name="paradas" type="number" min="0" max="30" step="1" value="2" required>
+          <button id="predict" class="button primary" type="submit">Estimar duración <span>↗</span></button>
+        </form>
+        <div id="prediction-result" class="prediction-result" role="status" aria-live="polite"><span>LISTO PARA EXPLORAR</span><p>Completa los datos y solicita una estimación.</p></div>
+        <p class="disclaimer">Demostración con datos sintéticos. Las estimaciones no están validadas para operaciones reales.</p>
+        <div class="model-info"><span id="model-name">Regresión lineal</span><small id="model-training">Esperando entrenamiento…</small></div>
+      </section>
+    </div>
+    <footer><span>ARTISA <span class="slash">/</span> Del origen al frontend</span><span>ETL · MariaDB · Machine Learning · Endpoints · Frontend</span></footer>
+  </main>
+</body>
+</html>
