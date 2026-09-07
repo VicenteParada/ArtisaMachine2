@@ -12,6 +12,7 @@ import pymysql
 from app import Handler as LegacyHandler
 from common.db import connect_db
 from common.http import JsonHandler, RequestError, serve
+from common.telemetry_map import analyze_telemetry
 from common.validation import features
 
 
@@ -24,6 +25,8 @@ def pipeline_state(cursor):
     etl = cursor.fetchone()
     cursor.execute("SELECT *, TIMESTAMPDIFF(SECOND,ultima_revision,UTC_TIMESTAMP()) AS hace_segundos FROM modelo_estado WHERE id=1")
     model = cursor.fetchone()
+    cursor.execute("SELECT * FROM telemetria_etl_estado WHERE id=1")
+    telemetry = cursor.fetchone()
     etl_ready = bool(etl and etl["hace_segundos"] < 45)
     model_ready = bool(model and model["hace_segundos"] < 15 and etl and model["dataset_version"] == etl["dataset_version"])
     return {
@@ -38,8 +41,12 @@ def pipeline_state(cursor):
         "modelo": ({k: v for k, v in model.items() if k not in ("id", "metricas_json", "coeficientes_json")} | {
             "metricas": json.loads(model["metricas_json"]), "coeficientes": json.loads(model["coeficientes_json"])
         }) if model else None,
+        "telemetria": ({k: v for k, v in telemetry.items()
+                         if k not in ("id", "origen", "rechazos_json")} | {
+            "rechazos": json.loads(telemetry["rechazos_json"])
+        }) if telemetry else None,
         "uptime_seconds": round(time.monotonic()-STARTED_AT, 2),
-        "datos": "sinteticos",
+        "datos": "sinteticos_y_telemetria_real" if telemetry else "sinteticos",
     }
 
 
@@ -52,7 +59,9 @@ class Handler(LegacyHandler):
         path = parsed.path
         if path == "/":
             self.respond(200, {"servicio": "artisa-docker-demo", "contenedor": socket.gethostname(),
-                               "mensaje": "Endpoints Artisa", "rutas": ["/api/estado", "/api/viajes", "/api/modelo", "/api/predicciones"]})
+                               "mensaje": "Endpoints Artisa", "rutas": ["/api/estado", "/api/viajes",
+                               "/api/telemetria/resumen", "/api/telemetria", "/api/telemetria/mapa-calor", "/api/modelo",
+                               "/api/predicciones"]})
             return
         if path != "/health" and not path.startswith("/api/"):
             super().do_GET()
@@ -81,6 +90,30 @@ class Handler(LegacyHandler):
                         LEFT JOIN predicciones_viajes p ON p.viaje_id=v.id AND p.dataset_version=v.dataset_version
                         ORDER BY v.id LIMIT %s""", (limit,))
                     self.respond(200, {"viajes": cursor.fetchall(), "limite": limit})
+                elif path == "/api/telemetria/resumen":
+                    cursor.execute("""SELECT COUNT(*) AS reportes,COUNT(DISTINCT asset_id) AS vehiculos,
+                        MIN(report_date) AS desde,MAX(report_date) AS hasta,
+                        COALESCE(AVG(speed),0) AS velocidad_promedio,
+                        COALESCE(MAX(speed),0) AS velocidad_maxima FROM telemetria_raw""")
+                    self.respond(200, cursor.fetchone())
+                elif path == "/api/telemetria":
+                    try:
+                        limit = int(parse_qs(parsed.query).get("limite", ["30"])[0])
+                        if not 1 <= limit <= 200:
+                            raise ValueError
+                    except ValueError:
+                        raise RequestError(400, "limite debe ser un entero entre 1 y 200") from None
+                    cursor.execute("""SELECT asset_id,asset_name,report_date,event_name,latitude,longitude,
+                        speed,gps_speed,heading,ignition FROM telemetria_raw
+                        ORDER BY report_date DESC,report_id DESC LIMIT %s""", (limit,))
+                    self.respond(200, {"reportes": cursor.fetchall(), "limite": limit})
+                elif path == "/api/telemetria/mapa-calor":
+                    cursor.execute("""SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
+                        speed,gps_speed,event_name FROM telemetria_raw
+                        ORDER BY report_date DESC,report_id DESC LIMIT 50000""")
+                    analysis = analyze_telemetry(cursor.fetchall())
+                    analysis["limite_reportes"] = 50000
+                    self.respond(200, analysis)
                 elif path == "/api/modelo":
                     model = pipeline_state(cursor)["modelo"]
                     self.respond(200 if model else 503, model or {"error": "Modelo aun no disponible"})

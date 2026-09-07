@@ -4,3 +4,6 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Archivo personal local, ajeno al proyecto Artisa
+sorpresa-para-antito.html

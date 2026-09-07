@@ -5,7 +5,7 @@ con Docker Compose y se abre en [http://localhost:8080](http://localhost:8080).
 
 ```mermaid
 flowchart LR
-    O[Origen: archivo CSV] --> E[1. ETL]
+    O[Origen: CSV y API SQL] --> E[1. ETL]
     E --> D[(2. MariaDB)]
     D --> M[3. Machine Learning]
     M --> D
@@ -13,7 +13,8 @@ flowchart LR
     A --> F[5. Frontend]
 ```
 
-El origen es un archivo externo a los contenedores, montado en modo de lectura.
+El proyecto conserva el CSV de demostración y añade un primer ETL real que consume
+la API SQL de telemetría por lotes.
 Los cinco servicios son `etl`, `mariadb`, `machine`, `endpoints` y `front`.
 Machine Learning y endpoints tienen contenedores distintos. El modelo lee la base
 y guarda allí sus resultados; la API consulta esos resultados para el frontend.
@@ -70,6 +71,7 @@ Capstone Artisa/
 │   └── schema.sql           # Tablas del flujo; imagen oficial MariaDB
 ├── ETLs/
 │   ├── Dockerfile
+│   ├── telemetry.py         # API SQL -> validación -> MariaDB
 │   ├── worker.py
 │   └── transform.py
 ├── origen/
@@ -110,6 +112,35 @@ El modelo es demostrativo y no está validado para estimar operaciones reales.
 El MAE mostrado corresponde a las filas reservadas para evaluación, no al ajuste
 sobre todas las filas ni a viajes reales.
 
+## Primer ETL de telemetría real
+
+El mismo contenedor `etl` consulta la API SQL mediante `POST`, lee la lista `rows`,
+normaliza las fechas a UTC, valida identificadores y coordenadas y guarda los datos
+en `telemetria_raw`. `report_id` es la clave primaria, por lo que repetir una página
+actualiza sus datos y no crea duplicados.
+
+La extracción usa paginación por `(report_date, report_id)`, sin `OFFSET`. El cursor
+y los conteos se guardan en `telemetria_etl_estado`, dentro de la misma transacción
+que la página procesada. La configuración inicial limita la prueba a 5.000 filas de
+un solo día para no solicitar accidentalmente los 28,8 millones de registros.
+
+Configura estas variables únicamente en `.env`:
+
+```dotenv
+TELEMETRY_ENABLED=1
+SOURCE_API_URL=http://HOST_ORIGEN:3003/sql
+SOURCE_API_TIMEOUT_SECONDS=90
+TELEMETRY_START=2026-03-31T00:00:00
+TELEMETRY_END=2026-04-01T00:00:00
+TELEMETRY_BATCH_SIZE=500
+TELEMETRY_MAX_TOTAL_ROWS=5000
+TELEMETRY_INTERVAL_SECONDS=30
+```
+
+El ETL requiere acceso a la red local del origen. Para ampliar el histórico cambia
+la ventana de fechas y reinicia el contenedor `etl`. El nuevo estado reinicia el
+cursor de esa ventana, pero conserva los reportes ya guardados por `report_id`.
+
 ## Cambiar el origen
 
 Edita `origen/viajes.csv` y guarda el archivo. No hace falta reconstruir las imágenes;
@@ -130,8 +161,8 @@ la carga anterior. Repetir el mismo archivo no duplica viajes. Si se retira un I
 válido del archivo, deja de formar parte de la versión activa; su fila histórica
 permanece almacenada. La API muestra solo viajes de la versión activa.
 
-Si la próxima fuente es una API, Excel u otra base, el adaptador a reemplazar está
-en `ETLs/worker.py`; se mantiene el mismo contrato de datos transformados.
+El CSV sigue disponible para probar el modelo sintético. La API real se configura
+por separado mediante las variables del primer ETL de telemetría.
 
 ## Endpoints
 
@@ -144,6 +175,9 @@ Todos se pueden consultar a través del frontend en `http://localhost:8080`.
 | GET | `/api/estado` | Estado, versión del origen, rechazos y metadatos del modelo |
 | GET | `/api/resumen` | Totales de viajes, predicciones y destinos |
 | GET | `/api/viajes?limite=20` | Viajes de la carga activa con sus predicciones; máximo 500 |
+| GET | `/api/telemetria/resumen` | Conteos y rango temporal de la telemetría real |
+| GET | `/api/telemetria?limite=30` | Muestra reciente de telemetría real para la página; máximo 200 |
+| GET | `/api/telemetria/mapa-calor` | Densidad geográfica, tramos observados y paradas de la telemetría real |
 | GET | `/api/modelo` | Métricas de evaluación y coeficientes |
 | POST | `/api/predicciones` | Crea una solicitud; responde 202 con ID y URL de consulta |
 | GET | `/api/predicciones/{id}` | Estado y resultado persistido de una solicitud |

@@ -40,7 +40,10 @@ def predict(distance):
 def main():
     with urlopen(BASE, timeout=10) as response:
         assert response.headers.get_content_type() == "text/html"
-        assert 'Simula un viaje' in response.read().decode("utf-8")
+        page = response.read().decode("utf-8")
+        assert 'Simula un viaje' in page
+        assert 'Telemetría importada' in page
+        assert 'Mapa de calor' in page
     for asset in ("/app.js", "/style.css"):
         with urlopen(BASE+asset, timeout=10) as response:
             assert response.code == 200
@@ -57,7 +60,22 @@ def main():
     assert model["dataset_version"] == state["etl"]["dataset_version"]
     assert model["metricas"]["filas_evaluacion"] > 0
     assert model["metricas"]["mae_horas"] >= 0
+    telemetry_summary = request("/api/telemetria/resumen")
+    telemetry_rows = request("/api/telemetria?limite=10")["reportes"]
+    assert telemetry_summary["reportes"] >= 0
+    assert len(telemetry_rows) <= 10
+    if telemetry_summary["reportes"]:
+        assert telemetry_summary["vehiculos"] > 0
+        assert telemetry_summary["desde"] and telemetry_summary["hasta"]
+        assert telemetry_rows
+        assert all(row["asset_id"] and row["report_date"] for row in telemetry_rows)
+        heatmap = request("/api/telemetria/mapa-calor")
+        assert heatmap["resumen"]["reportes"] > 0
+        assert heatmap["resumen"]["vehiculos"] > 0
+        assert heatmap["limites"] and heatmap["celdas"]
+        assert heatmap["metodo"]["descripcion_parada"]
     request("/api/viajes?limite=incorrecto", status=400)
+    request("/api/telemetria?limite=incorrecto", status=400)
     request("/api/ruta-inexistente", status=404)
     valid = {"distancia_km": 100, "carga_kg": 8000, "paradas": 2}
     for invalid in ({}, {**valid, "distancia_km": -2}, {**valid, "carga_kg": True},
@@ -68,6 +86,9 @@ def main():
     print(f"OK: cinco servicios disponibles; {summary['viajes']} viajes y {summary['predicciones']} predicciones en MariaDB.")
     print(f"OK: ETL descarto {state['etl']['rechazados']} filas; modelo entrenado y evaluado con datos separados.")
     print("OK: solicitud creada por endpoints, procesada por Machine y resultado persistido consultado desde el frontend.")
+    print(f"OK: la página muestra {telemetry_summary['reportes']} reportes reales de {telemetry_summary['vehiculos']} vehículos.")
+    if telemetry_summary["reportes"]:
+        print(f"OK: mapa de calor generado con {heatmap['resumen']['tramos']} tramos y {heatmap['resumen']['paradas']} paradas detectadas.")
     print("OK: validacion de entradas, archivos del frontend y respuestas HTTP.")
 
 

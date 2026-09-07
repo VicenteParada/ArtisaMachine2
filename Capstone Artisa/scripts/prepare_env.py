@@ -17,5 +17,13 @@ else:
             "MARIADB_USER=artisa_app\n"
             f"MARIADB_PASSWORD={secrets.token_hex(24)}\n"
             f"MARIADB_ROOT_PASSWORD={secrets.token_hex(24)}\n"
+            "TELEMETRY_ENABLED=0\n"
+            "SOURCE_API_URL=\n"
+            "SOURCE_API_TIMEOUT_SECONDS=90\n"
+            "TELEMETRY_START=2026-03-31T00:00:00\n"
+            "TELEMETRY_END=2026-04-01T00:00:00\n"
+            "TELEMETRY_BATCH_SIZE=500\n"
+            "TELEMETRY_MAX_TOTAL_ROWS=5000\n"
+            "TELEMETRY_INTERVAL_SECONDS=30\n"
         )
     print("Archivo .env creado con credenciales locales aleatorias.")

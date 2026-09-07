@@ -12,22 +12,23 @@
     <a class="brand" href="/"><span class="brand-mark">A</span><span>ARTISA<small>LABORATORIO DE DATOS</small></span></a>
     <div class="nav-label">ESPACIO DE TRABAJO</div>
     <nav aria-label="Navegación principal">
-      <a class="active" href="#flujo"><span>▦</span> Vista general</a>
-      <a href="#viajes"><span>≡</span> Datos procesados</a>
-      <a href="#simulador"><span>↗</span> Simular un viaje</a>
+      <a id="overview-link" href="#flujo"><span>▦</span> Arquitectura</a>
+      <a data-dataset-link="real" href="#datos-reales"><span>⌖</span> Datos reales</a>
+      <a data-dataset-link="heatmap" href="#mapa-calor"><span>◉</span> Mapa de calor</a>
+      <a data-dataset-link="simulated" href="#datos-simulados"><span>◇</span> Datos simulados</a>
     </nav>
-    <div class="sidebar-note"><span class="dot"></span> Entorno local<p>Origen, transformación y predicciones en un mismo proyecto.</p><span class="tag">DEMO · DATOS SINTÉTICOS</span></div>
+    <div class="sidebar-note"><span class="dot"></span> Entorno local<p>Origen, transformación y predicciones en un mismo proyecto.</p><span class="tag">TELEMETRÍA REAL + DEMO</span></div>
   </aside>
   <main>
     <header class="topbar"><span>Proyecto Artisa <span class="slash">/</span> <strong>Vista general</strong></span><a href="/health" target="_blank" rel="noopener">Estado del sistema ↗</a></header>
     <section class="heading">
-      <div><div class="eyebrow">INTELIGENCIA PARA EL TRANSPORTE</div><h1>De los datos a la decisión.</h1><p>Un recorrido completo: transforma viajes, aprende de ellos y consulta los resultados.</p></div>
+      <div><div class="eyebrow">INTELIGENCIA PARA EL TRANSPORTE</div><h1>De los datos a la decisión.</h1><p>Telemetría real desde la API de origen, procesada por el ETL y almacenada en MariaDB.</p></div>
       <button class="button secondary" id="refresh" type="button">↻ Actualizar</button>
     </section>
     <div id="notice" class="notice" role="status" hidden></div>
     <section id="flujo" class="panel pipeline">
       <div class="section-top"><div><span class="eyebrow">01 / ARQUITECTURA</span><h2>Todo conectado.</h2></div><span id="system-status" class="status neutral">Consultando servicios…</span></div>
-      <div class="origin"><span>ORIGEN EXTERNO</span><strong>viajes.csv</strong><span>→</span><small>Archivo de demostración</small></div>
+      <div class="origin"><span>ORIGEN EXTERNO</span><strong>API SQL de telemetría</strong><span>→</span><small>Lotes controlados e idempotentes</small></div>
       <div class="flow">
         <article class="node etl" data-service="etl"><span class="node-number">01</span><h3>ETL</h3><p>Extrae, limpia y carga</p><span class="node-status">Consultando…</span></article>
         <div class="flow-arrow arrow-a" aria-hidden="true">→</div>
@@ -42,32 +43,79 @@
       </div>
       <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada 15 s</span></div>
     </section>
-    <section class="metrics" aria-label="Resumen de datos">
-      <article><span>Viajes procesados</span><strong id="trip-count">—</strong><small id="source-count">Esperando el origen</small></article>
-      <article><span>Predicciones guardadas</span><strong id="prediction-count">—</strong><small>Disponibles en MariaDB</small></article>
-      <article><span>Error medio de evaluación</span><strong id="model-error">—</strong><small>En el 20 % de datos reservado</small></article>
-      <article><span>Destinos de ejemplo</span><strong id="destination-count">—</strong><small>Rutas del conjunto sintético</small></article>
-    </section>
-    <div class="workspace-grid">
-      <section id="viajes" class="panel data-panel">
-        <div class="section-top"><div><span class="eyebrow">02 / RESULTADOS</span><h2>Viajes procesados</h2></div><span class="tag">MARIA DB → API</span></div>
-        <label class="search"><span>⌕</span><input id="search" type="search" placeholder="Buscar origen, destino o ID…" aria-label="Buscar viajes"></label>
-        <div class="table-scroll"><table><thead><tr><th>Viaje / ruta</th><th>Distancia</th><th>Duración del dato</th><th>Estimación ML</th></tr></thead><tbody id="trip-rows"><tr><td colspan="4" class="empty">Cargando viajes…</td></tr></tbody></table></div>
-        <div class="table-footer"><span id="table-count">Consultando MariaDB…</span><button id="show-all" type="button" class="text-button">Ver todos</button></div>
-        <details><summary>¿Qué hizo el ETL con el origen?</summary><p id="etl-summary">Cargando trazabilidad…</p><ul id="rejections"></ul></details>
+    <nav class="dataset-tabs" aria-label="Carpetas de datos">
+      <a class="dataset-tab" data-dataset-tab="real" href="#datos-reales"><span class="dataset-icon">⌖</span><span><strong>Datos reales</strong><small>API de origen → ETL → MariaDB</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de calor</strong><small>Tramos recorridos y paradas</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="simulated" href="#datos-simulados"><span class="dataset-icon">◇</span><span><strong>Datos simulados</strong><small>Viajes de demostración → Machine Learning</small></span></a>
+    </nav>
+    <div id="datos-reales" class="dataset-space" data-dataset-view="real">
+      <section id="telemetria" class="panel telemetry-panel">
+        <div class="section-top"><div><span class="eyebrow">02 / DATOS REALES</span><h2>Telemetría importada</h2></div><span id="telemetry-status" class="status neutral">Consultando ETL…</span></div>
+        <p class="telemetry-intro">Muestra de los reportes extraídos desde la API de origen y guardados en MariaDB. Los nombres y documentos de conductores no se publican en esta vista.</p>
+        <div class="real-metrics" aria-label="Resumen de telemetría real">
+          <article><span>Reportes guardados</span><strong id="telemetry-count">—</strong><small>Límite inicial: 5.000 lecturas</small></article>
+          <article><span>Vehículos observados</span><strong id="vehicle-count">—</strong><small>Identificados por asset_id</small></article>
+          <article><span>Velocidad promedio</span><strong id="average-speed">—</strong><small>Según speed del origen</small></article>
+          <article><span>Velocidad máxima</span><strong id="maximum-speed">—</strong><small>Dentro de la muestra cargada</small></article>
+        </div>
+        <div class="telemetry-range"><span id="telemetry-range">Esperando rango temporal…</span><span id="telemetry-quality">Esperando control de calidad…</span></div>
+        <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha UTC</th><th>Evento</th><th>Velocidad</th><th>Coordenadas</th><th>Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="6" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
       </section>
-      <section id="simulador" class="panel simulator">
-        <span class="eyebrow">03 / MACHINE LEARNING</span><h2>Simula un viaje</h2><p>Estima su duración con el modelo entrenado sobre los datos procesados.</p>
-        <form id="prediction-form">
-          <label for="distance">Distancia <span>km</span></label><input id="distance" name="distancia_km" type="number" min="1" max="2000" step="0.1" value="180" required>
-          <label for="load">Carga <span>kg</span></label><input id="load" name="carga_kg" type="number" min="1" max="40000" step="1" value="8000" required>
-          <label for="stops">Paradas</label><input id="stops" name="paradas" type="number" min="0" max="30" step="1" value="2" required>
-          <button id="predict" class="button primary" type="submit">Estimar duración <span>↗</span></button>
-        </form>
-        <div id="prediction-result" class="prediction-result" role="status" aria-live="polite"><span>LISTO PARA EXPLORAR</span><p>Completa los datos y solicita una estimación.</p></div>
-        <p class="disclaimer">Demostración con datos sintéticos. Las estimaciones no están validadas para operaciones reales.</p>
-        <div class="model-info"><span id="model-name">Regresión lineal</span><small id="model-training">Esperando entrenamiento…</small></div>
+    </div>
+    <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
+      <section class="panel heatmap-panel">
+        <div class="section-top"><div><span class="eyebrow">03 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas y paradas</h2></div><span class="status">Telemetría real</span></div>
+        <p class="telemetry-intro">La intensidad aumenta donde existen más lecturas y cruces entre zonas. El análisis utiliza únicamente la muestra real importada.</p>
+        <div class="real-metrics heatmap-metrics" aria-label="Resumen del mapa de calor">
+          <article><span>Lecturas analizadas</span><strong id="heatmap-reports">—</strong><small>Posiciones únicas de la muestra</small></article>
+          <article><span>Vehículos</span><strong id="heatmap-vehicles">—</strong><small>Con recorrido observado</small></article>
+          <article><span>Paradas detectadas</span><strong id="heatmap-stops">—</strong><small>Evento “Inicio de detenido”</small></article>
+          <article><span>Tramos observados</span><strong id="heatmap-routes">—</strong><small>Cruces entre zonas consecutivas</small></article>
+        </div>
+        <div class="heatmap-layout">
+          <article class="map-card">
+            <div class="map-title"><div><strong>Densidad geográfica</strong><small id="heatmap-zones">Calculando zonas…</small></div><span>Coordenadas WGS84</span></div>
+            <svg id="heatmap-map" class="heatmap-map" viewBox="0 0 960 540" role="img" aria-label="Mapa de calor de rutas observadas"><text x="480" y="270" text-anchor="middle">Cargando mapa…</text></svg>
+            <div class="heat-legend"><span>Menor uso</span><i></i><i></i><i></i><i></i><i></i><span>Mayor uso</span><b>○ Parada</b></div>
+          </article>
+          <aside class="route-insights" aria-label="Resumen de rutas">
+            <article class="route-highlight most"><span>TRAMO MÁS USADO</span><strong id="most-route">Calculando…</strong><small id="most-route-usage">—</small></article>
+            <article class="route-highlight least"><span>TRAMO MENOS USADO</span><strong id="least-route">Calculando…</strong><small id="least-route-usage">—</small></article>
+            <article class="stop-ranking"><span class="eyebrow">PARADAS POR VEHÍCULO</span><ol id="stop-ranking"><li>Calculando…</li></ol></article>
+          </aside>
+        </div>
+        <details class="heatmap-method"><summary>¿Cómo se calcula este mapa?</summary><p id="heatmap-method">Esperando la metodología…</p></details>
       </section>
+    </div>
+    <div id="datos-simulados" class="dataset-space" data-dataset-view="simulated" hidden>
+      <div class="space-heading"><span class="eyebrow">04 / LABORATORIO</span><h2>Datos simulados</h2><p>Este espacio contiene únicamente el conjunto de demostración y sus predicciones.</p></div>
+      <section class="metrics" aria-label="Resumen de datos simulados">
+        <article><span>Viajes procesados</span><strong id="trip-count">—</strong><small id="source-count">Esperando el origen</small></article>
+        <article><span>Predicciones guardadas</span><strong id="prediction-count">—</strong><small>Disponibles en MariaDB</small></article>
+        <article><span>Error medio de evaluación</span><strong id="model-error">—</strong><small>En el 20 % de datos reservado</small></article>
+        <article><span>Destinos de ejemplo</span><strong id="destination-count">—</strong><small>Rutas del conjunto sintético</small></article>
+      </section>
+      <div class="workspace-grid">
+        <section id="viajes" class="panel data-panel">
+          <div class="section-top"><div><span class="eyebrow">05 / RESULTADOS SIMULADOS</span><h2>Viajes procesados</h2></div><span class="tag">MARIA DB → API</span></div>
+          <label class="search"><span>⌕</span><input id="search" type="search" placeholder="Buscar origen, destino o ID…" aria-label="Buscar viajes"></label>
+          <div class="table-scroll"><table><thead><tr><th>Viaje / ruta</th><th>Distancia</th><th>Duración del dato</th><th>Estimación ML</th></tr></thead><tbody id="trip-rows"><tr><td colspan="4" class="empty">Cargando viajes…</td></tr></tbody></table></div>
+          <div class="table-footer"><span id="table-count">Consultando MariaDB…</span><button id="show-all" type="button" class="text-button">Ver todos</button></div>
+          <details><summary>¿Qué hizo el ETL con el origen simulado?</summary><p id="etl-summary">Cargando trazabilidad…</p><ul id="rejections"></ul></details>
+        </section>
+        <section id="simulador" class="panel simulator">
+          <span class="eyebrow">06 / MACHINE LEARNING</span><h2>Simula un viaje</h2><p>Estima su duración con el modelo entrenado sobre los datos de demostración.</p>
+          <form id="prediction-form">
+            <label for="distance">Distancia <span>km</span></label><input id="distance" name="distancia_km" type="number" min="1" max="2000" step="0.1" value="180" required>
+            <label for="load">Carga <span>kg</span></label><input id="load" name="carga_kg" type="number" min="1" max="40000" step="1" value="8000" required>
+            <label for="stops">Paradas</label><input id="stops" name="paradas" type="number" min="0" max="30" step="1" value="2" required>
+            <button id="predict" class="button primary" type="submit">Estimar duración <span>↗</span></button>
+          </form>
+          <div id="prediction-result" class="prediction-result" role="status" aria-live="polite"><span>LISTO PARA EXPLORAR</span><p>Completa los datos y solicita una estimación.</p></div>
+          <p class="disclaimer">Demostración con datos sintéticos. Las estimaciones no están validadas para operaciones reales.</p>
+          <div class="model-info"><span id="model-name">Regresión lineal</span><small id="model-training">Esperando entrenamiento…</small></div>
+        </section>
+      </div>
     </div>
     <footer><span>ARTISA <span class="slash">/</span> Del origen al frontend</span><span>ETL · MariaDB · Machine Learning · Endpoints · Frontend</span></footer>
   </main>

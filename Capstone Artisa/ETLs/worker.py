@@ -9,12 +9,17 @@ from urllib.parse import urlsplit
 
 from common.db import connect_db, initialize_db
 from common.http import JsonHandler, serve
+from ETLs.telemetry import TelemetryConfig, record_error, run_once as run_telemetry_once
 from ETLs.transform import transform
 
 
 SOURCE = Path(os.environ.get("SOURCE_FILE", "/origen/viajes.csv"))
 INTERVAL = int(os.environ.get("ETL_INTERVAL_SECONDS", "15"))
 STATE = {"last_success": 0.0, "error": None}
+TELEMETRY_ENABLED = os.environ.get("TELEMETRY_ENABLED", "0").strip().lower() in ("1", "true", "yes")
+TELEMETRY_INTERVAL = int(os.environ.get("TELEMETRY_INTERVAL_SECONDS", "30"))
+TELEMETRY_STATE = {"enabled": TELEMETRY_ENABLED, "last_success": 0.0, "error": None,
+                   "estado": "deshabilitado" if not TELEMETRY_ENABLED else "pendiente"}
 
 
 def run_once():
@@ -70,15 +75,48 @@ def loop():
         time.sleep(INTERVAL)
 
 
+def telemetry_loop():
+    try:
+        initialize_db()
+        config = TelemetryConfig.from_env()
+    except ValueError as error:
+        TELEMETRY_STATE.update(error=str(error), estado="error")
+        print(f"ETL telemetria: configuracion invalida ({error})", flush=True)
+        return
+    while True:
+        try:
+            result = run_telemetry_once(config)
+            TELEMETRY_STATE.update(last_success=time.monotonic(), error=None, **result)
+            if result["recibidos"]:
+                print(
+                    f"ETL telemetria: {result['validos']} guardados, {result['rechazados']} "
+                    f"descartados; total {result['total_validos']} ({result['estado']})",
+                    flush=True,
+                )
+        except Exception as error:
+            message = f"{type(error).__name__}: {error}"
+            TELEMETRY_STATE.update(error=message, estado="error")
+            try:
+                record_error(message)
+            except Exception:
+                pass
+            print(f"ETL telemetria: ciclo fallido ({message})", flush=True)
+        time.sleep(TELEMETRY_INTERVAL)
+
+
 class Handler(JsonHandler):
     def do_GET(self):
         if urlsplit(self.path).path != "/health":
             self.respond(404, {"error": "Ruta no encontrada"})
             return
         ready = STATE["error"] is None and time.monotonic() - STATE["last_success"] < max(60, INTERVAL*3)
-        self.respond(200 if ready else 503, {"servicio": "etl", "status": "ok" if ready else "unavailable"})
+        telemetry = {key: value for key, value in TELEMETRY_STATE.items() if key != "last_success"}
+        self.respond(200 if ready else 503, {"servicio": "etl", "status": "ok" if ready else "unavailable",
+                                                "telemetria": telemetry})
 
 
 if __name__ == "__main__":
     threading.Thread(target=loop, daemon=True).start()
+    if TELEMETRY_ENABLED:
+        threading.Thread(target=telemetry_loop, daemon=True).start()
     serve(Handler, "ETL")
