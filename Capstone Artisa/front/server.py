@@ -28,7 +28,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://unpkg.com https://*.tile.openstreetmap.org; frame-ancestors 'none'")
         self.end_headers()
         self.wfile.write(body)
 
@@ -51,7 +51,7 @@ class Handler(BaseHTTPRequestHandler):
             if body is not None:
                 request.add_header("Content-Type", self.headers.get("Content-Type", "application/octet-stream"))
             try:
-                upstream = urlopen(request, timeout=8)
+                upstream = urlopen(request, timeout=20)
             except HTTPError as error:
                 upstream = error
             with upstream:

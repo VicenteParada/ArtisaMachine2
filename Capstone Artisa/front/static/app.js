@@ -34,6 +34,7 @@ function syncDatasetView() {
   for (const link of document.querySelectorAll(".sidebar [data-dataset-link]")) {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
   }
+  if (view === "heatmap" && fleetMap) window.setTimeout(fitPendingMap, 0);
 }
 
 const svgNode = (name, attributes = {}) => {
@@ -52,6 +53,183 @@ function heatColor(intensity) {
 
 function routeLabel(route) {
   return route ? route.etiqueta : "Sin tramos suficientes";
+}
+
+let fleetMap = null;
+let heatLayer = null;
+let routeLayer = null;
+let stopLayer = null;
+let truckLayer = null;
+let pendingMapBounds = null;
+let mapHasFitted = false;
+const truckMarkers = new Map();
+
+function vehicleStatus(vehicle) {
+  const speed = Number(vehicle.velocidad || 0);
+  if (speed > 3) return {label: "En movimiento", className: "moving"};
+  if (vehicle.encendido !== null && vehicle.encendido !== undefined && Number(vehicle.encendido) === 0) return {label: "Apagado", className: "off"};
+  return {label: "Detenido", className: "stopped"};
+}
+
+function initializeFleetMap() {
+  const container = $("heatmap-map");
+  if (fleetMap || !container) return;
+  if (!window.L) {
+    container.classList.add("map-unavailable");
+    container.textContent = "No fue posible cargar la cartografía. Revisa la conexión a Internet y actualiza la página.";
+    return;
+  }
+  container.replaceChildren();
+  fleetMap = L.map(container, {preferCanvas: true, zoomControl: true});
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(fleetMap);
+  heatLayer = L.layerGroup().addTo(fleetMap);
+  routeLayer = L.layerGroup().addTo(fleetMap);
+  stopLayer = L.layerGroup().addTo(fleetMap);
+  truckLayer = L.layerGroup().addTo(fleetMap);
+}
+
+function fitPendingMap() {
+  if (!fleetMap) return;
+  fleetMap.invalidateSize();
+  if (!mapHasFitted && pendingMapBounds && pendingMapBounds.isValid()) {
+    fleetMap.fitBounds(pendingMapBounds, {padding: [28, 28], maxZoom: 12});
+    mapHasFitted = true;
+  }
+}
+
+function truckIcon(vehicle) {
+  const status = vehicleStatus(vehicle);
+  const heading = Number.isFinite(Number(vehicle.rumbo)) ? Number(vehicle.rumbo) : 0;
+  const html = "<span class='truck-marker " + status.className + "'><span class='truck-heading' style='transform:rotate(" + heading + "deg)'>▲</span><span class='truck-glyph'>🚚</span></span>";
+  return L.divIcon({className: "truck-div-icon", html, iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -17]});
+}
+
+function truckPopup(vehicle) {
+  const status = vehicleStatus(vehicle);
+  const wrapper = document.createElement("div");
+  wrapper.className = "truck-popup";
+  const title = document.createElement("strong");
+  title.textContent = vehicle.asset_name || vehicle.asset_id || "Vehículo";
+  const identifier = document.createElement("span");
+  identifier.textContent = vehicle.asset_id || "Sin asset_id";
+  const state = document.createElement("b");
+  state.className = status.className;
+  state.textContent = status.label;
+  const details = document.createElement("p");
+  const speed = vehicle.velocidad === null || vehicle.velocidad === undefined ? "Sin velocidad" : `${format(vehicle.velocidad, 1)} km/h`;
+  details.textContent = `${speed} · ${vehicle.evento || "Sin evento"}`;
+  const date = document.createElement("small");
+  date.textContent = `Último reporte: ${formatUtc(vehicle.report_date)}`;
+  wrapper.append(title, identifier, state, details, date);
+  return wrapper;
+}
+
+function renderLiveFleet(vehicles) {
+  const list = $("vehicle-live-list");
+  if (!list) return;
+  list.replaceChildren();
+  $("vehicle-live-count").textContent = `${format(vehicles.length)} camiones visibles`;
+  const ordered = [...vehicles].sort((a, b) => Number(b.velocidad || 0) - Number(a.velocidad || 0));
+  for (const vehicle of ordered.slice(0, 14)) {
+    const status = vehicleStatus(vehicle);
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `vehicle-live-row ${status.className}`;
+    const icon = document.createElement("span");
+    icon.className = "vehicle-list-icon";
+    icon.textContent = "🚚";
+    const copy = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = vehicle.asset_name || vehicle.asset_id;
+    const detail = document.createElement("small");
+    detail.textContent = `${status.label} · ${vehicle.velocidad === null || vehicle.velocidad === undefined ? "s/d" : `${format(vehicle.velocidad, 1)} km/h`}`;
+    copy.append(name, detail);
+    button.append(icon, copy);
+    button.addEventListener("click", () => {
+      const marker = truckMarkers.get(vehicle.asset_id);
+      if (marker && fleetMap) {
+        fleetMap.setView(marker.getLatLng(), Math.max(fleetMap.getZoom(), 13));
+        marker.openPopup();
+      }
+    });
+    item.append(button);
+    list.append(item);
+  }
+  if (!vehicles.length) {
+    const item = document.createElement("li");
+    item.className = "empty";
+    item.textContent = "No hay posiciones de vehículos disponibles.";
+    list.append(item);
+  }
+}
+
+function renderFleetMap(data) {
+  initializeFleetMap();
+  if (!fleetMap) return;
+  heatLayer.clearLayers();
+  routeLayer.clearLayers();
+  stopLayer.clearLayers();
+  truckLayer.clearLayers();
+  truckMarkers.clear();
+
+  for (const cell of [...(data.celdas || [])].sort((a, b) => a.intensidad - b.intensidad)) {
+    L.circle([cell.latitud, cell.longitud], {
+      radius: 350 + Math.sqrt(cell.intensidad) * 2400,
+      color: heatColor(cell.intensidad),
+      weight: 1,
+      opacity: 0.75,
+      fillColor: heatColor(cell.intensidad),
+      fillOpacity: 0.16 + cell.intensidad * 0.34
+    }).bindTooltip(`${format(cell.reportes)} lecturas · ${format(cell.vehiculos)} vehículos`).addTo(heatLayer);
+  }
+
+  for (const route of [...(data.tramos || [])].sort((a, b) => a.intensidad - b.intensidad)) {
+    L.polyline([
+      [route.origen.latitud, route.origen.longitud],
+      [route.destino.latitud, route.destino.longitud]
+    ], {
+      color: heatColor(route.intensidad),
+      weight: 2 + route.intensidad * 7,
+      opacity: 0.42 + route.intensidad * 0.5,
+      lineCap: "round"
+    }).bindTooltip(`${format(route.pasos)} cruces · ${format(route.vehiculos)} vehículos`).addTo(routeLayer);
+  }
+
+  for (const cell of (data.celdas || []).filter((value) => value.paradas > 0)) {
+    L.circleMarker([cell.latitud, cell.longitud], {
+      radius: 7 + Math.min(8, Math.sqrt(cell.paradas) * 2),
+      color: "#6f42a6",
+      weight: 3,
+      fillColor: "#ffffff",
+      fillOpacity: 0.85
+    }).bindTooltip(`${format(cell.paradas)} paradas detectadas`).addTo(stopLayer);
+  }
+
+  const vehicles = data.vehiculos_actuales || [];
+  for (const vehicle of vehicles) {
+    const marker = L.marker([vehicle.latitud, vehicle.longitud], {
+      icon: truckIcon(vehicle),
+      zIndexOffset: 1000
+    }).bindPopup(truckPopup(vehicle));
+    marker.addTo(truckLayer);
+    truckMarkers.set(vehicle.asset_id, marker);
+  }
+  renderLiveFleet(vehicles);
+  $("map-last-update").textContent = data.ultima_posicion
+    ? `Últimas posiciones: ${formatUtc(data.ultima_posicion)} · actualización cada 15 s`
+    : "Sin posiciones recientes";
+
+  if (data.limites) {
+    pendingMapBounds = L.latLngBounds(
+      [data.limites.latitud_min, data.limites.longitud_min],
+      [data.limites.latitud_max, data.limites.longitud_max]
+    );
+  }
+  if ($("heatmap-map").offsetParent !== null) requestAnimationFrame(fitPendingMap);
 }
 
 function renderHeatmap(data) {
@@ -87,78 +265,7 @@ function renderHeatmap(data) {
     ranking.append(item);
   }
 
-  const svg = $("heatmap-map");
-  svg.replaceChildren();
-  if (!data.limites || !(data.celdas || []).length) {
-    const empty = svgNode("text", {x: 480, y: 270, "text-anchor": "middle", class: "map-empty"});
-    empty.textContent = "No hay coordenadas para construir el mapa.";
-    svg.append(empty);
-    return;
-  }
-
-  const width = 960, height = 540, padding = 48;
-  const bounds = data.limites;
-  const middleLatitude = (bounds.latitud_min + bounds.latitud_max) / 2;
-  const longitudeFactor = Math.max(0.3, Math.cos(middleLatitude * Math.PI / 180));
-  const geographicWidth = Math.max((bounds.longitud_max - bounds.longitud_min) * longitudeFactor, 0.01);
-  const geographicHeight = Math.max(bounds.latitud_max - bounds.latitud_min, 0.01);
-  const scale = Math.min((width - padding * 2) / geographicWidth, (height - padding * 2) / geographicHeight);
-  const usedWidth = geographicWidth * scale;
-  const usedHeight = geographicHeight * scale;
-  const left = (width - usedWidth) / 2;
-  const top = (height - usedHeight) / 2;
-  const project = (latitude, longitude) => ({
-    x: left + (longitude - bounds.longitud_min) * longitudeFactor * scale,
-    y: top + (bounds.latitud_max - latitude) * scale
-  });
-
-  svg.append(svgNode("rect", {x: left, y: top, width: usedWidth, height: usedHeight, rx: 10, class: "map-background"}));
-  for (let index = 0; index <= 4; index += 1) {
-    const x = left + usedWidth * index / 4;
-    const y = top + usedHeight * index / 4;
-    svg.append(svgNode("line", {x1: x, y1: top, x2: x, y2: top + usedHeight, class: "map-grid"}));
-    svg.append(svgNode("line", {x1: left, y1: y, x2: left + usedWidth, y2: y, class: "map-grid"}));
-  }
-
-  const routes = svgNode("g", {class: "map-routes"});
-  for (const route of [...(data.tramos || [])].sort((a, b) => a.intensidad - b.intensidad)) {
-    const origin = project(route.origen.latitud, route.origen.longitud);
-    const destination = project(route.destino.latitud, route.destino.longitud);
-    const line = svgNode("line", {
-      x1: origin.x, y1: origin.y, x2: destination.x, y2: destination.y,
-      stroke: heatColor(route.intensidad), "stroke-width": 1.5 + route.intensidad * 7,
-      "stroke-opacity": 0.35 + route.intensidad * 0.55
-    });
-    const title = svgNode("title");
-    title.textContent = `${route.etiqueta}: ${route.pasos} cruces, ${route.vehiculos} vehículos`;
-    line.append(title);
-    routes.append(line);
-  }
-  svg.append(routes);
-
-  const points = svgNode("g", {class: "map-points"});
-  for (const cell of [...(data.celdas || [])].sort((a, b) => a.intensidad - b.intensidad)) {
-    const point = project(cell.latitud, cell.longitud);
-    const radius = 4 + Math.sqrt(cell.intensidad) * 18;
-    const circle = svgNode("circle", {
-      cx: point.x, cy: point.y, r: radius, fill: heatColor(cell.intensidad),
-      "fill-opacity": 0.35 + cell.intensidad * 0.5
-    });
-    const title = svgNode("title");
-    title.textContent = `${cell.latitud.toFixed(3)}, ${cell.longitud.toFixed(3)}: ${cell.reportes} lecturas, ${cell.vehiculos} vehículos, ${cell.paradas} paradas`;
-    circle.append(title);
-    points.append(circle);
-    if (cell.paradas > 0) points.append(svgNode("circle", {
-      cx: point.x, cy: point.y, r: radius + 4, class: "stop-ring"
-    }));
-  }
-  svg.append(points);
-
-  const south = svgNode("text", {x: left, y: Math.min(height - 8, top + usedHeight + 24), class: "map-axis"});
-  south.textContent = `${bounds.latitud_min.toFixed(2)}° lat`;
-  const north = svgNode("text", {x: left + usedWidth, y: Math.min(height - 8, top + usedHeight + 24), "text-anchor": "end", class: "map-axis"});
-  north.textContent = `${bounds.latitud_max.toFixed(2)}° lat`;
-  svg.append(south, north);
+  renderFleetMap(data);
 }
 
 function renderTrips() {
@@ -212,6 +319,7 @@ function renderTelemetry(summary, dataset, state) {
     ejecutando: "Extrayendo datos",
     completo: "Ventana completa",
     limite_alcanzado: "Carga controlada completa",
+    esperando_nuevos_datos: "Sincronizado · próxima revisión en 15 min",
     deshabilitado: "ETL real deshabilitado",
     error: "Error en la última carga"
   };
@@ -294,6 +402,12 @@ function renderState(state) {
     $("model-error").textContent = `${format(metrics.mae_horas * 60, 1)} min`;
     $("model-name").textContent = "Regresión lineal · scikit-learn";
     $("model-training").textContent = `${metrics.filas_entrenamiento} viajes para entrenar · ${metrics.filas_evaluacion} para evaluar. Modelo final: ${metrics.filas_modelo_final} viajes.`;
+  }
+  if (state.modelo_telemetria) {
+    const geo = state.modelo_telemetria;
+    const metrics = geo.metricas || {};
+    $("geo-model-zones").textContent = `${format(metrics.zonas_detectadas || 0)} zonas frecuentes`;
+    $("geo-model-detail").textContent = `${geo.algoritmo} · ${format(metrics.reportes_entrenamiento || 0)} posiciones · ${format(metrics.cobertura_pct || 0, 1)} % agrupado. Entrenado ${formatUtc(geo.entrenado_en)}.`;
   }
 }
 

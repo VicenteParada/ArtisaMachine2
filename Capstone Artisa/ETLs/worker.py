@@ -17,7 +17,9 @@ SOURCE = Path(os.environ.get("SOURCE_FILE", "/origen/viajes.csv"))
 INTERVAL = int(os.environ.get("ETL_INTERVAL_SECONDS", "15"))
 STATE = {"last_success": 0.0, "error": None}
 TELEMETRY_ENABLED = os.environ.get("TELEMETRY_ENABLED", "0").strip().lower() in ("1", "true", "yes")
-TELEMETRY_INTERVAL = int(os.environ.get("TELEMETRY_INTERVAL_SECONDS", "30"))
+TELEMETRY_INTERVAL = int(os.environ.get("TELEMETRY_INTERVAL_SECONDS", "900"))
+TELEMETRY_CATCHUP_INTERVAL = int(os.environ.get("TELEMETRY_CATCHUP_INTERVAL_SECONDS", "5"))
+TELEMETRY_RETRY_INTERVAL = int(os.environ.get("TELEMETRY_RETRY_INTERVAL_SECONDS", "60"))
 TELEMETRY_STATE = {"enabled": TELEMETRY_ENABLED, "last_success": 0.0, "error": None,
                    "estado": "deshabilitado" if not TELEMETRY_ENABLED else "pendiente"}
 
@@ -76,23 +78,40 @@ def loop():
 
 
 def telemetry_loop():
-    try:
-        initialize_db()
-        config = TelemetryConfig.from_env()
-    except ValueError as error:
-        TELEMETRY_STATE.update(error=str(error), estado="error")
-        print(f"ETL telemetria: configuracion invalida ({error})", flush=True)
-        return
     while True:
         try:
-            result = run_telemetry_once(config)
-            TELEMETRY_STATE.update(last_success=time.monotonic(), error=None, **result)
-            if result["recibidos"]:
+            initialize_db()
+            break
+        except Exception as error:
+            TELEMETRY_STATE.update(error=str(error), estado="error")
+            print(
+                f"ETL telemetria: no fue posible inicializar la base ({type(error).__name__}); se reintentara",
+                flush=True,
+            )
+            time.sleep(max(1, TELEMETRY_RETRY_INTERVAL))
+    while True:
+        delay = TELEMETRY_INTERVAL
+        try:
+            config = TelemetryConfig.from_env()
+            totals = {"recibidos": 0, "validos": 0, "rechazados": 0}
+            result = None
+            for _ in range(config.pages_per_cycle):
+                result = run_telemetry_once(config)
+                for key in totals:
+                    totals[key] += int(result.get(key, 0))
+                if result["estado"] in ("completo", "limite_alcanzado") or result["recibidos"] < config.batch_size:
+                    break
+            result = result or {"estado": "esperando_nuevos_datos", "total_validos": 0}
+            TELEMETRY_STATE.update(last_success=time.monotonic(), error=None,
+                                   estado=result["estado"], total_validos=result["total_validos"], **totals)
+            if totals["recibidos"]:
                 print(
-                    f"ETL telemetria: {result['validos']} guardados, {result['rechazados']} "
-                    f"descartados; total {result['total_validos']} ({result['estado']})",
+                    f"ETL telemetria: {totals['validos']} guardados, {totals['rechazados']} "
+                    f"descartados en {totals['recibidos']} recibidos ({result['estado']})",
                     flush=True,
                 )
+            if config.continuous and result["estado"] == "ejecutando":
+                delay = max(1, TELEMETRY_CATCHUP_INTERVAL)
         except Exception as error:
             message = f"{type(error).__name__}: {error}"
             TELEMETRY_STATE.update(error=message, estado="error")
@@ -101,7 +120,8 @@ def telemetry_loop():
             except Exception:
                 pass
             print(f"ETL telemetria: ciclo fallido ({message})", flush=True)
-        time.sleep(TELEMETRY_INTERVAL)
+            delay = max(1, TELEMETRY_RETRY_INTERVAL)
+        time.sleep(delay)
 
 
 class Handler(JsonHandler):

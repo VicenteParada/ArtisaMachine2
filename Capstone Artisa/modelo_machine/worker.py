@@ -1,5 +1,6 @@
 """MariaDB -> entrenamiento/predicción -> MariaDB; no forma parte de la API."""
 
+from hashlib import sha256
 import json
 import threading
 import time
@@ -12,9 +13,12 @@ from sklearn.model_selection import train_test_split
 from common.db import connect_db
 from common.http import JsonHandler, serve
 from common.validation import FEATURES
+from modelo_machine.telemetry import train_hotspots
 
 
 STATE = {"last_success": 0.0, "error": None, "version": None}
+TELEMETRY_MODEL_INTERVAL_SECONDS = 300
+TELEMETRY_MODEL_MAX_POINTS = 20000
 
 
 def train(rows):
@@ -93,8 +97,50 @@ def cycle(model, version):
     return model, version
 
 
+def telemetry_cycle(previous_version):
+    with connect_db(autocommit=False) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT ultimo_report_date,ultimo_report_id,validos FROM telemetria_etl_estado WHERE id=1")
+        source = cursor.fetchone()
+        if not source or int(source["validos"]) < 10:
+            connection.commit()
+            return previous_version
+        fingerprint = f"{source['ultimo_report_date']}|{source['ultimo_report_id']}|{source['validos']}"
+        current = sha256(fingerprint.encode("utf-8")).hexdigest()
+        cursor.execute("SELECT dataset_version FROM modelo_telemetria_estado WHERE id=1")
+        stored = cursor.fetchone()
+        if previous_version == current or (stored and stored["dataset_version"] == current):
+            connection.commit()
+            return current
+        cursor.execute(
+            """SELECT asset_id,latitude,longitude,speed FROM telemetria_raw
+            ORDER BY report_date DESC,report_id DESC LIMIT %s""",
+            (TELEMETRY_MODEL_MAX_POINTS,),
+        )
+        rows = cursor.fetchall()
+        connection.commit()
+
+    metrics, zones = train_hotspots(rows)
+    with connect_db(autocommit=False) as connection, connection.cursor() as cursor:
+        cursor.execute("""INSERT INTO modelo_telemetria_estado
+            (id,dataset_version,algoritmo,metricas_json,zonas_json,entrenado_en,ultima_revision)
+            VALUES (1,%s,'DBSCAN geoespacial',%s,%s,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))
+            ON DUPLICATE KEY UPDATE dataset_version=VALUES(dataset_version),algoritmo=VALUES(algoritmo),
+            metricas_json=VALUES(metricas_json),zonas_json=VALUES(zonas_json),
+            entrenado_en=VALUES(entrenado_en),ultima_revision=VALUES(ultima_revision)""",
+            (current, json.dumps(metrics, ensure_ascii=False), json.dumps(zones, ensure_ascii=False)),
+        )
+        connection.commit()
+    print(
+        f"Machine: telemetria entrenada con {metrics['reportes_entrenamiento']} posiciones; "
+        f"{metrics['zonas_detectadas']} zonas frecuentes",
+        flush=True,
+    )
+    return current
+
 def loop():
     model, version = None, None
+    telemetry_version = None
+    next_telemetry_at = 0.0
     while True:
         try:
             model, version = cycle(model, version)
@@ -102,6 +148,17 @@ def loop():
         except Exception as error:
             STATE["error"] = type(error).__name__
             print(f"Machine: ciclo fallido ({type(error).__name__}); se reintentara", flush=True)
+        if time.monotonic() >= next_telemetry_at:
+            try:
+                telemetry_version = telemetry_cycle(telemetry_version)
+                STATE["telemetry_version"] = telemetry_version
+            except Exception as error:
+                print(
+                    f"Machine: entrenamiento de telemetria fallido ({type(error).__name__}); se reintentara",
+                    flush=True,
+                )
+            finally:
+                next_telemetry_at = time.monotonic() + TELEMETRY_MODEL_INTERVAL_SECONDS
         time.sleep(2)
 
 
@@ -110,7 +167,11 @@ class Handler(JsonHandler):
         if urlsplit(self.path).path != "/health":
             self.respond(404, {"error": "Ruta no encontrada"})
             return
-        ready = STATE["error"] is None and STATE["version"] and time.monotonic()-STATE["last_success"] < 30
+        ready = (
+            STATE["error"] is None
+            and STATE["version"]
+            and time.monotonic() - STATE["last_success"] < 120
+        )
         self.respond(200 if ready else 503, {"servicio": "machine", "status": "ok" if ready else "unavailable"})
 
 

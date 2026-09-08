@@ -66,6 +66,7 @@ Capstone Artisa/
 ├── modelo_machine/          # Entrena, predice y escribe los resultados
 │   ├── Dockerfile
 │   ├── requirements.txt
+│   ├── telemetry.py         # Clustering DBSCAN de posiciones reales
 │   └── worker.py
 ├── DB/
 │   └── schema.sql           # Tablas del flujo; imagen oficial MariaDB
@@ -124,6 +125,19 @@ y los conteos se guardan en `telemetria_etl_estado`, dentro de la misma transacc
 que la página procesada. La configuración inicial limita la prueba a 5.000 filas de
 un solo día para no solicitar accidentalmente los 28,8 millones de registros.
 
+## Entrenamiento geoespacial y mapa operativo
+
+Machine entrena automáticamente un modelo no supervisado DBSCAN sobre hasta 20.000
+posiciones válidas de `telemetria_raw`. El modelo agrupa puntos a menos de 0,8 km,
+identifica zonas frecuentes y guarda su versión, cobertura y fecha de entrenamiento
+en `modelo_telemetria_estado`. Se reentrena cuando cambia el cursor del ETL real.
+
+El mapa usa cartografía OpenStreetMap mediante Leaflet, representa los tramos de azul
+a rojo según su uso, las paradas con círculos violetas y la última posición conocida
+de cada vehículo con un icono de camión. El frontend consulta la API cada 15 segundos;
+cuando el origen entregue datos en tiempo real, los marcadores se actualizarán por el
+mismo flujo sin cambiar la interfaz. La cartografía base requiere conexión a Internet.
+
 Configura estas variables únicamente en `.env`:
 
 ```dotenv
@@ -134,12 +148,23 @@ TELEMETRY_START=2026-03-31T00:00:00
 TELEMETRY_END=2026-04-01T00:00:00
 TELEMETRY_BATCH_SIZE=500
 TELEMETRY_MAX_TOTAL_ROWS=5000
-TELEMETRY_INTERVAL_SECONDS=30
+TELEMETRY_INTERVAL_SECONDS=900
+TELEMETRY_CATCHUP_INTERVAL_SECONDS=5
+TELEMETRY_RETRY_INTERVAL_SECONDS=60
+TELEMETRY_CONTINUOUS=0
+TELEMETRY_PAGES_PER_CYCLE=1
 ```
 
-El ETL requiere acceso a la red local del origen. Para ampliar el histórico cambia
-la ventana de fechas y reinicia el contenedor `etl`. El nuevo estado reinicia el
-cursor de esa ventana, pero conserva los reportes ya guardados por `report_id`.
+El ETL requiere acceso a la red local del origen. En modo fijo, para ampliar el
+histórico cambia la ventana de fechas y reinicia `etl`; el cursor se reinicia pero
+los reportes permanecen por `report_id`. Con `TELEMETRY_CONTINUOUS=1`, el fin de la
+ventana avanza hasta la hora actual, se conserva el cursor y se buscan datos nuevos
+cada `TELEMETRY_INTERVAL_SECONDS`. Cada ciclo procesa como máximo
+`TELEMETRY_BATCH_SIZE × TELEMETRY_PAGES_PER_CYCLE` registros. Si todavía hay datos
+atrasados, el siguiente bloque comienza después de `TELEMETRY_CATCHUP_INTERVAL_SECONDS`;
+al alcanzar el origen, el ETL espera 15 minutos antes de buscar novedades.
+Si la red del origen se interrumpe, reintenta despues de
+TELEMETRY_RETRY_INTERVAL_SECONDS sin perder el cursor ni duplicar reportes.
 
 ## Cambiar el origen
 
@@ -177,8 +202,9 @@ Todos se pueden consultar a través del frontend en `http://localhost:8080`.
 | GET | `/api/viajes?limite=20` | Viajes de la carga activa con sus predicciones; máximo 500 |
 | GET | `/api/telemetria/resumen` | Conteos y rango temporal de la telemetría real |
 | GET | `/api/telemetria?limite=30` | Muestra reciente de telemetría real para la página; máximo 200 |
-| GET | `/api/telemetria/mapa-calor` | Densidad geográfica, tramos observados y paradas de la telemetría real |
-| GET | `/api/modelo` | Métricas de evaluación y coeficientes |
+| GET | `/api/telemetria/mapa-calor` | Densidad, tramos, paradas y última posición de cada camión |
+| GET | `/api/modelo` | Métricas de evaluación y coeficientes de la regresión simulada |
+| GET | `/api/modelo/telemetria` | Métricas y zonas del modelo DBSCAN entrenado con GPS real |
 | POST | `/api/predicciones` | Crea una solicitud; responde 202 con ID y URL de consulta |
 | GET | `/api/predicciones/{id}` | Estado y resultado persistido de una solicitud |
 | GET/POST | `/mensajes` | Demostración anterior de lectura y escritura |

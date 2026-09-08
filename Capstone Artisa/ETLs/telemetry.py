@@ -57,6 +57,8 @@ class TelemetryConfig:
     batch_size: int
     max_total_rows: int
     timeout_seconds: int
+    continuous: bool = False
+    pages_per_cycle: int = 1
 
     @classmethod
     def from_env(cls):
@@ -67,7 +69,9 @@ class TelemetryConfig:
         if len(url) > 255:
             raise ValueError("SOURCE_API_URL supera 255 caracteres")
         start = _datetime(os.environ.get("TELEMETRY_START", ""), "TELEMETRY_START")
-        end = _datetime(os.environ.get("TELEMETRY_END", ""), "TELEMETRY_END")
+        continuous = os.environ.get("TELEMETRY_CONTINUOUS", "0").strip().lower() in ("1", "true", "yes")
+        end = (datetime.now(timezone.utc).replace(tzinfo=None) if continuous else
+               _datetime(os.environ.get("TELEMETRY_END", ""), "TELEMETRY_END"))
         if end <= start:
             raise ValueError("TELEMETRY_END debe ser posterior a TELEMETRY_START")
         return cls(
@@ -77,6 +81,8 @@ class TelemetryConfig:
             batch_size=_integer_env("TELEMETRY_BATCH_SIZE", 500, 1, 5000),
             max_total_rows=_integer_env("TELEMETRY_MAX_TOTAL_ROWS", 5000, 1, 1_000_000),
             timeout_seconds=_integer_env("SOURCE_API_TIMEOUT_SECONDS", 90, 5, 300),
+            continuous=continuous,
+            pages_per_cycle=_integer_env("TELEMETRY_PAGES_PER_CYCLE", 1, 1, 100),
         )
 
 
@@ -241,7 +247,7 @@ def _state_for(config):
         changed = bool(state and (
             state["origen"] != config.url
             or state["ventana_desde"] != config.start
-            or state["ventana_hasta"] != config.end
+            or (not config.continuous and state["ventana_hasta"] != config.end)
         ))
         if not state or changed:
             cursor.execute(
@@ -258,6 +264,10 @@ def _state_for(config):
             connection.commit()
             return {"leidos": 0, "validos": 0, "rechazados": 0, "estado": "pendiente",
                     "ultimo_report_date": None, "ultimo_report_id": None}
+        if config.continuous and state["ventana_hasta"] != config.end:
+            cursor.execute("""UPDATE telemetria_etl_estado SET ventana_hasta=%s,
+                ultima_revision=UTC_TIMESTAMP(6) WHERE id=1""", (config.end,))
+            state["ventana_hasta"] = config.end
         connection.commit()
         return state
 
@@ -272,10 +282,10 @@ def _cursor_from(row):
 
 def run_once(config):
     state = _state_for(config)
-    if state["estado"] in ("completo", "limite_alcanzado"):
+    if state["estado"] in ("completo", "limite_alcanzado") and not config.continuous:
         return {"estado": state["estado"], "recibidos": 0, "validos": 0, "rechazados": 0,
                 "total_validos": state["validos"]}
-    remaining = config.max_total_rows - int(state["leidos"])
+    remaining = config.batch_size if config.continuous else config.max_total_rows - int(state["leidos"])
     if remaining <= 0:
         with _connect_db() as connection, connection.cursor() as cursor:
             cursor.execute("""UPDATE telemetria_etl_estado SET estado='limite_alcanzado',
@@ -298,8 +308,8 @@ def run_once(config):
     new_valid = int(state["validos"]) + len(accepted)
     new_rejected = int(state["rechazados"]) + len(rejected)
     if len(rows) < page_limit:
-        status = "completo"
-    elif new_read >= config.max_total_rows:
+        status = "esperando_nuevos_datos" if config.continuous else "completo"
+    elif not config.continuous and new_read >= config.max_total_rows:
         status = "limite_alcanzado"
     else:
         status = "ejecutando"

@@ -33,6 +33,8 @@ def analyze_telemetry(rows):
             "limites": None,
             "celdas": [],
             "tramos": [],
+            "vehiculos_actuales": [],
+            "ultima_posicion": None,
             "ranking": {"mas_usado": None, "menos_usado": None},
             "paradas_por_vehiculo": [],
             "metodo": _method(),
@@ -81,6 +83,30 @@ def analyze_telemetry(rows):
     tracks = defaultdict(list)
     for row in unique_observations:
         tracks[str(row["asset_id"])].append(row)
+
+    current_vehicles = []
+    for asset, track in tracks.items():
+        latest = track[-1]
+        speed = latest.get("gps_speed")
+        if speed is None:
+            speed = latest.get("speed")
+        current_vehicles.append({
+            "asset_id": asset,
+            "asset_name": names.get(asset, asset),
+            "report_date": latest.get("report_date"),
+            "latitud": float(latest["latitude"]),
+            "longitud": float(latest["longitude"]),
+            "velocidad": float(speed) if speed is not None else None,
+            "rumbo": float(latest["heading"]) if latest.get("heading") is not None else None,
+            "encendido": latest.get("ignition"),
+            "evento": latest.get("event_name"),
+        })
+    current_vehicles.sort(key=lambda value: (str(value["asset_name"]), value["asset_id"]))
+    latest_position = max(
+        (vehicle["report_date"] for vehicle in current_vehicles if vehicle["report_date"] is not None),
+        default=None,
+    )
+
     segments = defaultdict(lambda: {"pasos": 0, "vehiculos": set()})
     for asset, track in tracks.items():
         previous = None
@@ -131,6 +157,8 @@ def analyze_telemetry(rows):
         },
         "celdas": cell_rows[:250],
         "tramos": segment_rows[:180],
+        "vehiculos_actuales": current_vehicles,
+        "ultima_posicion": latest_position,
         "ranking": {"mas_usado": segment_rows[0] if segment_rows else None,
                     "menos_usado": least},
         "paradas_por_vehiculo": stop_rows[:10],

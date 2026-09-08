@@ -24,6 +24,10 @@ else:
             "TELEMETRY_END=2026-04-01T00:00:00\n"
             "TELEMETRY_BATCH_SIZE=500\n"
             "TELEMETRY_MAX_TOTAL_ROWS=5000\n"
-            "TELEMETRY_INTERVAL_SECONDS=30\n"
+            "TELEMETRY_INTERVAL_SECONDS=900\n"
+            "TELEMETRY_CATCHUP_INTERVAL_SECONDS=5\n"
+            "TELEMETRY_RETRY_INTERVAL_SECONDS=60\n"
+            "TELEMETRY_CONTINUOUS=0\n"
+            "TELEMETRY_PAGES_PER_CYCLE=1\n"
         )
     print("Archivo .env creado con credenciales locales aleatorias.")
