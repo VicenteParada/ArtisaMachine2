@@ -44,11 +44,9 @@ const svgNode = (name, attributes = {}) => {
 };
 
 function heatColor(intensity) {
-  if (intensity >= 0.8) return "#c84630";
-  if (intensity >= 0.55) return "#e88836";
-  if (intensity >= 0.3) return "#e6c84c";
-  if (intensity >= 0.12) return "#70a85b";
-  return "#397c91";
+  if (intensity >= 0.66) return "#14532d";
+  if (intensity >= 0.33) return "#f97316";
+  return "#dc2626";
 }
 
 function routeLabel(route) {
@@ -187,16 +185,41 @@ function renderFleetMap(data) {
     }).bindTooltip(`${format(cell.reportes)} lecturas · ${format(cell.vehiculos)} vehículos`).addTo(heatLayer);
   }
 
-  for (const route of [...(data.tramos || [])].sort((a, b) => a.intensidad - b.intensidad)) {
-    L.polyline([
+  const visibleRoutes = [...(data.tramos || [])]
+    .sort((a, b) => a.intensidad - b.intensidad)
+    .map((route, index, routes) => ({
+      ...route,
+      nivelVisual: routes.length > 1 ? index / (routes.length - 1) : 1
+    }));
+
+  for (const route of visibleRoutes) {
+    const points = [
       [route.origen.latitud, route.origen.longitud],
       [route.destino.latitud, route.destino.longitud]
-    ], {
-      color: heatColor(route.intensidad),
-      weight: 2 + route.intensidad * 7,
-      opacity: 0.42 + route.intensidad * 0.5,
-      lineCap: "round"
-    }).bindTooltip(`${format(route.pasos)} cruces · ${format(route.vehiculos)} vehículos`).addTo(routeLayer);
+    ];
+    L.polyline(points, {
+      color: "#ffffff",
+      weight: 8 + route.nivelVisual * 4,
+      opacity: 0.92,
+      lineCap: "round",
+      lineJoin: "round",
+      interactive: false
+    }).addTo(routeLayer);
+  }
+
+  for (const route of visibleRoutes) {
+    const points = [
+      [route.origen.latitud, route.origen.longitud],
+      [route.destino.latitud, route.destino.longitud]
+    ];
+    const nivel = route.nivelVisual >= 0.66 ? "Uso alto" : (route.nivelVisual >= 0.33 ? "Uso medio" : "Uso bajo");
+    L.polyline(points, {
+      color: heatColor(route.nivelVisual),
+      weight: 5 + route.nivelVisual * 4,
+      opacity: 1,
+      lineCap: "round",
+      lineJoin: "round"
+    }).bindTooltip(nivel + " | " + format(route.pasos) + " cruces | " + format(route.vehiculos) + " vehiculos").addTo(routeLayer);
   }
 
   for (const cell of (data.celdas || []).filter((value) => value.paradas > 0)) {

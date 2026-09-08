@@ -132,8 +132,8 @@ posiciones válidas de `telemetria_raw`. El modelo agrupa puntos a menos de 0,8 
 identifica zonas frecuentes y guarda su versión, cobertura y fecha de entrenamiento
 en `modelo_telemetria_estado`. Se reentrena cuando cambia el cursor del ETL real.
 
-El mapa usa cartografía OpenStreetMap mediante Leaflet, representa los tramos de azul
-a rojo según su uso, las paradas con círculos violetas y la última posición conocida
+El mapa usa cartografía OpenStreetMap mediante Leaflet, representa los tramos con líneas sólidas y los divide en tercios: rojo para uso bajo,
+naranja para uso medio y verde oscuro para uso alto, las paradas con círculos violetas y la última posición conocida
 de cada vehículo con un icono de camión. El frontend consulta la API cada 15 segundos;
 cuando el origen entregue datos en tiempo real, los marcadores se actualizarán por el
 mismo flujo sin cambiar la interfaz. La cartografía base requiere conexión a Internet.
@@ -148,7 +148,7 @@ TELEMETRY_START=2026-03-31T00:00:00
 TELEMETRY_END=2026-04-01T00:00:00
 TELEMETRY_BATCH_SIZE=500
 TELEMETRY_MAX_TOTAL_ROWS=5000
-TELEMETRY_INTERVAL_SECONDS=900
+TELEMETRY_INTERVAL_SECONDS=300
 TELEMETRY_CATCHUP_INTERVAL_SECONDS=5
 TELEMETRY_RETRY_INTERVAL_SECONDS=60
 TELEMETRY_CONTINUOUS=0
@@ -162,7 +162,7 @@ ventana avanza hasta la hora actual, se conserva el cursor y se buscan datos nue
 cada `TELEMETRY_INTERVAL_SECONDS`. Cada ciclo procesa como máximo
 `TELEMETRY_BATCH_SIZE × TELEMETRY_PAGES_PER_CYCLE` registros. Si todavía hay datos
 atrasados, el siguiente bloque comienza después de `TELEMETRY_CATCHUP_INTERVAL_SECONDS`;
-al alcanzar el origen, el ETL espera 15 minutos antes de buscar novedades.
+al alcanzar el origen, el ETL espera 5 minutos antes de buscar novedades.
 Si la red del origen se interrumpe, reintenta despues de
 TELEMETRY_RETRY_INTERVAL_SECONDS sin perder el cursor ni duplicar reportes.
 
