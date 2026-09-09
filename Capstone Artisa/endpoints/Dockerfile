@@ -4,6 +4,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 COPY common/ common/
+COPY simulacion/ simulacion/
 COPY endpoints/ endpoints/
 COPY app.py schema.sql ./
 USER 10001:10001

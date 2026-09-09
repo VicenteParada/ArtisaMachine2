@@ -125,18 +125,50 @@ y los conteos se guardan en `telemetria_etl_estado`, dentro de la misma transacc
 que la página procesada. La configuración inicial limita la prueba a 5.000 filas de
 un solo día para no solicitar accidentalmente los 28,8 millones de registros.
 
-## Entrenamiento geoespacial y mapa operativo
+## Simulación de salida procesada y mapa operativo
 
-Machine entrena automáticamente un modelo no supervisado DBSCAN sobre hasta 20.000
-posiciones válidas de `telemetria_raw`. El modelo agrupa puntos a menos de 0,8 km,
-identifica zonas frecuentes y guarda su versión, cobertura y fecha de entrenamiento
-en `modelo_telemetria_estado`. Se reentrena cuando cambia el cursor del ETL real.
+La telemetría completa permanece en `telemetria_raw`; la vista del mapa no elimina,
+reemplaza ni modifica esos reportes. Para evitar recalcular todo el histórico en cada
+petición, `common/map_provider.py` lee una ventana de los últimos registros mediante
+el índice temporal, conserva además la última posición disponible de todos los
+vehículos y mantiene el resultado en caché durante cinco minutos.
 
-El mapa usa cartografía OpenStreetMap mediante Leaflet, representa los tramos con líneas sólidas y los divide en tercios: rojo para uso bajo,
-naranja para uso medio y verde oscuro para uso alto, las paradas con círculos violetas y la última posición conocida
-de cada vehículo con un icono de camión. El frontend consulta la API cada 15 segundos;
-cuando el origen entregue datos en tiempo real, los marcadores se actualizarán por el
-mismo flujo sin cambiar la interfaz. La cartografía base requiere conexión a Internet.
+`common/telemetry_map.py` ordena cada secuencia por `asset_id`, fecha y `report_id`.
+Separa recorridos por pausas, detenciones prolongadas o saltos físicamente
+incompatibles, y nunca une puntos de vehículos diferentes. Cada recorrido se registra
+primero como `trip`, con su vehículo, inicio, término, distancia y geometría GPS.
+Después se compara con el registro de rutas usando origen y destino cercanos, el mismo
+sentido, al menos 60 % de geometría compartida y una tolerancia de corredor de 2 km.
+La tolerancia de los extremos es proporcional al recorrido y queda limitada entre
+2 y 8 km. Coordenadas exactas o la cantidad de lecturas no crean el `route_id`; el
+identificador se asigna después de agrupar. De ese registro salen `route_id`,
+`usage_count` y `unique_vehicle_count`, sin limitar artificialmente el número de rutas.
+
+El contrato de `GET /api/mapa` mantiene separados:
+
+- `routes`: geometría y clasificación global de cada ruta.
+- `trips`: recorridos observados, con distancia y geometría, que justifican `usage_count`.
+- `vehicles`: última latitud y longitud disponible de toda la flota.
+- `stops`: zonas de detención derivadas de eventos reales.
+- `readings`: celdas técnicas de actividad GPS, ocultas por defecto.
+
+`usage_count` siempre equivale a la cantidad de `trips` asociados a la ruta. Las
+lecturas, la densidad y las paradas no participan en HIGH, MEDIUM o LOW. Cada ruta
+mantiene un solo color completo: HIGH verde oscuro, MEDIUM naranja y LOW rojo.
+
+La geometría actual sigue la secuencia GPS real filtrada y se identifica como
+`GPS_TRACE_FILTERED`. No se envían coordenadas privadas a servicios externos ni se
+presenta esta aproximación como map matching. El ajuste exacto a la red vial se hará
+posteriormente On-Premise con OSRM, Valhalla, GraphHopper u otro motor; el contrato y
+el frontend no necesitarán cambiar.
+
+El panel inspirado en una consola de monitoreo permite seleccionar una ruta o un
+vehículo. Una ruta usa `fitBounds` sobre su propia geometría; un vehículo centra el
+mapa en su latitud y longitud, abre su detalle y conserva su marcador. Los filtros
+Todas, Más usadas, Uso medio y Poco usadas cambian únicamente la visibilidad de las
+capas. Rutas, vehículos y paradas están activas al abrir; las lecturas quedan
+apagadas. El archivo `simulacion/mapa_procesado.json` permanece como alternativa
+para ejecutar la interfaz sin MariaDB usando `MAP_DATA_SOURCE=simulation`.
 
 Configura estas variables únicamente en `.env`:
 
@@ -153,6 +185,10 @@ TELEMETRY_CATCHUP_INTERVAL_SECONDS=5
 TELEMETRY_RETRY_INTERVAL_SECONDS=60
 TELEMETRY_CONTINUOUS=0
 TELEMETRY_PAGES_PER_CYCLE=1
+MAP_DATA_SOURCE=telemetry
+MAP_SIMULATION_FILE=/app/simulacion/mapa_procesado.json
+MAP_MAX_REPORTS=30000
+MAP_REFRESH_SECONDS=300
 ```
 
 El ETL requiere acceso a la red local del origen. En modo fijo, para ampliar el
@@ -202,7 +238,8 @@ Todos se pueden consultar a través del frontend en `http://localhost:8080`.
 | GET | `/api/viajes?limite=20` | Viajes de la carga activa con sus predicciones; máximo 500 |
 | GET | `/api/telemetria/resumen` | Conteos y rango temporal de la telemetría real |
 | GET | `/api/telemetria?limite=30` | Muestra reciente de telemetría real para la página; máximo 200 |
-| GET | `/api/telemetria/mapa-calor` | Densidad, tramos, paradas y última posición de cada camión |
+| GET | `/api/mapa` | Contrato procesado: rutas, recorridos, paradas, vehículos y lecturas técnicas |
+| GET | `/api/telemetria/mapa-calor` | Alias compatible de `/api/mapa` |
 | GET | `/api/modelo` | Métricas de evaluación y coeficientes de la regresión simulada |
 | GET | `/api/modelo/telemetria` | Métricas y zonas del modelo DBSCAN entrenado con GPS real |
 | POST | `/api/predicciones` | Crea una solicitud; responde 202 con ID y URL de consulta |

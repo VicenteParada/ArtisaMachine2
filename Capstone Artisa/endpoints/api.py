@@ -13,15 +13,12 @@ import pymysql
 from app import Handler as LegacyHandler
 from common.db import connect_db
 from common.http import JsonHandler, RequestError, serve
-from common.telemetry_map import analyze_telemetry
+from common.map_provider import MapDataError, get_map_data
 from common.validation import features
 
 
 STARTED_AT = time.monotonic()
 PREDICTION_PATH = re.compile(r"/api/predicciones/([0-9a-f-]{36})")
-HEATMAP_LIMIT = 20000
-HEATMAP_CACHE = {"key": None, "analysis": None}
-HEATMAP_LOCK = Lock()
 TELEMETRY_SUMMARY_CACHE = {"expires_at": 0.0, "summary": None}
 TELEMETRY_SUMMARY_LOCK = Lock()
 
@@ -72,11 +69,20 @@ class Handler(LegacyHandler):
         if path == "/":
             self.respond(200, {"servicio": "artisa-docker-demo", "contenedor": socket.gethostname(),
                                "mensaje": "Endpoints Artisa", "rutas": ["/api/estado", "/api/viajes",
-                               "/api/telemetria/resumen", "/api/telemetria", "/api/telemetria/mapa-calor", "/api/modelo", "/api/modelo/telemetria",
+                               "/api/telemetria/resumen", "/api/telemetria", "/api/mapa", "/api/telemetria/mapa-calor", "/api/modelo", "/api/modelo/telemetria",
                                "/api/predicciones"]})
             return
         if path != "/health" and not path.startswith("/api/"):
             super().do_GET()
+            return
+        if path in ("/api/mapa", "/api/telemetria/mapa-calor"):
+            try:
+                with connect_db(autocommit=True) as connection, connection.cursor() as cursor:
+                    self.respond(200, get_map_data(cursor))
+            except MapDataError as error:
+                self.respond(503, {"error": str(error)})
+            except pymysql.MySQLError as error:
+                self.database_error(error)
             return
         try:
             with connect_db(autocommit=False) as connection, connection.cursor() as cursor:
@@ -130,31 +136,7 @@ class Handler(LegacyHandler):
                         speed,gps_speed,heading,ignition FROM telemetria_raw
                         ORDER BY report_date DESC,report_id DESC LIMIT %s""", (limit,))
                     self.respond(200, {"reportes": cursor.fetchall(), "limite": limit})
-                elif path == "/api/telemetria/mapa-calor":
-                    cursor.execute(
-                        "SELECT ultimo_report_date,ultimo_report_id,validos "
-                        "FROM telemetria_etl_estado WHERE id=1"
-                    )
-                    map_state = cursor.fetchone() or {}
-                    cache_key = (
-                        map_state.get("ultimo_report_date"),
-                        map_state.get("ultimo_report_id"),
-                        map_state.get("validos"),
-                    )
-                    with HEATMAP_LOCK:
-                        if HEATMAP_CACHE["key"] == cache_key:
-                            analysis = HEATMAP_CACHE["analysis"]
-                        else:
-                            cursor.execute(
-                                """SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
-                                speed,gps_speed,heading,ignition,event_name FROM telemetria_raw
-                                ORDER BY report_date DESC,report_id DESC LIMIT %s""",
-                                (HEATMAP_LIMIT,),
-                            )
-                            analysis = analyze_telemetry(cursor.fetchall())
-                            analysis["limite_reportes"] = HEATMAP_LIMIT
-                            HEATMAP_CACHE.update(key=cache_key, analysis=analysis)
-                    self.respond(200, analysis)
+
                 elif path == "/api/modelo/telemetria":
                     cursor.execute("SELECT * FROM modelo_telemetria_estado WHERE id=1")
                     model = cursor.fetchone()

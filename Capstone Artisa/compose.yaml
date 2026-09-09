@@ -80,7 +80,12 @@ services:
       context: .
       dockerfile: endpoints/Dockerfile
     container_name: artisa-endpoints
-    environment: *db-environment
+    environment:
+      <<: *db-environment
+      MAP_DATA_SOURCE: ${MAP_DATA_SOURCE:-telemetry}
+      MAP_SIMULATION_FILE: ${MAP_SIMULATION_FILE:-/app/simulacion/mapa_procesado.json}
+      MAP_MAX_REPORTS: ${MAP_MAX_REPORTS:-30000}
+      MAP_REFRESH_SECONDS: ${MAP_REFRESH_SECONDS:-300}
     depends_on:
       machine:
         condition: service_healthy
