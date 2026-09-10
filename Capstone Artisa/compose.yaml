@@ -101,7 +101,7 @@ services:
     environment:
       API_URL: http://endpoints:8000
     ports:
-      - "127.0.0.1:8080:8000"
+      - "0.0.0.0:8080:8000"
     depends_on:
       endpoints:
         condition: service_healthy
