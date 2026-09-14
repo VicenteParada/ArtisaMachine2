@@ -3,6 +3,7 @@
 import json
 import re
 import socket
+from threading import Lock
 import time
 from urllib.parse import parse_qs, urlsplit
 import uuid
@@ -18,6 +19,11 @@ from common.validation import features
 
 STARTED_AT = time.monotonic()
 PREDICTION_PATH = re.compile(r"/api/predicciones/([0-9a-f-]{36})")
+HEATMAP_LIMIT = 20000
+HEATMAP_CACHE = {"key": None, "analysis": None}
+HEATMAP_LOCK = Lock()
+TELEMETRY_SUMMARY_CACHE = {"expires_at": 0.0, "summary": None}
+TELEMETRY_SUMMARY_LOCK = Lock()
 
 
 def pipeline_state(cursor):
@@ -27,6 +33,8 @@ def pipeline_state(cursor):
     model = cursor.fetchone()
     cursor.execute("SELECT * FROM telemetria_etl_estado WHERE id=1")
     telemetry = cursor.fetchone()
+    cursor.execute("SELECT * FROM modelo_telemetria_estado WHERE id=1")
+    telemetry_model = cursor.fetchone()
     etl_ready = bool(etl and etl["hace_segundos"] < 45)
     model_ready = bool(model and model["hace_segundos"] < 15 and etl and model["dataset_version"] == etl["dataset_version"])
     return {
@@ -41,6 +49,10 @@ def pipeline_state(cursor):
         "modelo": ({k: v for k, v in model.items() if k not in ("id", "metricas_json", "coeficientes_json")} | {
             "metricas": json.loads(model["metricas_json"]), "coeficientes": json.loads(model["coeficientes_json"])
         }) if model else None,
+        "modelo_telemetria": ({k: v for k, v in telemetry_model.items()
+                                  if k not in ("id", "metricas_json", "zonas_json")} | {
+            "metricas": json.loads(telemetry_model["metricas_json"])
+        }) if telemetry_model else None,
         "telemetria": ({k: v for k, v in telemetry.items()
                          if k not in ("id", "origen", "rechazos_json")} | {
             "rechazos": json.loads(telemetry["rechazos_json"])
@@ -60,7 +72,7 @@ class Handler(LegacyHandler):
         if path == "/":
             self.respond(200, {"servicio": "artisa-docker-demo", "contenedor": socket.gethostname(),
                                "mensaje": "Endpoints Artisa", "rutas": ["/api/estado", "/api/viajes",
-                               "/api/telemetria/resumen", "/api/telemetria", "/api/telemetria/mapa-calor", "/api/modelo",
+                               "/api/telemetria/resumen", "/api/telemetria", "/api/telemetria/mapa-calor", "/api/modelo", "/api/modelo/telemetria",
                                "/api/predicciones"]})
             return
         if path != "/health" and not path.startswith("/api/"):
@@ -91,11 +103,22 @@ class Handler(LegacyHandler):
                         ORDER BY v.id LIMIT %s""", (limit,))
                     self.respond(200, {"viajes": cursor.fetchall(), "limite": limit})
                 elif path == "/api/telemetria/resumen":
-                    cursor.execute("""SELECT COUNT(*) AS reportes,COUNT(DISTINCT asset_id) AS vehiculos,
-                        MIN(report_date) AS desde,MAX(report_date) AS hasta,
-                        COALESCE(AVG(speed),0) AS velocidad_promedio,
-                        COALESCE(MAX(speed),0) AS velocidad_maxima FROM telemetria_raw""")
-                    self.respond(200, cursor.fetchone())
+                    with TELEMETRY_SUMMARY_LOCK:
+                        if (
+                            TELEMETRY_SUMMARY_CACHE["summary"] is not None
+                            and time.monotonic() < TELEMETRY_SUMMARY_CACHE["expires_at"]
+                        ):
+                            summary = TELEMETRY_SUMMARY_CACHE["summary"]
+                        else:
+                            cursor.execute("""SELECT COUNT(*) AS reportes,COUNT(DISTINCT asset_id) AS vehiculos,
+                                MIN(report_date) AS desde,MAX(report_date) AS hasta,
+                                COALESCE(AVG(speed),0) AS velocidad_promedio,
+                                COALESCE(MAX(speed),0) AS velocidad_maxima FROM telemetria_raw""")
+                            summary = cursor.fetchone()
+                            TELEMETRY_SUMMARY_CACHE.update(
+                                expires_at=time.monotonic() + 60, summary=summary
+                            )
+                    self.respond(200, summary)
                 elif path == "/api/telemetria":
                     try:
                         limit = int(parse_qs(parsed.query).get("limite", ["30"])[0])
@@ -108,12 +131,39 @@ class Handler(LegacyHandler):
                         ORDER BY report_date DESC,report_id DESC LIMIT %s""", (limit,))
                     self.respond(200, {"reportes": cursor.fetchall(), "limite": limit})
                 elif path == "/api/telemetria/mapa-calor":
-                    cursor.execute("""SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
-                        speed,gps_speed,event_name FROM telemetria_raw
-                        ORDER BY report_date DESC,report_id DESC LIMIT 50000""")
-                    analysis = analyze_telemetry(cursor.fetchall())
-                    analysis["limite_reportes"] = 50000
+                    cursor.execute(
+                        "SELECT ultimo_report_date,ultimo_report_id,validos "
+                        "FROM telemetria_etl_estado WHERE id=1"
+                    )
+                    map_state = cursor.fetchone() or {}
+                    cache_key = (
+                        map_state.get("ultimo_report_date"),
+                        map_state.get("ultimo_report_id"),
+                        map_state.get("validos"),
+                    )
+                    with HEATMAP_LOCK:
+                        if HEATMAP_CACHE["key"] == cache_key:
+                            analysis = HEATMAP_CACHE["analysis"]
+                        else:
+                            cursor.execute(
+                                """SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
+                                speed,gps_speed,heading,ignition,event_name FROM telemetria_raw
+                                ORDER BY report_date DESC,report_id DESC LIMIT %s""",
+                                (HEATMAP_LIMIT,),
+                            )
+                            analysis = analyze_telemetry(cursor.fetchall())
+                            analysis["limite_reportes"] = HEATMAP_LIMIT
+                            HEATMAP_CACHE.update(key=cache_key, analysis=analysis)
                     self.respond(200, analysis)
+                elif path == "/api/modelo/telemetria":
+                    cursor.execute("SELECT * FROM modelo_telemetria_estado WHERE id=1")
+                    model = cursor.fetchone()
+                    if model:
+                        model = {k: v for k, v in model.items() if k not in ("id", "metricas_json", "zonas_json")} | {
+                            "metricas": json.loads(model["metricas_json"]),
+                            "zonas": json.loads(model["zonas_json"]),
+                        }
+                    self.respond(200 if model else 503, model or {"error": "Modelo de telemetria aun no disponible"})
                 elif path == "/api/modelo":
                     model = pipeline_state(cursor)["modelo"]
                     self.respond(200 if model else 503, model or {"error": "Modelo aun no disponible"})

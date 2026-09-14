@@ -16,7 +16,7 @@ def connect_db(autocommit=True):
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=autocommit,
         connect_timeout=3,
-        read_timeout=5,
+        read_timeout=15,
         write_timeout=5,
     )
 

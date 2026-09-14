@@ -26,12 +26,19 @@ class TelemetryMapTests(unittest.TestCase):
         self.assertEqual(result["resumen"]["tramos"], 1)
         self.assertEqual(result["ranking"]["mas_usado"]["pasos"], 2)
         self.assertEqual(result["paradas_por_vehiculo"][0]["asset_id"], "A")
+        self.assertEqual(len(result["vehiculos_actuales"]), 2)
+        vehicle_a = next(vehicle for vehicle in result["vehiculos_actuales"] if vehicle["asset_id"] == "A")
+        self.assertEqual(vehicle_a["report_date"], start + timedelta(minutes=1))
+        self.assertEqual(vehicle_a["latitud"], -23.16)
+        self.assertEqual(result["ultima_posicion"], start + timedelta(minutes=1))
 
     def test_empty_dataset_has_no_bounds_or_ranking(self):
         result = analyze_telemetry([])
         self.assertIsNone(result["limites"])
         self.assertIsNone(result["ranking"]["mas_usado"])
         self.assertEqual(result["resumen"]["paradas"], 0)
+        self.assertEqual(result["vehiculos_actuales"], [])
+        self.assertIsNone(result["ultima_posicion"])
 
 
 if __name__ == "__main__":

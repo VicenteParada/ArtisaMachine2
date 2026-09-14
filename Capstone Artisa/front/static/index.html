@@ -4,7 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Artisa · Flujo de datos</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="/style.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -65,7 +67,7 @@
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
       <section class="panel heatmap-panel">
         <div class="section-top"><div><span class="eyebrow">03 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas y paradas</h2></div><span class="status">Telemetría real</span></div>
-        <p class="telemetry-intro">La intensidad aumenta donde existen más lecturas y cruces entre zonas. El análisis utiliza únicamente la muestra real importada.</p>
+        <p class="telemetry-intro">Las rutas se comparan por nivel de uso: verde oscuro para el tercio más usado, naranja para el tercio intermedio y rojo para el tercio menos usado. El análisis utiliza la muestra real importada.</p>
         <div class="real-metrics heatmap-metrics" aria-label="Resumen del mapa de calor">
           <article><span>Lecturas analizadas</span><strong id="heatmap-reports">—</strong><small>Posiciones únicas de la muestra</small></article>
           <article><span>Vehículos</span><strong id="heatmap-vehicles">—</strong><small>Con recorrido observado</small></article>
@@ -74,14 +76,23 @@
         </div>
         <div class="heatmap-layout">
           <article class="map-card">
-            <div class="map-title"><div><strong>Densidad geográfica</strong><small id="heatmap-zones">Calculando zonas…</small></div><span>Coordenadas WGS84</span></div>
-            <svg id="heatmap-map" class="heatmap-map" viewBox="0 0 960 540" role="img" aria-label="Mapa de calor de rutas observadas"><text x="480" y="270" text-anchor="middle">Cargando mapa…</text></svg>
-            <div class="heat-legend"><span>Menor uso</span><i></i><i></i><i></i><i></i><i></i><span>Mayor uso</span><b>○ Parada</b></div>
+            <div class="map-title"><div><strong>Rutas, paradas y posición de la flota</strong><small id="heatmap-zones">Calculando zonas…</small></div><span id="map-last-update">Datos nuevos cada 5 min · mapa cada 15 s</span></div>
+            <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa interactivo de rutas, paradas y camiones"><span class="map-loading">Cargando cartografía…</span></div>
+            <div class="heat-legend"><span>Uso bajo</span><i></i><span>Uso medio</span><i></i><span>Uso alto</span><i></i><b class="legend-stop">○ Parada</b><b class="legend-truck">🚚 Camión</b></div>
           </article>
           <aside class="route-insights" aria-label="Resumen de rutas">
             <article class="route-highlight most"><span>TRAMO MÁS USADO</span><strong id="most-route">Calculando…</strong><small id="most-route-usage">—</small></article>
             <article class="route-highlight least"><span>TRAMO MENOS USADO</span><strong id="least-route">Calculando…</strong><small id="least-route-usage">—</small></article>
             <article class="stop-ranking"><span class="eyebrow">PARADAS POR VEHÍCULO</span><ol id="stop-ranking"><li>Calculando…</li></ol></article>
+            <article class="geo-model">
+              <span class="eyebrow">MODELO DE TELEMETRÍA REAL</span>
+              <strong id="geo-model-zones">Entrenando…</strong>
+              <small id="geo-model-detail">Machine está buscando zonas frecuentes.</small>
+            </article>
+            <article class="live-fleet">
+              <div><span class="eyebrow">FLOTA EN EL MAPA</span><strong id="vehicle-live-count">Calculando…</strong></div>
+              <ul id="vehicle-live-list"><li>Esperando posiciones…</li></ul>
+            </article>
           </aside>
         </div>
         <details class="heatmap-method"><summary>¿Cómo se calcula este mapa?</summary><p id="heatmap-method">Esperando la metodología…</p></details>
