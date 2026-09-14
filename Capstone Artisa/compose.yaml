@@ -17,6 +17,8 @@ services:
   mariadb:
     image: mariadb:11.8
     container_name: artisa-mariadb
+    ports:
+      - "127.0.0.1:3306:3306"
     environment:
       MARIADB_DATABASE: ${MARIADB_DATABASE:?Ejecuta python3 scripts/prepare_env.py}
       MARIADB_USER: ${MARIADB_USER:?Ejecuta python3 scripts/prepare_env.py}
@@ -39,33 +41,16 @@ services:
     container_name: artisa-etl
     environment:
       <<: *db-environment
-      SOURCE_FILE: /origen/viajes.csv
-      ETL_INTERVAL_SECONDS: "15"
-      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-0}
-      SOURCE_API_URL: ${SOURCE_API_URL:-}
-      SOURCE_API_TIMEOUT_SECONDS: ${SOURCE_API_TIMEOUT_SECONDS:-90}
-      TELEMETRY_START: ${TELEMETRY_START:-2026-03-31T00:00:00}
-      TELEMETRY_END: ${TELEMETRY_END:-2026-04-01T00:00:00}
-      TELEMETRY_BATCH_SIZE: ${TELEMETRY_BATCH_SIZE:-500}
-      TELEMETRY_MAX_TOTAL_ROWS: ${TELEMETRY_MAX_TOTAL_ROWS:-5000}
+      MONGO_URI: ${MONGO_URI:-mongodb://host.docker.internal:27017}
+      MONGO_DATABASE: ${MONGO_DATABASE:-gps_data}
+      MONGO_COLLECTION: ${MONGO_COLLECTION:-raw_gps}
+      MONGO_TIMEOUT_SECONDS: ${MONGO_TIMEOUT_SECONDS:-10}
+      TELEMETRY_BATCH_SIZE: ${TELEMETRY_BATCH_SIZE:-2000}
       TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
-    volumes:
-      - ./origen:/origen:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       mariadb:
-        condition: service_healthy
-    healthcheck: *python-health
-    restart: unless-stopped
-    init: true
-
-  machine:
-    build:
-      context: .
-      dockerfile: modelo_machine/Dockerfile
-    container_name: artisa-machine
-    environment: *db-environment
-    depends_on:
-      etl:
         condition: service_healthy
     healthcheck: *python-health
     restart: unless-stopped
@@ -78,7 +63,7 @@ services:
     container_name: artisa-endpoints
     environment: *db-environment
     depends_on:
-      machine:
+      mariadb:
         condition: service_healthy
     healthcheck: *python-health
     restart: unless-stopped
