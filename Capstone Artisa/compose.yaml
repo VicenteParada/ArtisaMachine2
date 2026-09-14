@@ -100,8 +100,6 @@ services:
     container_name: artisa-front
     environment:
       API_URL: http://endpoints:8000
-    ports:
-      - "0.0.0.0:8080:8000"
     depends_on:
       endpoints:
         condition: service_healthy
