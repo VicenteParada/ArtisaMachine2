@@ -1,6 +1,7 @@
 """Endpoints leen MariaDB; Machine procesa las solicitudes por separado."""
 
 import json
+import os
 import re
 import socket
 from threading import Lock
@@ -23,41 +24,157 @@ TELEMETRY_SUMMARY_CACHE = {"expires_at": 0.0, "summary": None}
 TELEMETRY_SUMMARY_LOCK = Lock()
 
 
-def pipeline_state(cursor):
-    cursor.execute("SELECT *, TIMESTAMPDIFF(SECOND,ultima_revision,UTC_TIMESTAMP()) AS hace_segundos FROM etl_estado WHERE id=1")
-    etl = cursor.fetchone()
-    cursor.execute("SELECT *, TIMESTAMPDIFF(SECOND,ultima_revision,UTC_TIMESTAMP()) AS hace_segundos FROM modelo_estado WHERE id=1")
-    model = cursor.fetchone()
-    cursor.execute("SELECT * FROM telemetria_etl_estado WHERE id=1")
-    telemetry = cursor.fetchone()
-    cursor.execute("SELECT * FROM modelo_telemetria_estado WHERE id=1")
-    telemetry_model = cursor.fetchone()
-    etl_ready = bool(etl and etl["hace_segundos"] < 45)
-    model_ready = bool(model and model["hace_segundos"] < 15 and etl and model["dataset_version"] == etl["dataset_version"])
+def _seconds(value):
+    return int(value) if value is not None else 10**9
+
+
+def _rejections(row):
+    try:
+        return json.loads(row.get("rechazos_json") or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+
+
+def _telemetry_source(cursor):
+    """Prefiere el ETL MongoDB de main y conserva la telemetría anterior como respaldo."""
+    cursor.execute("SELECT validos FROM raw_gps_estado WHERE id=1")
+    raw_count = int((cursor.fetchone() or {}).get("validos") or 0)
+    if raw_count:
+        return "raw_gps", raw_count
+    cursor.execute("SELECT validos FROM telemetria_etl_estado WHERE id=1")
+    legacy_count = int((cursor.fetchone() or {}).get("validos") or 0)
+    return "telemetria_raw", legacy_count
+
+
+def _telemetry_summary(cursor):
+    """Resume el histórico sin escanear cientos de miles de filas en cada carga."""
+    table, report_count = _telemetry_source(cursor)
+    cursor.execute(f"SELECT report_date FROM {table} ORDER BY report_date ASC LIMIT 1")
+    first = cursor.fetchone()
+    cursor.execute(f"SELECT report_date FROM {table} ORDER BY report_date DESC LIMIT 1")
+    last = cursor.fetchone()
+    cursor.execute(
+        f"SELECT COUNT(*) AS vehiculos FROM "
+        f"(SELECT asset_id FROM {table} GROUP BY asset_id) AS flota"
+    )
+    vehicles = int((cursor.fetchone() or {}).get("vehiculos") or 0)
+    cursor.execute(
+        f"""SELECT COALESCE(AVG(speed),0) AS velocidad_promedio,
+        COALESCE(MAX(speed),0) AS velocidad_maxima
+        FROM (SELECT speed FROM {table}
+              ORDER BY report_date DESC LIMIT 30000) AS ventana_reciente"""
+    )
+    speeds = cursor.fetchone() or {}
     return {
-        "status": "ok" if etl_ready and model_ready else "degraded",
-        "servicio": "artisa-docker-demo",
-        "database": {"engine": "MariaDB", "status": "ok"},
-        "componentes": {"etl": "ok" if etl_ready else "unavailable", "mariadb": "ok",
-                        "machine": "ok" if model_ready else "unavailable", "endpoints": "ok"},
-        "etl": ({k: v for k, v in etl.items() if k not in ("id", "rechazos_json")} | {
-            "rechazos": json.loads(etl["rechazos_json"])
-        }) if etl else None,
-        "modelo": ({k: v for k, v in model.items() if k not in ("id", "metricas_json", "coeficientes_json")} | {
-            "metricas": json.loads(model["metricas_json"]), "coeficientes": json.loads(model["coeficientes_json"])
-        }) if model else None,
-        "modelo_telemetria": ({k: v for k, v in telemetry_model.items()
-                                  if k not in ("id", "metricas_json", "zonas_json")} | {
-            "metricas": json.loads(telemetry_model["metricas_json"])
-        }) if telemetry_model else None,
-        "telemetria": ({k: v for k, v in telemetry.items()
-                         if k not in ("id", "origen", "rechazos_json")} | {
-            "rechazos": json.loads(telemetry["rechazos_json"])
-        }) if telemetry else None,
-        "uptime_seconds": round(time.monotonic()-STARTED_AT, 2),
-        "datos": "sinteticos_y_telemetria_real" if telemetry else "sinteticos",
+        "reportes": report_count,
+        "vehiculos": vehicles,
+        "desde": first.get("report_date") if first else None,
+        "hasta": last.get("report_date") if last else None,
+        "velocidad_promedio": speeds.get("velocidad_promedio") or 0,
+        "velocidad_maxima": speeds.get("velocidad_maxima") or 0,
+        "origen": table,
+        "ventana_velocidad": min(report_count, 30000),
     }
 
+
+def pipeline_state(cursor):
+    cursor.execute(
+        "SELECT *, TIMESTAMPDIFF(SECOND,ultima_revision,UTC_TIMESTAMP()) AS hace_segundos "
+        "FROM raw_gps_estado WHERE id=1"
+    )
+    mongo_etl = cursor.fetchone()
+    cursor.execute(
+        "SELECT *, TIMESTAMPDIFF(SECOND,ultima_revision,UTC_TIMESTAMP()) AS hace_segundos "
+        "FROM etl_estado WHERE id=1"
+    )
+    legacy_etl = cursor.fetchone()
+    cursor.execute(
+        "SELECT *, TIMESTAMPDIFF(SECOND,ultima_revision,UTC_TIMESTAMP()) AS hace_segundos "
+        "FROM modelo_estado WHERE id=1"
+    )
+    model = cursor.fetchone()
+    cursor.execute("SELECT * FROM telemetria_etl_estado WHERE id=1")
+    legacy_telemetry = cursor.fetchone()
+    cursor.execute("SELECT * FROM modelo_telemetria_estado WHERE id=1")
+    telemetry_model = cursor.fetchone()
+
+    etl_ready = bool(
+        mongo_etl
+        and mongo_etl.get("estado") != "error"
+        and _seconds(mongo_etl.get("hace_segundos"))
+        < int(os.environ.get("ETL_HEALTH_MAX_AGE_SECONDS", "900"))
+    )
+    model_ready = bool(
+        model
+        and _seconds(model.get("hace_segundos")) < 120
+        and legacy_etl
+        and model.get("dataset_version") == legacy_etl.get("dataset_version")
+    )
+    mongo_has_data = bool(mongo_etl and int(mongo_etl.get("validos") or 0) > 0)
+    telemetry = mongo_etl if mongo_has_data else legacy_telemetry
+
+    legacy_payload = None
+    if legacy_etl:
+        legacy_payload = {
+            key: value
+            for key, value in legacy_etl.items()
+            if key not in ("id", "rechazos_json")
+        } | {"rechazos": _rejections(legacy_etl)}
+
+    mongo_payload = None
+    if mongo_etl:
+        mongo_payload = {
+            key: value
+            for key, value in mongo_etl.items()
+            if key not in ("id", "rechazos_json")
+        } | {"rechazos": _rejections(mongo_etl)}
+
+    model_payload = None
+    if model:
+        model_payload = {
+            key: value
+            for key, value in model.items()
+            if key not in ("id", "metricas_json", "coeficientes_json")
+        } | {
+            "metricas": json.loads(model["metricas_json"]),
+            "coeficientes": json.loads(model["coeficientes_json"]),
+        }
+
+    telemetry_model_payload = None
+    if telemetry_model:
+        telemetry_model_payload = {
+            key: value
+            for key, value in telemetry_model.items()
+            if key not in ("id", "metricas_json", "zonas_json")
+        } | {"metricas": json.loads(telemetry_model["metricas_json"])}
+
+    telemetry_payload = None
+    if telemetry:
+        telemetry_payload = {
+            key: value
+            for key, value in telemetry.items()
+            if key not in ("id", "origen", "rechazos_json", "hace_segundos")
+        } | {"rechazos": _rejections(telemetry)}
+
+    return {
+        "status": "ok" if etl_ready else "degraded",
+        "servicio": "artisa-docker-demo",
+        "database": {"engine": "MariaDB", "status": "ok"},
+        "componentes": {
+            "etl": "ok" if etl_ready else "unavailable",
+            "mariadb": "ok",
+            "machine": "ok" if model_ready else "unavailable",
+            "endpoints": "ok",
+            "front": "ok",
+        },
+        "etl": legacy_payload,
+        "etl_mongodb": mongo_payload,
+        "modelo": model_payload,
+        "modelo_telemetria": telemetry_model_payload,
+        "telemetria": telemetry_payload,
+        "uptime_seconds": round(time.monotonic() - STARTED_AT, 2),
+        "datos": "mongodb_y_telemetria_historica" if mongo_has_data else "telemetria_historica",
+    }
 
 class Handler(LegacyHandler):
     respond = JsonHandler.respond
@@ -116,11 +233,7 @@ class Handler(LegacyHandler):
                         ):
                             summary = TELEMETRY_SUMMARY_CACHE["summary"]
                         else:
-                            cursor.execute("""SELECT COUNT(*) AS reportes,COUNT(DISTINCT asset_id) AS vehiculos,
-                                MIN(report_date) AS desde,MAX(report_date) AS hasta,
-                                COALESCE(AVG(speed),0) AS velocidad_promedio,
-                                COALESCE(MAX(speed),0) AS velocidad_maxima FROM telemetria_raw""")
-                            summary = cursor.fetchone()
+                            summary = _telemetry_summary(cursor)
                             TELEMETRY_SUMMARY_CACHE.update(
                                 expires_at=time.monotonic() + 60, summary=summary
                             )
@@ -132,10 +245,22 @@ class Handler(LegacyHandler):
                             raise ValueError
                     except ValueError:
                         raise RequestError(400, "limite debe ser un entero entre 1 y 200") from None
-                    cursor.execute("""SELECT asset_id,asset_name,report_date,event_name,latitude,longitude,
-                        speed,gps_speed,heading,ignition FROM telemetria_raw
-                        ORDER BY report_date DESC,report_id DESC LIMIT %s""", (limit,))
-                    self.respond(200, {"reportes": cursor.fetchall(), "limite": limit})
+                    telemetry_table, _ = _telemetry_source(cursor)
+                    if telemetry_table == "raw_gps":
+                        cursor.execute("""SELECT asset_id,asset_name,report_date,event_name,
+                            latitude,longitude,speed,NULL AS gps_speed,NULL AS heading,
+                            NULL AS ignition FROM raw_gps
+                            ORDER BY report_date DESC,report_id DESC LIMIT %s""", (limit,))
+                    else:
+                        cursor.execute("""SELECT asset_id,asset_name,report_date,event_name,
+                            latitude,longitude,speed,gps_speed,heading,ignition
+                            FROM telemetria_raw
+                            ORDER BY report_date DESC,report_id DESC LIMIT %s""", (limit,))
+                    self.respond(200, {
+                        "reportes": cursor.fetchall(),
+                        "limite": limit,
+                        "origen": telemetry_table,
+                    })
 
                 elif path == "/api/modelo/telemetria":
                     cursor.execute("SELECT * FROM modelo_telemetria_estado WHERE id=1")

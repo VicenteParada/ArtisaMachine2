@@ -34,6 +34,19 @@ services:
       retries: 12
     restart: unless-stopped
 
+  mongodb:
+    image: mongo:8.0
+    container_name: artisa-mongodb
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
+    restart: unless-stopped
+
   etl:
     build:
       context: .
@@ -41,14 +54,27 @@ services:
     container_name: artisa-etl
     environment:
       <<: *db-environment
-      MONGO_URI: ${MONGO_URI:-mongodb://host.docker.internal:27017}
+      MONGO_URI: ${MONGO_DOCKER_URI:-mongodb://mongodb:27017}
       MONGO_DATABASE: ${MONGO_DATABASE:-gps_data}
       MONGO_COLLECTION: ${MONGO_COLLECTION:-raw_gps}
       MONGO_TIMEOUT_SECONDS: ${MONGO_TIMEOUT_SECONDS:-10}
       TELEMETRY_BATCH_SIZE: ${TELEMETRY_BATCH_SIZE:-2000}
-      TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-300}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    healthcheck: *python-health
+    restart: unless-stopped
+    init: true
+
+  machine:
+    build:
+      context: .
+      dockerfile: modelo_machine/Dockerfile
+    container_name: artisa-machine
+    environment: *db-environment
     depends_on:
       mariadb:
         condition: service_healthy
@@ -65,8 +91,9 @@ services:
       <<: *db-environment
       MAP_DATA_SOURCE: ${MAP_DATA_SOURCE:-telemetry}
       MAP_SIMULATION_FILE: ${MAP_SIMULATION_FILE:-/app/simulacion/mapa_procesado.json}
-      MAP_MAX_REPORTS: ${MAP_MAX_REPORTS:-30000}
+      MAP_MAX_REPORTS: ${MAP_MAX_REPORTS:-10000}
       MAP_REFRESH_SECONDS: ${MAP_REFRESH_SECONDS:-300}
+      ETL_HEALTH_MAX_AGE_SECONDS: ${ETL_HEALTH_MAX_AGE_SECONDS:-900}
     depends_on:
       mariadb:
         condition: service_healthy
@@ -129,3 +156,4 @@ services:
 
 volumes:
   mariadb_data:
+  mongodb_data:

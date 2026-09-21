@@ -442,38 +442,70 @@ def _environment_integer(name, default, minimum, maximum):
     return value
 
 
+def _telemetry_source(cursor):
+    """Elige la telemetría importada por main y usa el histórico anterior como respaldo."""
+    cursor.execute("SELECT validos FROM raw_gps_estado WHERE id=1")
+    raw_count = int((cursor.fetchone() or {}).get("validos") or 0)
+    if raw_count:
+        return "raw_gps", raw_count
+    cursor.execute("SELECT validos FROM telemetria_etl_estado WHERE id=1")
+    legacy_count = int((cursor.fetchone() or {}).get("validos") or 0)
+    return "telemetria_raw", legacy_count
+
+
 def load_telemetry_map(cursor):
     """Lee una ventana indexada y conserva la última posición de toda la flota."""
-    max_reports = _environment_integer("MAP_MAX_REPORTS", 30000, 1000, 100000)
+    max_reports = _environment_integer("MAP_MAX_REPORTS", 10000, 1000, 100000)
     refresh_seconds = _environment_integer("MAP_REFRESH_SECONDS", 300, 30, 3600)
-    cursor.execute(
-        """SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
-        speed,gps_speed,heading,ignition,event_name FROM telemetria_raw
-        ORDER BY report_date DESC,report_id DESC LIMIT %s""",
-        (max_reports,),
-    )
-    rows = cursor.fetchall()
+    telemetry_table, available_report_count = _telemetry_source(cursor)
+
+    if telemetry_table == "raw_gps":
+        cursor.execute(
+            """SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
+            speed,NULL AS gps_speed,NULL AS heading,NULL AS ignition,event_name
+            FROM raw_gps ORDER BY report_date DESC,report_id DESC LIMIT %s""",
+            (max_reports,),
+        )
+        rows = cursor.fetchall()
+        cursor.execute(
+            """SELECT t.report_id,t.asset_id,t.asset_name,t.report_date,t.latitude,t.longitude,
+            t.speed,NULL AS gps_speed,NULL AS heading,NULL AS ignition,t.event_name
+            FROM raw_gps t
+            JOIN (SELECT asset_id,MAX(report_date) AS report_date FROM raw_gps
+                  GROUP BY asset_id) latest
+              ON latest.asset_id=t.asset_id AND latest.report_date=t.report_date
+            ORDER BY t.asset_id,t.report_id"""
+        )
+        current_rows = cursor.fetchall()
+    else:
+        cursor.execute(
+            """SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
+            speed,gps_speed,heading,ignition,event_name FROM telemetria_raw
+            ORDER BY report_date DESC,report_id DESC LIMIT %s""",
+            (max_reports,),
+        )
+        rows = cursor.fetchall()
+        cursor.execute(
+            """SELECT t.report_id,t.asset_id,t.asset_name,t.report_date,t.latitude,t.longitude,
+            t.speed,t.gps_speed,t.heading,t.ignition,t.event_name
+            FROM telemetria_raw t
+            JOIN (SELECT asset_id,MAX(report_date) AS report_date FROM telemetria_raw
+                  GROUP BY asset_id) latest
+              ON latest.asset_id=t.asset_id AND latest.report_date=t.report_date
+            ORDER BY t.asset_id,t.report_id"""
+        )
+        current_rows = cursor.fetchall()
+
+
     if not rows:
         raise MapDataError("MariaDB aun no contiene telemetria para procesar")
 
-    cursor.execute(
-        """SELECT t.report_id,t.asset_id,t.asset_name,t.report_date,t.latitude,t.longitude,
-        t.speed,t.gps_speed,t.heading,t.ignition,t.event_name
-        FROM telemetria_raw t
-        JOIN (SELECT asset_id,MAX(report_date) AS report_date FROM telemetria_raw
-              GROUP BY asset_id) latest
-          ON latest.asset_id=t.asset_id AND latest.report_date=t.report_date
-        ORDER BY t.asset_id,t.report_id"""
-    )
-    current_rows = cursor.fetchall()
-    cursor.execute("SELECT COUNT(*) AS reportes FROM telemetria_raw")
-    totals = cursor.fetchone() or {}
-    available_report_count = int(totals.get("reportes") or len(rows))
     analysis = analyze_telemetry(rows, current_rows=current_rows)
-    return normalize_processed_map(
+    data = normalize_processed_map(
         _telemetry_contract(analysis, available_report_count, refresh_seconds)
     )
-
+    data["metadata"]["telemetry_table"] = telemetry_table
+    return data
 
 @lru_cache(maxsize=1)
 def _simulation_map():

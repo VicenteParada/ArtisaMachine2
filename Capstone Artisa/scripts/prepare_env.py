@@ -18,11 +18,11 @@ else:
             f"MARIADB_PASSWORD={secrets.token_hex(24)}\n"
             f"MARIADB_ROOT_PASSWORD={secrets.token_hex(24)}\n"
             "TELEMETRY_ENABLED=0\n"
-            "MONGO_URI=mongodb://host.docker.internal:27017\n"
+            "MONGO_DOCKER_URI=mongodb://mongodb:27017\n"
             "MONGO_DATABASE=gps_data\n"
             "MONGO_COLLECTION=raw_gps\n"
             "MONGO_TIMEOUT_SECONDS=10\n"
             "TELEMETRY_BATCH_SIZE=2000\n"
-            "TELEMETRY_INTERVAL_SECONDS=30\n"
+            "TELEMETRY_INTERVAL_SECONDS=300\n"
         )
     print("Archivo .env creado con credenciales locales aleatorias.")
