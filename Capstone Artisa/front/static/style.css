@@ -89,6 +89,11 @@
 .access-card>p{margin:0 0 34px;color:#7c8a8d;font-size:15px;line-height:1.5}
 .access-card .landing-button{width:100%;margin-top:15px;text-align:center;justify-content:center}
 .access-card small{display:block;margin-top:20px;text-align:center;color:#a3adae;font-size:10px}
+.login-form{margin-top:22px}
+.login-form label{display:block;margin:13px 0 6px;color:#526568;font-size:11px;font-weight:700}
+.login-form input{width:100%;padding:12px;border:1px solid #dce4e2;border-radius:6px;background:#fbfcfa;color:#172d32}
+.login-form input:focus{outline:2px solid #bdd2b2;outline-offset:1px}
+.login-error{margin:12px 0 0!important;color:#b24c31!important;font-size:11px!important}
 .access-footer{margin:70px auto 0;color:#a6afb0;font-size:11px}
 .landing-glow{position:absolute;border-radius:50%;pointer-events:none}
 .landing-glow-one{width:560px;height:560px;right:-120px;top:-120px;background:radial-gradient(circle,rgba(122,170,32,.42),rgba(122,170,32,0) 68%)}

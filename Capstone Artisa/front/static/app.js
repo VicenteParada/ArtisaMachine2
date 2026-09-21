@@ -3,7 +3,7 @@
 const $ = (id) => document.getElementById(id);
 const landing = document.querySelector(".landing");
 const appShell = document.getElementById("app");
-const enterApp = document.getElementById("enter-app");
+const loginForm = document.getElementById("login-form");
 const format = (value, decimals = 0) => Number(value).toLocaleString("es-CL", {maximumFractionDigits: decimals});
 const formatUtc = (value) => value ? new Intl.DateTimeFormat("es-CL", {
   dateStyle: "short", timeStyle: "medium", timeZone: "UTC"
@@ -21,12 +21,55 @@ function showApp() {
   window.scrollTo(0, 0);
 }
 
-enterApp.addEventListener("click", showApp);
-if (window.location.hash) showApp();
+function token() {
+  return sessionStorage.getItem("artisa_token");
+}
+
+function logout() {
+  sessionStorage.removeItem("artisa_token");
+  landing.hidden = false;
+  appShell.hidden = true;
+}
+
+loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = loginForm.querySelector("button");
+  const error = $("login-error");
+  button.disabled = true;
+  error.hidden = true;
+  try {
+    const response = await fetch("/auth/login", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        username: $("login-user").value,
+        password: $("login-password").value
+      })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "No se pudo iniciar sesión.");
+    sessionStorage.setItem("artisa_token", payload.token);
+    showApp();
+    refresh();
+  } catch (loginError) {
+    error.textContent = loginError.message;
+    error.hidden = false;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+if (token() && window.location.hash) showApp();
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {...options, signal: AbortSignal.timeout(20000)});
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", `Bearer ${token()}`);
+  const response = await fetch(path, {...options, headers, signal: AbortSignal.timeout(20000)});
   const payload = await response.json();
+  if (response.status === 401) {
+    logout();
+    throw new Error("La sesión expiró. Ingresa nuevamente.");
+  }
   if (!response.ok) throw new Error(payload.error || "El servicio está temporalmente ocupado.");
   return payload;
 }
@@ -724,6 +767,7 @@ function renderState(state) {
 }
 
 async function refresh() {
+  if (!token()) return;
   if (refreshing) return;
   refreshing = true; $("refresh").disabled = true;
   try {
@@ -816,5 +860,5 @@ $("monitor-search").addEventListener("input", () => {
 $("reset-map-view").addEventListener("click", resetMapSelection);
 window.addEventListener("hashchange", syncDatasetView);
 syncDatasetView();
-refresh();
+if (token()) refresh();
 setInterval(refresh, 15000);
