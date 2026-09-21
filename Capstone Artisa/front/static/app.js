@@ -76,9 +76,10 @@ async function api(path, options = {}) {
 
 function syncDatasetView() {
   const simulatedHashes = new Set(["#datos-simulados", "#viajes", "#simulador"]);
-  const view = simulatedHashes.has(window.location.hash)
-    ? "simulated"
-    : (window.location.hash === "#mapa-calor" ? "heatmap" : "real");
+  let view = "real";
+  if (simulatedHashes.has(window.location.hash)) view = "simulated";
+  else if (window.location.hash === "#mapa-calor") view = "heatmap";
+  else if (window.location.hash === "#dashboard") view = "dashboard";
   for (const space of document.querySelectorAll("[data-dataset-view]")) {
     space.hidden = space.dataset.datasetView !== view;
   }
@@ -628,6 +629,229 @@ function renderHeatmap(data) {
   $("geo-model-detail").textContent = data.description + " " + (metadata.road_matching || "");
   renderFleetMap(data);
 }
+const DASHBOARD_ZONES = ["Zona Norte", "Zona Centro", "Zona Sur", "Zona Oeste", "Zona Este"];
+
+function routeCenter(route) {
+  const coordinates = route && route.geometry && route.geometry.type === "LineString" ? route.geometry.coordinates : [];
+  let latitude = 0;
+  let longitude = 0;
+  let count = 0;
+  for (const coordinate of coordinates) {
+    const lon = Number(coordinate && coordinate[0]);
+    const lat = Number(coordinate && coordinate[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    latitude += lat;
+    longitude += lon;
+    count += 1;
+  }
+  return count ? {latitude: latitude / count, longitude: longitude / count} : null;
+}
+
+function dashboardBounds(data) {
+  const supplied = data.bounds || {};
+  const bounds = {
+    latitudeMin: Number(supplied.latitude_min),
+    latitudeMax: Number(supplied.latitude_max),
+    longitudeMin: Number(supplied.longitude_min),
+    longitudeMax: Number(supplied.longitude_max)
+  };
+  if (Object.values(bounds).every(Number.isFinite)) return bounds;
+  const points = [];
+  for (const route of data.routes) {
+    const point = routeCenter(route);
+    if (point) points.push(point);
+  }
+  for (const stop of data.stops) {
+    const latitude = Number(stop.latitude);
+    const longitude = Number(stop.longitude);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) points.push({latitude, longitude});
+  }
+  const latitudes = points.map((point) => point.latitude);
+  const longitudes = points.map((point) => point.longitude);
+  return {
+    latitudeMin: Math.min(...latitudes, -34),
+    latitudeMax: Math.max(...latitudes, -33),
+    longitudeMin: Math.min(...longitudes, -71),
+    longitudeMax: Math.max(...longitudes, -70)
+  };
+}
+
+function dashboardZone(latitude, longitude, bounds) {
+  const latitudeCenter = (bounds.latitudeMin + bounds.latitudeMax) / 2;
+  const longitudeCenter = (bounds.longitudeMin + bounds.longitudeMax) / 2;
+  const latitudeRadius = Math.max((bounds.latitudeMax - bounds.latitudeMin) / 2, 0.0001);
+  const longitudeRadius = Math.max((bounds.longitudeMax - bounds.longitudeMin) / 2, 0.0001);
+  const northing = (Number(latitude) - latitudeCenter) / latitudeRadius;
+  const easting = (Number(longitude) - longitudeCenter) / longitudeRadius;
+  if (Math.abs(northing) <= 0.26 && Math.abs(easting) <= 0.26) return "Zona Centro";
+  if (Math.abs(northing) >= Math.abs(easting)) return northing >= 0 ? "Zona Norte" : "Zona Sur";
+  return easting < 0 ? "Zona Oeste" : "Zona Este";
+}
+
+function zoneAccumulator() {
+  return new Map(DASHBOARD_ZONES.map((zone) => [zone, {label: zone, value: 0, count: 0, vehicles: 0}]));
+}
+
+function renderDashboardBars(containerId, items, defaultColor) {
+  const container = $(containerId);
+  if (!container) return;
+  container.replaceChildren();
+  const maximum = Math.max(1, ...items.map((item) => Number(item.value || 0)));
+  for (const item of items) {
+    const row = document.createElement("div");
+    row.className = "dashboard-bar-row";
+    const heading = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = item.label;
+    const value = document.createElement("strong");
+    value.textContent = format(item.value || 0);
+    heading.append(label, value);
+    const track = document.createElement("div");
+    track.className = "dashboard-bar-track";
+    const fill = document.createElement("i");
+    const percentage = Number(item.value || 0) > 0 ? Math.max(3, Number(item.value || 0) / maximum * 100) : 0;
+    fill.style.width = percentage + "%";
+    fill.style.backgroundColor = item.color || defaultColor;
+    track.append(fill);
+    const detail = document.createElement("small");
+    detail.textContent = item.detail || "Sin actividad en este bloque";
+    row.append(heading, track, detail);
+    container.append(row);
+  }
+  if (!items.length) {
+    const empty = document.createElement("span");
+    empty.className = "chart-empty";
+    empty.textContent = "No hay datos suficientes para construir este gráfico.";
+    container.append(empty);
+  }
+}
+
+function renderDashboardDonut(containerId, items, centerLabel) {
+  const container = $(containerId);
+  if (!container) return;
+  container.replaceChildren();
+  const total = items.reduce((sum, item) => sum + Number(item.value || 0), 0);
+  let angle = 0;
+  const segments = [];
+  for (const item of items) {
+    const next = total ? angle + Number(item.value || 0) / total * 360 : angle;
+    segments.push(`${item.color} ${angle}deg ${next}deg`);
+    angle = next;
+  }
+  const chart = document.createElement("div");
+  chart.className = "dashboard-donut";
+  chart.style.background = total ? `conic-gradient(${segments.join(",")})` : "#e6ece8";
+  const center = document.createElement("div");
+  const number = document.createElement("strong");
+  number.textContent = format(total);
+  const label = document.createElement("span");
+  label.textContent = centerLabel;
+  center.append(number, label);
+  chart.append(center);
+  const legend = document.createElement("ul");
+  legend.className = "dashboard-donut-legend";
+  for (const item of items) {
+    const row = document.createElement("li");
+    const swatch = document.createElement("i");
+    swatch.style.backgroundColor = item.color;
+    const name = document.createElement("span");
+    name.textContent = item.label;
+    const value = document.createElement("strong");
+    const percentage = total ? Math.round(Number(item.value || 0) / total * 100) : 0;
+    value.textContent = `${format(item.value || 0)} · ${percentage}%`;
+    row.append(swatch, name, value);
+    legend.append(row);
+  }
+  container.append(chart, legend);
+}
+
+function renderDashboard(data) {
+  const summary = data.summary || {};
+  $("dashboard-reports").textContent = format(summary.available_report_count || 0);
+  $("dashboard-trips").textContent = format(summary.trip_count || data.trips.length);
+  $("dashboard-routes").textContent = format(summary.route_count || data.routes.length);
+  $("dashboard-stop-events").textContent = format(summary.stop_event_count || 0);
+  $("dashboard-snapshot").textContent = "Corte " + formatDataDay(data.snapshotDate);
+  $("dashboard-snapshot").className = "status simulation";
+
+  const bounds = dashboardBounds(data);
+  const routeZones = zoneAccumulator();
+  for (const route of data.routes) {
+    const point = routeCenter(route);
+    if (!point) continue;
+    const zone = routeZones.get(dashboardZone(point.latitude, point.longitude, bounds));
+    const properties = routeProperties(route);
+    zone.value += Number(properties.usage_count || 0);
+    zone.count += 1;
+    zone.vehicles += Number(properties.unique_vehicle_count || 0);
+  }
+  const routeZoneItems = [...routeZones.values()]
+    .map((zone) => ({...zone, detail: `${format(zone.count)} rutas · ${format(zone.vehicles)} participaciones de vehículos`}))
+    .sort((first, second) => second.value - first.value);
+  renderDashboardBars("dashboard-route-zones", routeZoneItems, "#246c55");
+
+  const stopZones = zoneAccumulator();
+  for (const stop of data.stops) {
+    const latitude = Number(stop.latitude);
+    const longitude = Number(stop.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+    const zone = stopZones.get(dashboardZone(latitude, longitude, bounds));
+    zone.value += Number(stop.stop_event_count || 0);
+    zone.count += 1;
+    zone.vehicles += Number(stop.vehicle_count || 0);
+  }
+  const stopZoneItems = [...stopZones.values()]
+    .map((zone) => ({...zone, detail: `${format(zone.count)} zonas de parada · ${format(zone.vehicles)} participaciones de vehículos`}))
+    .sort((first, second) => second.value - first.value);
+  renderDashboardBars("dashboard-stop-zones", stopZoneItems, "#6f42a6");
+
+  const routeLevels = {HIGH: 0, MEDIUM: 0, LOW: 0};
+  for (const route of data.routes) {
+    const level = routeProperties(route).usage_level;
+    if (Object.hasOwn(routeLevels, level)) routeLevels[level] += 1;
+  }
+  renderDashboardDonut("dashboard-route-levels", [
+    {label: "Más usadas", value: routeLevels.HIGH, color: "#14532d"},
+    {label: "Uso medio", value: routeLevels.MEDIUM, color: "#f97316"},
+    {label: "Poco usadas", value: routeLevels.LOW, color: "#dc2626"}
+  ], "rutas");
+
+  const fleet = {moving: 0, stopped: 0, off: 0};
+  for (const vehicle of data.vehicles) fleet[vehicleStatus(vehicle).className] += 1;
+  renderDashboardDonut("dashboard-fleet-status", [
+    {label: "En movimiento", value: fleet.moving, color: "#58a566"},
+    {label: "Detenidos", value: fleet.stopped, color: "#e88836"},
+    {label: "Apagados", value: fleet.off, color: "#708083"}
+  ], "vehículos");
+
+  const topRoutes = [...data.routes]
+    .sort((first, second) => Number(routeProperties(second).usage_count || 0) - Number(routeProperties(first).usage_count || 0))
+    .slice(0, 8)
+    .map((route) => {
+      const properties = routeProperties(route);
+      return {
+        label: properties.label || properties.route_id,
+        value: Number(properties.usage_count || 0),
+        color: properties.color,
+        detail: `${properties.route_id} · ${format(properties.unique_vehicle_count || 0)} vehículos · ${properties.usage_label || properties.usage_level}`
+      };
+    });
+  renderDashboardBars("dashboard-top-routes", topRoutes, "#246c55");
+
+  const mostRouteZone = routeZoneItems[0];
+  $("dashboard-most-route-zone").textContent = mostRouteZone ? mostRouteZone.label : "Sin datos";
+  $("dashboard-most-route-zone-detail").textContent = mostRouteZone
+    ? `${format(mostRouteZone.value)} recorridos en ${format(mostRouteZone.count)} rutas`
+    : "No hay rutas suficientes en el bloque.";
+  const mostStopZone = stopZoneItems[0];
+  $("dashboard-most-stop-zone").textContent = mostStopZone ? mostStopZone.label : "Sin datos";
+  $("dashboard-most-stop-zone-detail").textContent = mostStopZone
+    ? `${format(mostStopZone.value)} detenciones en ${format(mostStopZone.count)} zonas detectadas`
+    : "No hay paradas suficientes en el bloque.";
+  $("dashboard-method").textContent =
+    "Las coordenadas se dividen en cinco zonas relativas al centro del área observada: norte, centro, sur, oeste y este. " +
+    "Cada ruta conserva una sola clasificación y se cuenta en la zona de su centro geométrico. Actualización automática con el mismo bloque del mapa.";
+}
 function renderTrips() {
   const query = $("search").value.trim().toLocaleLowerCase("es");
   const filtered = trips.filter((row) => `${row.id} ${row.origen} ${row.destino}`.toLocaleLowerCase("es").includes(query));
@@ -784,6 +1008,7 @@ async function refresh() {
     renderState(state);
     renderTelemetry(telemetrySummary, telemetryDataset, state);
     renderHeatmap(mapData);
+    renderDashboard(mapData);
     $("trip-count").textContent = format(summary.viajes);
     $("prediction-count").textContent = format(summary.predicciones);
     $("destination-count").textContent = format(summary.destinos);

@@ -16,7 +16,8 @@ FILES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/app.js": ("app.js", "text/javascript; charset=utf-8"),
          "/map-data.js": ("map-data.js", "text/javascript; charset=utf-8"),
          "/style.css": ("style.css", "text/css; charset=utf-8"),
-         "/artisa-logo.png": ("artisa-logo.png", "image/png")}
+         "/artisa-logo.png": ("artisa-logo.png", "image/png"),
+         "/artisa-fleet-cover.jpg": ("artisa-fleet-cover.jpg", "image/jpeg")}
 
 
 class Handler(BaseHTTPRequestHandler):

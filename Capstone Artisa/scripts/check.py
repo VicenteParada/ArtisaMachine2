@@ -16,6 +16,7 @@ parser.add_argument("url", nargs="?", default="http://127.0.0.1:8080")
 parser.add_argument("--persistence", action="store_true", help="Recrea MariaDB y verifica que el registro persista")
 args = parser.parse_args()
 base_url = args.url.rstrip("/")
+auth_token = None
 
 
 def request(path, method="GET", data=None, expected=200):
@@ -23,6 +24,8 @@ def request(path, method="GET", data=None, expected=200):
     req = Request(f"{base_url}{path}", data=body, method=method)
     if body is not None:
         req.add_header("Content-Type", "application/json")
+    if auth_token:
+        req.add_header("Authorization", f"Bearer {auth_token}")
     try:
         response = urlopen(req, timeout=8)
     except HTTPError as error:
@@ -50,6 +53,12 @@ def wait_healthy():
 
 
 wait_healthy()
+auth_token = request(
+    "/auth/login",
+    "POST",
+    {"username": "healthcheck", "password": "local-check"},
+)["token"]
+assert auth_token, "El servicio de autenticacion no entrego un token"
 check_pipeline.BASE = base_url
 check_pipeline.main()
 assert request("/ruta-inexistente", expected=404)["error"] == "Ruta no encontrada"

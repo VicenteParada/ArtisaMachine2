@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Artisa · Transporte inteligente</title>
+  <link rel="icon" href="/artisa-logo.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="/style.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
@@ -49,6 +50,7 @@
     <div class="nav-label">ESPACIO DE TRABAJO</div>
     <nav aria-label="Navegación principal">
       <a id="overview-link" href="#flujo"><span>▦</span> Arquitectura</a>
+      <a data-dataset-link="dashboard" href="#dashboard"><span>▥</span> Dashboard</a>
       <a data-dataset-link="real" href="#datos-reales"><span>⌖</span> Datos reales</a>
       <a data-dataset-link="heatmap" href="#mapa-calor"><span>◉</span> Mapa de calor</a>
       <a data-dataset-link="simulated" href="#datos-simulados"><span>◇</span> Datos simulados</a>
@@ -79,12 +81,59 @@
       </div>
       <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada 15 s</span></div>
     </section>
-    <nav class="dataset-tabs" aria-label="Carpetas de datos">
+    <nav class="dataset-tabs" aria-label="Espacios de análisis">
+      <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores y gráficos operativos</small></span></a>
       <a class="dataset-tab" data-dataset-tab="real" href="#datos-reales"><span class="dataset-icon">⌖</span><span><strong>Datos reales</strong><small>API de origen → ETL → MariaDB</small></span></a>
       <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de calor</strong><small>Rutas completas y paradas</small></span></a>
       <a class="dataset-tab" data-dataset-tab="simulated" href="#datos-simulados"><span class="dataset-icon">◇</span><span><strong>Datos simulados</strong><small>Viajes de demostración → Machine Learning</small></span></a>
     </nav>
-    <div id="datos-reales" class="dataset-space" data-dataset-view="real">
+    <div id="dashboard" class="dataset-space" data-dataset-view="dashboard" hidden>
+      <section class="panel dashboard-panel">
+        <div class="section-top">
+          <div><span class="eyebrow">02 / PANEL OPERATIVO</span><h2>Dashboard de rutas y flota</h2></div>
+          <span id="dashboard-snapshot" class="status neutral">Preparando indicadores…</span>
+        </div>
+        <p class="telemetry-intro">Resumen visual de la telemetría procesada. Los gráficos se actualizan con el mismo bloque de datos del mapa y permiten identificar las zonas con mayor actividad, concentración de paradas y estado de la flota.</p>
+        <div class="dashboard-kpis" aria-label="Indicadores principales del dashboard">
+          <article><span>Reportes disponibles</span><strong id="dashboard-reports">—</strong><small>Telemetría conservada en MariaDB</small></article>
+          <article><span>Recorridos analizados</span><strong id="dashboard-trips">—</strong><small>Viajes dentro de la ventana procesada</small></article>
+          <article><span>Rutas identificadas</span><strong id="dashboard-routes">—</strong><small>Agrupaciones geoespaciales completas</small></article>
+          <article><span>Eventos de detención</span><strong id="dashboard-stop-events">—</strong><small>Detenciones detectadas en las zonas</small></article>
+        </div>
+        <div class="dashboard-grid">
+          <article class="dashboard-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">ACTIVIDAD GEOGRÁFICA</span><h3>Uso de rutas por zona</h3></div><span class="chart-unit">Recorridos</span></div>
+            <p>La actividad de cada ruta se asigna a la zona donde se encuentra el centro de su geometría.</p>
+            <div id="dashboard-route-zones" class="dashboard-bars" aria-label="Gráfico de uso de rutas por zona"><span class="chart-empty">Cargando zonas…</span></div>
+          </article>
+          <article class="dashboard-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">DETENCIONES</span><h3>Paradas por zona</h3></div><span class="chart-unit">Eventos</span></div>
+            <p>Compara la cantidad de detenciones detectadas y los vehículos asociados a cada zona.</p>
+            <div id="dashboard-stop-zones" class="dashboard-bars stops" aria-label="Gráfico de paradas por zona"><span class="chart-empty">Cargando paradas…</span></div>
+          </article>
+          <article class="dashboard-card dashboard-donut-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">CLASIFICACIÓN</span><h3>Nivel de uso de rutas</h3></div></div>
+            <p>Verde para las más usadas, naranja para uso medio y rojo para poco uso.</p>
+            <div id="dashboard-route-levels" class="dashboard-donut-wrap" aria-label="Distribución de rutas por nivel de uso"></div>
+          </article>
+          <article class="dashboard-card dashboard-donut-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">FLOTA ACTUAL</span><h3>Estado de los vehículos</h3></div></div>
+            <p>Clasificación basada en velocidad e ignición de la última posición disponible.</p>
+            <div id="dashboard-fleet-status" class="dashboard-donut-wrap" aria-label="Distribución del estado de la flota"></div>
+          </article>
+          <article class="dashboard-card dashboard-wide">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">RANKING OPERATIVO</span><h3>Rutas con mayor actividad</h3></div><span class="chart-unit">Top 8</span></div>
+            <p>Recorridos agrupados por ruta completa; el color conserva su clasificación global.</p>
+            <div id="dashboard-top-routes" class="dashboard-bars routes" aria-label="Ranking de rutas con mayor actividad"><span class="chart-empty">Calculando ranking…</span></div>
+          </article>
+          <aside class="dashboard-highlights" aria-label="Hallazgos destacados">
+            <article><span>ZONA CON MAYOR USO</span><strong id="dashboard-most-route-zone">—</strong><small id="dashboard-most-route-zone-detail">Calculando recorridos…</small></article>
+            <article><span>ZONA CON MÁS PARADAS</span><strong id="dashboard-most-stop-zone">—</strong><small id="dashboard-most-stop-zone-detail">Calculando detenciones…</small></article>
+          </aside>
+        </div>
+        <div class="dashboard-method"><strong>Cómo se definen las zonas</strong><span id="dashboard-method">Se calculan automáticamente desde las coordenadas del bloque procesado.</span></div>
+      </section>
+    </div>    <div id="datos-reales" class="dataset-space" data-dataset-view="real">
       <section id="telemetria" class="panel telemetry-panel">
         <div class="section-top"><div><span class="eyebrow">02 / DATOS REALES</span><h2>Telemetría importada</h2></div><span id="telemetry-status" class="status neutral">Consultando ETL…</span></div>
         <p class="telemetry-intro">Muestra de los reportes extraídos desde la API de origen y guardados en MariaDB. Los nombres y documentos de conductores no se publican en esta vista.</p>

@@ -7,11 +7,15 @@ from urllib.request import Request, urlopen
 
 
 BASE = "http://127.0.0.1:8080"
+AUTH_TOKEN = None
 
 
 def request(path, data=None, status=200):
     body = None if data is None else json.dumps(data).encode()
-    req = Request(BASE+path, data=body, headers={"Content-Type": "application/json"})
+    headers = {"Content-Type": "application/json"}
+    if AUTH_TOKEN:
+        headers["Authorization"] = f"Bearer {AUTH_TOKEN}"
+    req = Request(BASE+path, data=body, headers=headers)
     try:
         response = urlopen(req, timeout=10)
     except HTTPError as error:
@@ -19,6 +23,16 @@ def request(path, data=None, status=200):
     with response:
         assert response.code == status, f"{path}: esperado {status}, recibido {response.code}"
         return json.load(response)
+
+
+def authenticate():
+    global AUTH_TOKEN
+    login = request(
+        "/auth/login",
+        {"username": "healthcheck", "password": "local-check"},
+    )
+    AUTH_TOKEN = login["token"]
+    assert AUTH_TOKEN, "El servicio de autenticacion no entrego un token"
 
 
 def predict(distance):
@@ -38,6 +52,7 @@ def predict(distance):
 
 
 def main():
+    authenticate()
     with urlopen(BASE, timeout=10) as response:
         assert response.headers.get_content_type() == "text/html"
         page = response.read().decode("utf-8")
@@ -69,11 +84,19 @@ def main():
         assert telemetry_summary["desde"] and telemetry_summary["hasta"]
         assert telemetry_rows
         assert all(row["asset_id"] and row["report_date"] for row in telemetry_rows)
-        heatmap = request("/api/telemetria/mapa-calor")
-        assert heatmap["resumen"]["reportes"] > 0
-        assert heatmap["resumen"]["vehiculos"] > 0
-        assert heatmap["limites"] and heatmap["celdas"]
-        assert heatmap["metodo"]["descripcion_parada"]
+        map_data = request("/api/telemetria/mapa-calor")
+        map_summary = map_data["summary"]
+        assert map_data["schema_version"]
+        assert 0 < map_summary["available_report_count"] <= telemetry_summary["reportes"]
+        assert map_summary["window_report_count"] > 0
+        assert map_summary["route_count"] == len(map_data["routes"])
+        assert map_summary["trip_count"] == len(map_data["trips"])
+        assert map_summary["stop_count"] == len(map_data["stops"])
+        assert map_summary["vehicle_count"] == len(map_data["vehicles"])
+        assert sum(map_summary["route_categories"].values()) == map_summary["route_count"]
+        assert map_data["bounds"] and map_data["routes"] and map_data["trips"]
+        assert all(route["usage_level"] in {"HIGH", "MEDIUM", "LOW"} for route in map_data["routes"])
+        assert map_data["metadata"]["geometry_source"] == "GPS_TRACE_FILTERED"
     request("/api/viajes?limite=incorrecto", status=400)
     request("/api/telemetria?limite=incorrecto", status=400)
     request("/api/ruta-inexistente", status=404)
@@ -88,7 +111,10 @@ def main():
     print("OK: solicitud creada por endpoints, procesada por Machine y resultado persistido consultado desde el frontend.")
     print(f"OK: la página muestra {telemetry_summary['reportes']} reportes reales de {telemetry_summary['vehiculos']} vehículos.")
     if telemetry_summary["reportes"]:
-        print(f"OK: mapa de calor generado con {heatmap['resumen']['tramos']} tramos y {heatmap['resumen']['paradas']} paradas detectadas.")
+        print(
+            f"OK: mapa generado con {map_summary['route_count']} rutas, "
+            f"{map_summary['trip_count']} viajes y {map_summary['stop_count']} paradas."
+        )
     print("OK: validacion de entradas, archivos del frontend y respuestas HTTP.")
 
 
