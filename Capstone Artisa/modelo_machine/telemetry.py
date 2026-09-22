@@ -1,9 +1,13 @@
-"""Modelo no supervisado para descubrir zonas frecuentes en telemetría GPS."""
+"""raw_gps -> clustering DBSCAN -> modelo_telemetria_estado."""
 
+import json
+import os
 from collections import defaultdict
 
 import numpy as np
 from sklearn.cluster import DBSCAN
+
+from common.db import connect_db
 
 
 EARTH_RADIUS_KM = 6371.0088
@@ -52,3 +56,67 @@ def train_hotspots(rows, radius_km=0.8, min_samples=5):
         "alcance": "Clustering geoespacial no supervisado; identifica zonas frecuentes, no rutas etiquetadas.",
     }
     return metrics, zones[:250]
+
+
+def last_trained_version():
+    with connect_db() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT dataset_version FROM modelo_telemetria_estado WHERE id=1")
+        row = cursor.fetchone()
+        return row["dataset_version"] if row else None
+
+
+def cycle(previous_version, radius_km, min_samples, max_rows):
+    """Reentrena solo cuando el cursor del ETL de telemetria avanzo."""
+    with connect_db(autocommit=False) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT ultimo_mongo_id, validos FROM raw_gps_estado WHERE id=1")
+        state = cursor.fetchone()
+        current_version = state["ultimo_mongo_id"] if state else None
+        if not current_version:
+            connection.commit()
+            raise ValueError("Esperando la primera carga del ETL de telemetria")
+        if current_version == previous_version:
+            cursor.execute("UPDATE modelo_telemetria_estado SET ultima_revision=UTC_TIMESTAMP(6) WHERE id=1")
+            connection.commit()
+            return previous_version
+        cursor.execute(
+            "SELECT asset_id, latitude, longitude, speed FROM raw_gps "
+            "ORDER BY report_date DESC LIMIT %s",
+            (max_rows,),
+        )
+        rows = cursor.fetchall()
+        connection.commit()
+
+    metrics, zones = train_hotspots(rows, radius_km=radius_km, min_samples=min_samples)
+    with connect_db(autocommit=False) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            """INSERT INTO modelo_telemetria_estado
+            (id,dataset_version,algoritmo,metricas_json,zonas_json,entrenado_en,ultima_revision)
+            VALUES (1,%s,'DBSCAN',%s,%s,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))
+            ON DUPLICATE KEY UPDATE dataset_version=VALUES(dataset_version),
+            algoritmo=VALUES(algoritmo),metricas_json=VALUES(metricas_json),
+            zonas_json=VALUES(zonas_json),entrenado_en=VALUES(entrenado_en),
+            ultima_revision=VALUES(ultima_revision)""",
+            (current_version, json.dumps(metrics, ensure_ascii=False), json.dumps(zones, ensure_ascii=False)),
+        )
+        connection.commit()
+    print(
+        f"Machine: {metrics['zonas_detectadas']} zonas detectadas de {metrics['reportes_entrenamiento']} "
+        f"reportes ({metrics['cobertura_pct']}% cobertura)",
+        flush=True,
+    )
+    return current_version
+
+
+class ModelConfig:
+    def __init__(self, radius_km, min_samples, max_rows):
+        self.radius_km = radius_km
+        self.min_samples = min_samples
+        self.max_rows = max_rows
+
+    @classmethod
+    def from_env(cls):
+        return cls(
+            radius_km=float(os.environ.get("TELEMETRY_MODEL_RADIUS_KM", "0.8")),
+            min_samples=int(os.environ.get("TELEMETRY_MODEL_MIN_SAMPLES", "5")),
+            max_rows=int(os.environ.get("TELEMETRY_MODEL_MAX_ROWS", "20000")),
+        )

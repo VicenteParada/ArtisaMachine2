@@ -56,6 +56,24 @@ services:
     restart: unless-stopped
     init: true
 
+  machine:
+    build:
+      context: .
+      dockerfile: modelo_machine/Dockerfile
+    container_name: artisa-machine
+    environment:
+      <<: *db-environment
+      TELEMETRY_MODEL_MAX_ROWS: ${TELEMETRY_MODEL_MAX_ROWS:-20000}
+      TELEMETRY_MODEL_RADIUS_KM: ${TELEMETRY_MODEL_RADIUS_KM:-0.8}
+      TELEMETRY_MODEL_MIN_SAMPLES: ${TELEMETRY_MODEL_MIN_SAMPLES:-5}
+      TELEMETRY_MODEL_INTERVAL_SECONDS: ${TELEMETRY_MODEL_INTERVAL_SECONDS:-30}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck: *python-health
+    restart: unless-stopped
+    init: true
+
   endpoints:
     build:
       context: .
@@ -82,6 +100,47 @@ services:
       endpoints:
         condition: service_healthy
     healthcheck: *python-health
+    restart: unless-stopped
+    init: true
+
+  # auth y nginx: agregados por angelo-dev, todavia no forman parte del
+  # camino en vivo (front sigue siendo la entrada real en 8080). Quedan
+  # disponibles para levantar y probar aparte hasta que se decida integrarlos.
+  auth:
+    build:
+      context: .
+      dockerfile: auth/Dockerfile
+    container_name: artisa-auth
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-this-secret}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      start_period: 5s
+      retries: 12
+    restart: unless-stopped
+    init: true
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    container_name: artisa-nginx
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      auth:
+        condition: service_healthy
+      front:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/auth/health"]
+      interval: 5s
+      timeout: 5s
+      start_period: 5s
+      retries: 12
     restart: unless-stopped
     init: true
 
