@@ -15,6 +15,12 @@
 !endpoints/**
 !front/
 !front/**
+!auth/
+!auth/**
+!nginx/
+!nginx/**
+!simulacion/
+!simulacion/**
 **/__pycache__/
 **/*.pyc
 **/.env
