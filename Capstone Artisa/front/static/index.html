@@ -3,18 +3,54 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Artisa · Flujo de datos</title>
+  <title>Artisa · Transporte inteligente</title>
+  <link rel="icon" href="/artisa-logo.png">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="/style.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+  <script src="/map-data.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
+  <section class="landing" aria-labelledby="landing-title">
+    <div class="landing-visual">
+      <div class="landing-glow landing-glow-one" aria-hidden="true"></div>
+      <div class="landing-glow landing-glow-two" aria-hidden="true"></div>
+      <a class="landing-brand" href="/" aria-label="Artisa, inicio">
+        <img src="/artisa-logo.png?v=2" alt="Artisa Transportes">
+      </a>
+      <div class="landing-copy">
+        <span class="landing-pill">SISTEMA DE GESTIÓN</span>
+        <h1 id="landing-title">Kilómetros de<br><em>confianza.</em></h1>
+        <p>Plataforma interna para visualizar, analizar y gestionar la operación de Transportes Artisa.</p>
+      </div>
+      <div class="landing-footer"><span>ARTISA</span><span>Datos que conectan cada viaje.</span></div>
+    </div>
+    <div class="landing-access">
+      <div class="access-card">
+        <span class="access-kicker">TRANSPORTES ARTISA</span>
+        <h2>Bienvenido</h2>
+        <p>Ingresa al panel de control para continuar</p>
+        <form id="login-form" class="login-form">
+          <label for="login-user">Usuario</label>
+          <input id="login-user" name="username" autocomplete="username" required>
+          <label for="login-password">Contraseña</label>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+          <button class="landing-button" type="submit">Ingresar al sistema <span aria-hidden="true">→</span></button>
+          <p id="login-error" class="login-error" role="alert" hidden></p>
+        </form>
+        <small>Acceso interno · Gestión de flota y telemetría<br>Modo desarrollo: cualquier credencial no vacía</small>
+      </div>
+      <footer class="access-footer">© 2026 Transportes Artisa</footer>
+    </div>
+  </section>
+  <div id="app" hidden>
   <aside class="sidebar">
-    <a class="brand" href="/"><span class="brand-mark">A</span><span>ARTISA<small>LABORATORIO DE DATOS</small></span></a>
+    <a class="brand" href="/" aria-label="Artisa, inicio">    <img src="/artisa-logo.png?v=2" alt="Artisa Transportes"></a>
     <div class="nav-label">ESPACIO DE TRABAJO</div>
     <nav aria-label="Navegación principal">
       <a id="overview-link" href="#flujo"><span>▦</span> Arquitectura</a>
+      <a data-dataset-link="dashboard" href="#dashboard"><span>▥</span> Dashboard</a>
       <a data-dataset-link="real" href="#datos-reales"><span>⌖</span> Datos reales</a>
       <a data-dataset-link="heatmap" href="#mapa-calor"><span>◉</span> Mapa de calor</a>
       <a data-dataset-link="simulated" href="#datos-simulados"><span>◇</span> Datos simulados</a>
@@ -45,12 +81,59 @@
       </div>
       <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada 15 s</span></div>
     </section>
-    <nav class="dataset-tabs" aria-label="Carpetas de datos">
+    <nav class="dataset-tabs" aria-label="Espacios de análisis">
+      <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores y gráficos operativos</small></span></a>
       <a class="dataset-tab" data-dataset-tab="real" href="#datos-reales"><span class="dataset-icon">⌖</span><span><strong>Datos reales</strong><small>API de origen → ETL → MariaDB</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de calor</strong><small>Tramos recorridos y paradas</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de calor</strong><small>Rutas completas y paradas</small></span></a>
       <a class="dataset-tab" data-dataset-tab="simulated" href="#datos-simulados"><span class="dataset-icon">◇</span><span><strong>Datos simulados</strong><small>Viajes de demostración → Machine Learning</small></span></a>
     </nav>
-    <div id="datos-reales" class="dataset-space" data-dataset-view="real">
+    <div id="dashboard" class="dataset-space" data-dataset-view="dashboard" hidden>
+      <section class="panel dashboard-panel">
+        <div class="section-top">
+          <div><span class="eyebrow">02 / PANEL OPERATIVO</span><h2>Dashboard de rutas y flota</h2></div>
+          <span id="dashboard-snapshot" class="status neutral">Preparando indicadores…</span>
+        </div>
+        <p class="telemetry-intro">Resumen visual de la telemetría procesada. Los gráficos se actualizan con el mismo bloque de datos del mapa y permiten identificar las zonas con mayor actividad, concentración de paradas y estado de la flota.</p>
+        <div class="dashboard-kpis" aria-label="Indicadores principales del dashboard">
+          <article><span>Reportes disponibles</span><strong id="dashboard-reports">—</strong><small>Telemetría conservada en MariaDB</small></article>
+          <article><span>Recorridos analizados</span><strong id="dashboard-trips">—</strong><small>Viajes dentro de la ventana procesada</small></article>
+          <article><span>Rutas identificadas</span><strong id="dashboard-routes">—</strong><small>Agrupaciones geoespaciales completas</small></article>
+          <article><span>Eventos de detención</span><strong id="dashboard-stop-events">—</strong><small>Detenciones detectadas en las zonas</small></article>
+        </div>
+        <div class="dashboard-grid">
+          <article class="dashboard-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">ACTIVIDAD GEOGRÁFICA</span><h3>Uso de rutas por zona</h3></div><span class="chart-unit">Recorridos</span></div>
+            <p>La actividad de cada ruta se asigna a la zona donde se encuentra el centro de su geometría.</p>
+            <div id="dashboard-route-zones" class="dashboard-bars" aria-label="Gráfico de uso de rutas por zona"><span class="chart-empty">Cargando zonas…</span></div>
+          </article>
+          <article class="dashboard-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">DETENCIONES</span><h3>Paradas por zona</h3></div><span class="chart-unit">Eventos</span></div>
+            <p>Compara la cantidad de detenciones detectadas y los vehículos asociados a cada zona.</p>
+            <div id="dashboard-stop-zones" class="dashboard-bars stops" aria-label="Gráfico de paradas por zona"><span class="chart-empty">Cargando paradas…</span></div>
+          </article>
+          <article class="dashboard-card dashboard-donut-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">CLASIFICACIÓN</span><h3>Nivel de uso de rutas</h3></div></div>
+            <p>Verde para las más usadas, naranja para uso medio y rojo para poco uso.</p>
+            <div id="dashboard-route-levels" class="dashboard-donut-wrap" aria-label="Distribución de rutas por nivel de uso"></div>
+          </article>
+          <article class="dashboard-card dashboard-donut-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">FLOTA ACTUAL</span><h3>Estado de los vehículos</h3></div></div>
+            <p>Clasificación basada en velocidad e ignición de la última posición disponible.</p>
+            <div id="dashboard-fleet-status" class="dashboard-donut-wrap" aria-label="Distribución del estado de la flota"></div>
+          </article>
+          <article class="dashboard-card dashboard-wide">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">RANKING OPERATIVO</span><h3>Rutas con mayor actividad</h3></div><span class="chart-unit">Top 8</span></div>
+            <p>Recorridos agrupados por ruta completa; el color conserva su clasificación global.</p>
+            <div id="dashboard-top-routes" class="dashboard-bars routes" aria-label="Ranking de rutas con mayor actividad"><span class="chart-empty">Calculando ranking…</span></div>
+          </article>
+          <aside class="dashboard-highlights" aria-label="Hallazgos destacados">
+            <article><span>ZONA CON MAYOR USO</span><strong id="dashboard-most-route-zone">—</strong><small id="dashboard-most-route-zone-detail">Calculando recorridos…</small></article>
+            <article><span>ZONA CON MÁS PARADAS</span><strong id="dashboard-most-stop-zone">—</strong><small id="dashboard-most-stop-zone-detail">Calculando detenciones…</small></article>
+          </aside>
+        </div>
+        <div class="dashboard-method"><strong>Cómo se definen las zonas</strong><span id="dashboard-method">Se calculan automáticamente desde las coordenadas del bloque procesado.</span></div>
+      </section>
+    </div>    <div id="datos-reales" class="dataset-space" data-dataset-view="real">
       <section id="telemetria" class="panel telemetry-panel">
         <div class="section-top"><div><span class="eyebrow">02 / DATOS REALES</span><h2>Telemetría importada</h2></div><span id="telemetry-status" class="status neutral">Consultando ETL…</span></div>
         <p class="telemetry-intro">Muestra de los reportes extraídos desde la API de origen y guardados en MariaDB. Los nombres y documentos de conductores no se publican en esta vista.</p>
@@ -66,32 +149,58 @@
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
       <section class="panel heatmap-panel">
-        <div class="section-top"><div><span class="eyebrow">03 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas y paradas</h2></div><span class="status">Telemetría real</span></div>
-        <p class="telemetry-intro">Las rutas se comparan por nivel de uso: verde oscuro para el tercio más usado, naranja para el tercio intermedio y rojo para el tercio menos usado. El análisis utiliza la muestra real importada.</p>
+        <div class="section-top"><div><span class="eyebrow">03 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas y paradas</h2></div><span class="status simulation">Telemetría procesada</span></div>
+        <p class="telemetry-intro">Esta vista simula el procesamiento futuro utilizando la telemetría ya guardada en MariaDB. Latitud y longitud forman los recorridos; la cantidad de recorridos agrupados determina el color de cada ruta.</p>
+        <div class="route-filter-panel">
+          <span>Mostrar rutas</span>
+          <div class="route-filter-actions" role="group" aria-label="Filtrar rutas por nivel de uso">
+            <button type="button" class="route-filter is-active" data-route-filter="ALL" aria-pressed="true">Todas <b data-route-count="ALL">0</b></button>
+            <button type="button" class="route-filter" data-route-filter="HIGH" aria-pressed="false">Más usadas <b data-route-count="HIGH">0</b></button>
+            <button type="button" class="route-filter" data-route-filter="MEDIUM" aria-pressed="false">Uso medio <b data-route-count="MEDIUM">0</b></button>
+            <button type="button" class="route-filter" data-route-filter="LOW" aria-pressed="false">Poco usadas <b data-route-count="LOW">0</b></button>
+          </div>
+        </div>
+        <div class="map-layer-panel">
+          <span>Capas del mapa</span>
+          <div class="map-layer-actions" role="group" aria-label="Controlar capas del mapa">
+            <label class="map-layer-toggle routes"><input type="checkbox" data-map-layer="routes" checked> Rutas</label>
+            <label class="map-layer-toggle vehicles"><input type="checkbox" data-map-layer="vehicles" checked> Vehículos</label>
+            <label class="map-layer-toggle stops"><input type="checkbox" data-map-layer="stops" checked> Paradas</label>
+            <label class="map-layer-toggle readings"><input type="checkbox" data-map-layer="readings"> Mostrar lecturas GPS</label>
+          </div>
+        </div>
         <div class="real-metrics heatmap-metrics" aria-label="Resumen del mapa de calor">
-          <article><span>Lecturas analizadas</span><strong id="heatmap-reports">—</strong><small>Posiciones únicas de la muestra</small></article>
-          <article><span>Vehículos</span><strong id="heatmap-vehicles">—</strong><small>Con recorrido observado</small></article>
-          <article><span>Paradas detectadas</span><strong id="heatmap-stops">—</strong><small>Evento “Inicio de detenido”</small></article>
-          <article><span>Tramos observados</span><strong id="heatmap-routes">—</strong><small>Cruces entre zonas consecutivas</small></article>
+          <article><span>Recorridos analizados</span><strong id="heatmap-trips">—</strong><small>Trips asociados a rutas</small></article>
+          <article><span>Vehículos</span><strong id="heatmap-vehicles">—</strong><small>Última posición por vehículo</small></article>
+          <article><span>Rutas identificadas</span><strong id="heatmap-routes">—</strong><small>Agrupaciones de recorridos</small></article>
+          <article><span>Paradas detectadas</span><strong id="heatmap-stops">—</strong><small>Zonas procesadas</small></article>
         </div>
         <div class="heatmap-layout">
           <article class="map-card">
-            <div class="map-title"><div><strong>Rutas, paradas y posición de la flota</strong><small id="heatmap-zones">Calculando zonas…</small></div><span id="map-last-update">Datos nuevos cada 5 min · mapa cada 15 s</span></div>
+            <div class="map-title"><div><strong>Monitoreo de rutas y flota</strong><small id="heatmap-zones">Preparando datos técnicos…</small></div><div class="map-title-actions"><span id="map-last-update">Cargando contrato del mapa…</span><button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button></div></div>
             <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa interactivo de rutas, paradas y camiones"><span class="map-loading">Cargando cartografía…</span></div>
-            <div class="heat-legend"><span>Uso bajo</span><i></i><span>Uso medio</span><i></i><span>Uso alto</span><i></i><b class="legend-stop">○ Parada</b><b class="legend-truck">🚚 Camión</b></div>
+            <div class="heat-legend"><span>Uso bajo</span><i></i><span>Uso medio</span><i></i><span>Uso alto</span><i></i><b class="legend-stop">○ Parada</b><b class="legend-truck">🚚 Camión</b><b class="legend-reading">● Lectura técnica</b></div>
           </article>
-          <aside class="route-insights" aria-label="Resumen de rutas">
-            <article class="route-highlight most"><span>TRAMO MÁS USADO</span><strong id="most-route">Calculando…</strong><small id="most-route-usage">—</small></article>
-            <article class="route-highlight least"><span>TRAMO MENOS USADO</span><strong id="least-route">Calculando…</strong><small id="least-route-usage">—</small></article>
-            <article class="stop-ranking"><span class="eyebrow">PARADAS POR VEHÍCULO</span><ol id="stop-ranking"><li>Calculando…</li></ol></article>
-            <article class="geo-model">
-              <span class="eyebrow">MODELO DE TELEMETRÍA REAL</span>
-              <strong id="geo-model-zones">Entrenando…</strong>
-              <small id="geo-model-detail">Machine está buscando zonas frecuentes.</small>
+          <aside class="route-insights" aria-label="Explorador de rutas y vehículos">
+            <article class="monitor-panel">
+              <div class="monitor-tabs" role="tablist" aria-label="Elementos del mapa">
+                <button type="button" class="monitor-tab is-active" data-monitor-tab="routes" role="tab" aria-selected="true">Rutas <b id="monitor-route-count">0</b></button>
+                <button type="button" class="monitor-tab" data-monitor-tab="vehicles" role="tab" aria-selected="false">Vehículos <b id="vehicle-live-count">0</b></button>
+              </div>
+              <label class="monitor-search"><span>⌕</span><input id="monitor-search" type="search" placeholder="Buscar ruta…" aria-label="Buscar rutas o vehículos"></label>
+              <ul id="route-monitor-list" class="monitor-list" data-monitor-list="routes"><li>Esperando rutas…</li></ul>
+              <ul id="vehicle-live-list" class="monitor-list" data-monitor-list="vehicles" hidden><li>Esperando posiciones…</li></ul>
+              <div id="map-selection-detail" class="map-selection-detail" aria-live="polite">
+                <span>SELECCIÓN DEL MAPA</span><strong>Selecciona una ruta o un vehículo</strong><p>El mapa centrará el elemento y mostrará sus datos sin modificar la clasificación.</p>
+              </div>
             </article>
-            <article class="live-fleet">
-              <div><span class="eyebrow">FLOTA EN EL MAPA</span><strong id="vehicle-live-count">Calculando…</strong></div>
-              <ul id="vehicle-live-list"><li>Esperando posiciones…</li></ul>
+            <article class="route-highlight most"><span>RUTA MÁS USADA</span><strong id="most-route">Calculando…</strong><small id="most-route-usage">—</small></article>
+            <article class="route-highlight least"><span>RUTA MENOS USADA</span><strong id="least-route">Calculando…</strong><small id="least-route-usage">—</small></article>
+            <article class="stop-ranking"><span class="eyebrow">PARADAS DESTACADAS</span><ol id="stop-ranking"><li>Calculando…</li></ol></article>
+            <article class="geo-model">
+              <span class="eyebrow">FUENTE DEL MAPA</span>
+              <strong id="geo-model-zones">Contrato procesado</strong>
+              <small id="geo-model-detail">Preparando la telemetría.</small>
             </article>
           </aside>
         </div>
@@ -130,5 +239,6 @@
     </div>
     <footer><span>ARTISA <span class="slash">/</span> Del origen al frontend</span><span>ETL · MariaDB · Machine Learning · Endpoints · Frontend</span></footer>
   </main>
+  </div>
 </body>
 </html>
