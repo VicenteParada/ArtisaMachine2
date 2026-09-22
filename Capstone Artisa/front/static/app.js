@@ -14,6 +14,31 @@ const formatDataDay = (value) => value ? new Intl.DateTimeFormat("es-CL", {
 let trips = [];
 let expanded = false;
 let refreshing = false;
+const LOGIN_USERNAME = "admin";
+const LOGIN_PASSWORD = "admin";
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_LOCK_MS = 30_000;
+
+function loginLockSeconds() {
+  const lockedUntil = Number(sessionStorage.getItem("artisa_login_locked_until") || 0);
+  return Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
+}
+
+function resetLoginAttempts() {
+  sessionStorage.removeItem("artisa_login_attempts");
+  sessionStorage.removeItem("artisa_login_locked_until");
+}
+
+function registerInvalidLogin() {
+  const attempts = Number(sessionStorage.getItem("artisa_login_attempts") || 0) + 1;
+  if (attempts >= LOGIN_MAX_ATTEMPTS) {
+    sessionStorage.setItem("artisa_login_attempts", "0");
+    sessionStorage.setItem("artisa_login_locked_until", String(Date.now() + LOGIN_LOCK_MS));
+    return "Demasiados intentos. Espera 30 segundos antes de volver a intentarlo.";
+  }
+  sessionStorage.setItem("artisa_login_attempts", String(attempts));
+  return `Usuario o contraseña incorrectos. Quedan ${LOGIN_MAX_ATTEMPTS - attempts} intentos.`;
+}
 
 function showApp() {
   landing.hidden = true;
@@ -27,28 +52,47 @@ function token() {
 
 function logout() {
   sessionStorage.removeItem("artisa_token");
+  sessionStorage.removeItem("artisa_user");
   landing.hidden = false;
   appShell.hidden = true;
 }
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const button = loginForm.querySelector("button");
+  const button = loginForm.querySelector(".landing-button");
   const error = $("login-error");
+  const usernameInput = $("login-user");
+  const passwordInput = $("login-password");
+  const remainingLock = loginLockSeconds();
+  if (remainingLock > 0) {
+    error.textContent = `Acceso bloqueado temporalmente. Intenta nuevamente en ${remainingLock} segundos.`;
+    error.hidden = false;
+    passwordInput.value = "";
+    passwordInput.focus();
+    return;
+  }
   button.disabled = true;
   error.hidden = true;
   try {
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    if (username !== LOGIN_USERNAME || password !== LOGIN_PASSWORD) {
+      passwordInput.value = "";
+      passwordInput.focus();
+      throw new Error(registerInvalidLogin());
+    }
     const response = await fetch("/auth/login", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        username: $("login-user").value,
-        password: $("login-password").value
-      })
+      cache: "no-store",
+      body: JSON.stringify({username, password})
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "No se pudo iniciar sesión.");
     sessionStorage.setItem("artisa_token", payload.token);
+    sessionStorage.setItem("artisa_user", LOGIN_USERNAME);
+    resetLoginAttempts();
+    passwordInput.value = "";
     showApp();
     refresh();
   } catch (loginError) {
@@ -59,7 +103,20 @@ loginForm.addEventListener("submit", async (event) => {
   }
 });
 
-if (token() && window.location.hash) showApp();
+$("toggle-password").addEventListener("click", () => {
+  const passwordInput = $("login-password");
+  const showing = passwordInput.type === "text";
+  passwordInput.type = showing ? "password" : "text";
+  $("toggle-password").textContent = showing ? "Mostrar" : "Ocultar";
+  $("toggle-password").setAttribute("aria-pressed", String(!showing));
+  passwordInput.focus();
+});
+
+if (token() && sessionStorage.getItem("artisa_user") === LOGIN_USERNAME && window.location.hash) {
+  showApp();
+} else if (token() || sessionStorage.getItem("artisa_user")) {
+  logout();
+}
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});

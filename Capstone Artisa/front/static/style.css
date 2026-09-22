@@ -245,6 +245,24 @@
   border-color: #75a84a;
   box-shadow: 0 0 0 4px rgba(117, 168, 74, .15);
 }
+.password-field { position: relative; }
+.password-field input { padding-right: 82px; }
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: #edf3ed;
+  color: #416443;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.password-toggle:hover { background: #e1ece0; }
+.password-toggle:focus-visible { outline: 2px solid #5a922d; outline-offset: 2px; }
 .landing-button {
   display: inline-flex;
   align-items: center;
@@ -261,10 +279,44 @@
   transition: transform .18s, box-shadow .18s, background .18s;
 }
 .landing-button:hover { transform: translateY(-1px); background: linear-gradient(135deg, #65b946, #438f2d); box-shadow: 0 16px 30px rgba(59, 133, 43, .3); }
+.landing-button:disabled { cursor: wait; opacity: .68; transform: none; box-shadow: none; }
 .landing-button span { font-size: 20px; line-height: .5; }
 .access-card .landing-button { width: 100%; margin-top: 17px; }
-.access-card small { display: block; margin-top: 20px; color: #96a2a3; font-size: 10px; line-height: 1.55; text-align: center; }
-.login-error { margin: 12px 0 0 !important; color: #b24c31 !important; font-size: 11px !important; }
+.login-error {
+  margin: 12px 0 0 !important;
+  padding: 10px 11px;
+  border: 1px solid #f0c8bc;
+  border-radius: 9px;
+  background: #fff5f1;
+  color: #a9442d !important;
+  font-size: 11px !important;
+  line-height: 1.45;
+}
+.login-security {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+  color: #6b7f78;
+  font-size: 10px;
+  line-height: 1.45;
+  text-align: left;
+}
+.login-security-icon {
+  display: grid;
+  flex: 0 0 25px;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e4f1df;
+  color: #4d8d35;
+  font-size: 12px;
+  font-weight: 900;
+}
+.login-security strong { display: block; color: #49605a; font-size: 10px; }
+.login-security small { display: block; margin-top: 1px; color: #87948f; font-size: 9px; }
 .access-footer { margin: 42px auto 0; color: #98a4a5; font-size: 10px; }
 .landing-glow { display: none; }
 #app[hidden] { display: none; }
