@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from ETLs.telemetry import transform_rows
+from ETLs.telemetry import TelemetryConfig, run_batches, transform_rows
 
 
 def row(identifier="R-1", **changes):
@@ -58,6 +59,35 @@ class TelemetryTests(unittest.TestCase):
         self.assertIn("duplicado", rejected[0]["motivo"])
         self.assertIn("asset_id", rejected[1]["motivo"])
         self.assertIn("latitude", rejected[2]["motivo"])
+
+
+class BatchControlTests(unittest.TestCase):
+    def setUp(self):
+        self.config = TelemetryConfig(
+            uri="mongodb://test", database="gps_data", collection="raw_gps",
+            batch_size=5000, timeout_seconds=10,
+        )
+
+    @patch("ETLs.telemetry.mark_status")
+    @patch("ETLs.telemetry.run_once")
+    def test_stops_after_explicit_block_limit_and_marks_paused(self, run_once, mark_status):
+        run_once.side_effect = [
+            {"estado": "ejecutando", "recibidos": 5000},
+            {"estado": "ejecutando", "recibidos": 5000},
+        ]
+        results = run_batches(self.config, max_blocks=2)
+        self.assertEqual(run_once.call_count, 2)
+        self.assertEqual(results[-1]["estado"], "pausado")
+        mark_status.assert_called_once_with("pausado")
+
+    @patch("ETLs.telemetry.mark_status")
+    @patch("ETLs.telemetry.run_once")
+    def test_completion_does_not_request_another_block(self, run_once, mark_status):
+        run_once.return_value = {"estado": "completado", "recibidos": 1251}
+        results = run_batches(self.config, max_blocks=10)
+        self.assertEqual(len(results), 1)
+        run_once.assert_called_once_with(self.config)
+        mark_status.assert_called_once_with("completado")
 
 
 if __name__ == "__main__":

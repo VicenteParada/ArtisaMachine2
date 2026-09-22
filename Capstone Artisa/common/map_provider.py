@@ -209,6 +209,9 @@ def _vehicle(vehicle, route_ids, seen_ids):
         "heading": _optional_number(vehicle.get("heading"), f"{vehicle_id}.heading"),
         "ignition": vehicle.get("ignition"),
         "event": str(vehicle.get("event") or "Sin evento"),
+        "driver_name": vehicle.get("driver_name"),
+        "driver_last_name": vehicle.get("driver_last_name"),
+        "driver_document_number": vehicle.get("driver_document_number"),
     }
 
 
@@ -370,6 +373,9 @@ def _telemetry_contract(analysis, available_report_count, refresh_seconds):
         "heading": vehicle["rumbo"],
         "ignition": vehicle["encendido"],
         "event": vehicle["evento"],
+        "driver_name": vehicle.get("driver_name"),
+        "driver_last_name": vehicle.get("driver_last_name"),
+        "driver_document_number": vehicle.get("driver_document_number"),
     } for vehicle in analysis["vehiculos_actuales"]]
 
     readings = []
@@ -453,30 +459,139 @@ def _telemetry_source(cursor):
     return "telemetria_raw", legacy_count
 
 
+
+def _load_persisted_map(cursor, available_report_count, refresh_seconds):
+    """Lee resultados analíticos guardados; evita recalcular rutas desde GPS en cada petición."""
+    cursor.execute("SELECT COUNT(*) AS cantidad FROM rutas_inferidas")
+    if int((cursor.fetchone() or {}).get("cantidad") or 0) == 0:
+        return None
+    cursor.execute(
+        """SELECT route_id,nombre,cantidad_viajes,cantidad_vehiculos,usage_level,color,
+        geometria_json,geometry_source,map_matching_estado FROM rutas_inferidas
+        ORDER BY cantidad_viajes DESC,route_id"""
+    )
+    routes = []
+    for row in cursor.fetchall():
+        routes.append({
+            "route_id": row["route_id"],
+            "label": row["nombre"],
+            "usage_count": row["cantidad_viajes"],
+            "unique_vehicle_count": row["cantidad_vehiculos"],
+            "usage_level": row["usage_level"],
+            "color": row["color"],
+            "observed_points": 0,
+            "geometry_source": row["geometry_source"],
+            "map_matching": row["map_matching_estado"] == "completado",
+            "geometry": json.loads(row["geometria_json"]),
+        })
+    cursor.execute(
+        """SELECT viaje_id,route_id,asset_id,inicio,termino,puntos_gps,distancia_km,
+        geometria_json,estado FROM viajes_telemetria ORDER BY inicio,viaje_id"""
+    )
+    trips = [{
+        "trip_id": row["viaje_id"], "route_id": row["route_id"],
+        "vehicle_id": row["asset_id"], "started_at": row["inicio"],
+        "ended_at": row["termino"], "reading_count": row["puntos_gps"],
+        "distance_km": row["distancia_km"], "geometry": json.loads(row["geometria_json"]),
+        "status": row["estado"].upper(),
+    } for row in cursor.fetchall()]
+    observed = defaultdict(int)
+    for trip in trips:
+        observed[trip["route_id"]] += int(trip["reading_count"] or 0)
+    for route in routes:
+        route["observed_points"] = observed[route["route_id"]]
+
+    cursor.execute(
+        """SELECT parada_id,viaje_id,latitude,longitude,duracion_minutos,zona,tipo
+        FROM paradas_telemetria ORDER BY inicio DESC LIMIT 500"""
+    )
+    stops = [{
+        "stop_id": row["parada_id"], "label": row["zona"] or row["tipo"],
+        "route_id": None, "latitude": row["latitude"], "longitude": row["longitude"],
+        "reading_count": 1, "vehicle_count": 1, "stop_event_count": 1,
+        "duration_minutes": row["duracion_minutos"],
+    } for row in cursor.fetchall()]
+    cursor.execute(
+        """SELECT asset_id,asset_name,report_date,latitude,longitude,speed,gps_speed,
+        heading,ignition,event_name,driver_name,driver_last_name,driver_document_number
+        FROM vehiculos_ultima_posicion ORDER BY asset_id"""
+    )
+    vehicles = [{
+        "vehicle_id": row["asset_id"], "vehicle_name": row["asset_name"] or row["asset_id"],
+        "route_id": None, "latitude": row["latitude"], "longitude": row["longitude"],
+        "timestamp": row["report_date"],
+        "speed_kmh": row["gps_speed"] if row["gps_speed"] is not None else row["speed"],
+        "heading": row["heading"], "ignition": row["ignition"],
+        "event": row["event_name"] or "Sin evento", "driver_name": row["driver_name"],
+        "driver_last_name": row["driver_last_name"],
+        "driver_document_number": row["driver_document_number"],
+    } for row in cursor.fetchall()]
+    snapshot = max((vehicle["timestamp"] for vehicle in vehicles), default=None)
+    return normalize_processed_map({
+        "schema_version": "1.3",
+        "source_mode": "PERSISTED_ANALYTICS",
+        "snapshot_date": snapshot.date().isoformat() if snapshot else None,
+        "description": "Rutas, viajes y paradas persistidos por el procesador analítico.",
+        "routes": routes, "trips": trips, "stops": stops, "vehicles": vehicles,
+        "readings": [],
+        "summary": {
+            "reading_count": available_report_count,
+            "window_report_count": sum(int(trip["reading_count"] or 0) for trip in trips),
+            "available_report_count": available_report_count,
+            "stop_event_count": len(stops),
+        },
+        "metadata": {
+            "classification": "Clasificación global persistida por ruta completa.",
+            "geometry": "Geometría persistida; OSRM cuando está configurado o traza GPS filtrada.",
+            "geometry_source": "PERSISTED",
+            "route_grouping": "Agrupación geoespacial explícita fuera de las peticiones HTTP.",
+            "road_matching": "Estado guardado individualmente en cada ruta.",
+            "data_retention": "Los resultados derivados no sustituyen raw_gps.",
+            "available_report_count": available_report_count,
+            "window_report_count": sum(int(trip["reading_count"] or 0) for trip in trips),
+            "latest_position": snapshot,
+            "refresh_seconds": refresh_seconds,
+        },
+    })
+
 def load_telemetry_map(cursor):
     """Lee una ventana indexada y conserva la última posición de toda la flota."""
     max_reports = _environment_integer("MAP_MAX_REPORTS", 10000, 1000, 100000)
     refresh_seconds = _environment_integer("MAP_REFRESH_SECONDS", 300, 30, 3600)
     telemetry_table, available_report_count = _telemetry_source(cursor)
+    if telemetry_table == "raw_gps":
+        persisted = _load_persisted_map(cursor, available_report_count, refresh_seconds)
+        if persisted is not None:
+            persisted["metadata"]["telemetry_table"] = telemetry_table
+            return persisted
 
     if telemetry_table == "raw_gps":
         cursor.execute(
             """SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
-            speed,NULL AS gps_speed,NULL AS heading,NULL AS ignition,event_name
-            FROM raw_gps ORDER BY report_date DESC,report_id DESC LIMIT %s""",
+            speed,gps_speed,heading,ignition,event_name,driver_name,driver_last_name,
+            driver_document_number FROM raw_gps
+            ORDER BY report_date DESC,report_id DESC LIMIT %s""",
             (max_reports,),
         )
         rows = cursor.fetchall()
         cursor.execute(
-            """SELECT t.report_id,t.asset_id,t.asset_name,t.report_date,t.latitude,t.longitude,
-            t.speed,NULL AS gps_speed,NULL AS heading,NULL AS ignition,t.event_name
-            FROM raw_gps t
-            JOIN (SELECT asset_id,MAX(report_date) AS report_date FROM raw_gps
-                  GROUP BY asset_id) latest
-              ON latest.asset_id=t.asset_id AND latest.report_date=t.report_date
-            ORDER BY t.asset_id,t.report_id"""
+            """SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
+            speed,gps_speed,heading,ignition,event_name,driver_name,driver_last_name,
+            driver_document_number FROM vehiculos_ultima_posicion
+            ORDER BY asset_id"""
         )
         current_rows = cursor.fetchall()
+        if not current_rows:
+            cursor.execute(
+                """SELECT t.report_id,t.asset_id,t.asset_name,t.report_date,t.latitude,t.longitude,
+                t.speed,t.gps_speed,t.heading,t.ignition,t.event_name,t.driver_name,
+                t.driver_last_name,t.driver_document_number FROM raw_gps t
+                JOIN (SELECT asset_id,MAX(report_date) AS report_date FROM raw_gps
+                      GROUP BY asset_id) latest
+                  ON latest.asset_id=t.asset_id AND latest.report_date=t.report_date
+                ORDER BY t.asset_id,t.report_id"""
+            )
+            current_rows = cursor.fetchall()
     else:
         cursor.execute(
             """SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
@@ -538,3 +653,5 @@ def get_map_data(cursor=None):
             data=data,
         )
         return data
+
+

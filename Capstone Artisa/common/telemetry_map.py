@@ -615,6 +615,9 @@ def analyze_telemetry(rows, current_rows=None):
             "rumbo": float(latest["heading"]) if latest.get("heading") is not None else None,
             "encendido": latest.get("ignition"),
             "evento": latest.get("event_name"),
+            "driver_name": latest.get("driver_name"),
+            "driver_last_name": latest.get("driver_last_name"),
+            "driver_document_number": latest.get("driver_document_number"),
         })
     current_vehicles.sort(key=lambda value: (str(value["asset_name"]), value["asset_id"]))
     latest_position = max(

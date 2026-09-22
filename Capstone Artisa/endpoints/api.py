@@ -1,5 +1,6 @@
 """Endpoints leen MariaDB; Machine procesa las solicitudes por separado."""
 
+from datetime import datetime
 import json
 import os
 import re
@@ -20,6 +21,7 @@ from common.validation import features
 
 STARTED_AT = time.monotonic()
 PREDICTION_PATH = re.compile(r"/api/predicciones/([0-9a-f-]{36})")
+VEHICLE_PATH = re.compile(r"/api/vehiculos/([A-Za-z0-9._-]{1,64})")
 TELEMETRY_SUMMARY_CACHE = {"expires_at": 0.0, "summary": None}
 TELEMETRY_SUMMARY_LOCK = Lock()
 
@@ -98,11 +100,15 @@ def pipeline_state(cursor):
     cursor.execute("SELECT * FROM modelo_telemetria_estado WHERE id=1")
     telemetry_model = cursor.fetchone()
 
+    mongo_state = str((mongo_etl or {}).get("estado") or "pendiente").casefold()
     etl_ready = bool(
         mongo_etl
-        and mongo_etl.get("estado") != "error"
-        and _seconds(mongo_etl.get("hace_segundos"))
-        < int(os.environ.get("ETL_HEALTH_MAX_AGE_SECONDS", "900"))
+        and mongo_state != "error"
+        and (
+            mongo_state in {"pausado", "completado"}
+            or _seconds(mongo_etl.get("hace_segundos"))
+            < int(os.environ.get("ETL_HEALTH_MAX_AGE_SECONDS", "900"))
+        )
     )
     model_ready = bool(
         model
@@ -186,6 +192,8 @@ class Handler(LegacyHandler):
         if path == "/":
             self.respond(200, {"servicio": "artisa-docker-demo", "contenedor": socket.gethostname(),
                                "mensaje": "Endpoints Artisa", "rutas": ["/api/estado", "/api/viajes",
+                               "/api/etl/progreso", "/api/vehiculos", "/api/dashboard",
+                               "/api/viajes/telemetria", "/api/paradas", "/api/rutas",
                                "/api/telemetria/resumen", "/api/telemetria", "/api/mapa", "/api/telemetria/mapa-calor", "/api/modelo", "/api/modelo/telemetria",
                                "/api/predicciones"]})
             return
@@ -225,6 +233,136 @@ class Handler(LegacyHandler):
                         LEFT JOIN predicciones_viajes p ON p.viaje_id=v.id AND p.dataset_version=v.dataset_version
                         ORDER BY v.id LIMIT %s""", (limit,))
                     self.respond(200, {"viajes": cursor.fetchall(), "limite": limit})
+                elif path == "/api/etl/progreso":
+                    cursor.execute("SELECT * FROM raw_gps_estado WHERE id=1")
+                    progress = cursor.fetchone()
+                    if progress:
+                        total = int(progress.get("total_origen") or 0)
+                        read = int(progress.get("leidos") or 0)
+                        progress = {key: value for key, value in progress.items()
+                                    if key not in ("id", "rechazos_json")} | {
+                            "documentos_pendientes": max(0, total - read),
+                            "bloques_pendientes": max(
+                                0,
+                                int(progress.get("bloques_totales") or 0)
+                                - int(progress.get("bloques_completados") or 0),
+                            ),
+                            "progreso_pct": round(read * 100 / total, 4) if total else 0.0,
+                            "rechazos": _rejections(progress),
+                        }
+                    self.respond(200 if progress else 503, progress or {
+                        "error": "El ETL historico aun no fue inicializado"
+                    })
+                elif path == "/api/vehiculos" or (vehicle_match := VEHICLE_PATH.fullmatch(path)):
+                    stale_minutes = int(os.environ.get("REALTIME_STALE_MINUTES", "15"))
+                    where = ""
+                    params = []
+                    if path != "/api/vehiculos":
+                        where = "WHERE asset_id=%s"
+                        params.append(vehicle_match[1])
+                    cursor.execute(
+                        f"""SELECT asset_id,asset_name,report_id,report_date,latitude,longitude,
+                        speed,gps_speed,heading,odometer,ignition,event_name,driver_name,
+                        driver_last_name,driver_document_number,
+                        TIMESTAMPDIFF(SECOND,report_date,UTC_TIMESTAMP()) AS antiguedad_segundos,
+                        CASE
+                          WHEN TIMESTAMPDIFF(MINUTE,report_date,UTC_TIMESTAMP())>%s THEN 'sin_senal'
+                          WHEN ignition=0 OR COALESCE(speed,gps_speed,0)<1 THEN 'detenido'
+                          ELSE 'en_movimiento'
+                        END AS estado
+                        FROM vehiculos_ultima_posicion {where}
+                        ORDER BY asset_name,asset_id""",
+                        tuple([stale_minutes] + params),
+                    )
+                    vehicles = cursor.fetchall()
+                    if path == "/api/vehiculos":
+                        self.respond(200, {"vehiculos": vehicles, "total": len(vehicles),
+                                           "actualizacion_segundos": 300})
+                    else:
+                        self.respond(200 if vehicles else 404,
+                                     vehicles[0] if vehicles else {"error": "Vehiculo no encontrado"})
+                elif path == "/api/dashboard":
+                    stale_minutes = int(os.environ.get("REALTIME_STALE_MINUTES", "15"))
+                    cursor.execute(
+                        """SELECT COUNT(*) AS total,
+                        SUM(TIMESTAMPDIFF(MINUTE,report_date,UTC_TIMESTAMP())<=%s
+                            AND COALESCE(speed,gps_speed,0)>=1 AND COALESCE(ignition,1)=1) AS en_movimiento,
+                        SUM(TIMESTAMPDIFF(MINUTE,report_date,UTC_TIMESTAMP())<=%s
+                            AND (COALESCE(speed,gps_speed,0)<1 OR ignition=0)) AS detenidos,
+                        SUM(TIMESTAMPDIFF(MINUTE,report_date,UTC_TIMESTAMP())>%s) AS sin_senal
+                        FROM vehiculos_ultima_posicion""",
+                        (stale_minutes, stale_minutes, stale_minutes),
+                    )
+                    fleet = cursor.fetchone() or {}
+                    cursor.execute(
+                        """SELECT COUNT(*) AS viajes,COALESCE(AVG(distancia_km),0) AS distancia_promedio_km,
+                        COALESCE(AVG(duracion_minutos),0) AS duracion_promedio_minutos,
+                        COALESCE(SUM(cantidad_paradas),0) AS paradas,
+                        COALESCE(SUM(tiempo_detenido_minutos),0) AS tiempo_detenido_minutos,
+                        COUNT(DISTINCT encadenamiento_id) AS encadenamientos
+                        FROM viajes_telemetria"""
+                    )
+                    trips = cursor.fetchone() or {}
+                    cursor.execute(
+                        "SELECT usage_level,COUNT(*) AS cantidad FROM rutas_inferidas GROUP BY usage_level"
+                    )
+                    route_levels = {row["usage_level"]: row["cantidad"] for row in cursor.fetchall()}
+                    cursor.execute("SELECT leidos,validos,rechazados,total_origen,estado FROM raw_gps_estado WHERE id=1")
+                    quality = cursor.fetchone() or {}
+                    self.respond(200, {
+                        "flota": fleet,
+                        "operacion": trips,
+                        "rutas": {level: int(route_levels.get(level, 0))
+                                  for level in ("HIGH", "MEDIUM", "LOW")},
+                        "calidad": quality,
+                        "actualizacion_segundos": 300,
+                    })
+                elif path in ("/api/viajes/telemetria", "/api/paradas", "/api/rutas"):
+                    try:
+                        query = parse_qs(parsed.query)
+                        limit = int(query.get("limite", ["100"])[0])
+                        offset = int(query.get("offset", ["0"])[0])
+                        if not 1 <= limit <= 500 or offset < 0:
+                            raise ValueError
+                    except ValueError:
+                        raise RequestError(400, "limite debe estar entre 1 y 500 y offset no puede ser negativo") from None
+                    if path == "/api/viajes/telemetria":
+                        cursor.execute(
+                            """SELECT viaje_id,encadenamiento_id,route_id,asset_id,asset_name,
+                            driver_document_number,driver_name,driver_last_name,inicio,termino,
+                            origen,destino,distancia_km,duracion_minutos,velocidad_promedio,
+                            velocidad_maxima,puntos_gps,cantidad_paradas,tiempo_detenido_minutos,estado
+                            FROM viajes_telemetria ORDER BY inicio DESC LIMIT %s OFFSET %s""",
+                            (limit, offset),
+                        )
+                        key = "viajes"
+                    elif path == "/api/paradas":
+                        cursor.execute(
+                            """SELECT parada_id,viaje_id,asset_id,driver_document_number,inicio,
+                            termino,duracion_minutos,latitude,longitude,zona,tipo,anomala
+                            FROM paradas_telemetria ORDER BY inicio DESC LIMIT %s OFFSET %s""",
+                            (limit, offset),
+                        )
+                        key = "paradas"
+                    else:
+                        level = str(query.get("nivel", [""])[0]).upper()
+                        if level and level not in {"HIGH", "MEDIUM", "LOW"}:
+                            raise RequestError(400, "nivel debe ser HIGH, MEDIUM o LOW")
+                        where = "WHERE usage_level=%s" if level else ""
+                        params = (level, limit, offset) if level else (limit, offset)
+                        cursor.execute(
+                            f"""SELECT route_id,nombre,origen,destino,geometry_source,
+                            map_matching_estado,cantidad_viajes,cantidad_vehiculos,
+                            cantidad_conductores,distancia_promedio_km,duracion_promedio_minutos,
+                            paradas_promedio,usage_level,color,version_datos,actualizado_en
+                            FROM rutas_inferidas {where}
+                            ORDER BY cantidad_viajes DESC,route_id LIMIT %s OFFSET %s""",
+                            params,
+                        )
+                        key = "rutas"
+                    rows = cursor.fetchall()
+                    self.respond(200, {key: rows, "limite": limit, "offset": offset,
+                                       "cantidad": len(rows)})
                 elif path == "/api/telemetria/resumen":
                     with TELEMETRY_SUMMARY_LOCK:
                         if (
@@ -239,27 +377,57 @@ class Handler(LegacyHandler):
                             )
                     self.respond(200, summary)
                 elif path == "/api/telemetria":
+                    query = parse_qs(parsed.query)
                     try:
-                        limit = int(parse_qs(parsed.query).get("limite", ["30"])[0])
-                        if not 1 <= limit <= 200:
+                        limit = int(query.get("limite", ["30"])[0])
+                        offset = int(query.get("offset", ["0"])[0])
+                        if not 1 <= limit <= 500 or offset < 0:
                             raise ValueError
                     except ValueError:
-                        raise RequestError(400, "limite debe ser un entero entre 1 y 200") from None
+                        raise RequestError(400, "limite debe estar entre 1 y 500 y offset no puede ser negativo") from None
+                    filters, params = [], []
+                    asset_id = str(query.get("vehiculo", [""])[0]).strip()
+                    if asset_id:
+                        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", asset_id):
+                            raise RequestError(400, "vehiculo no es valido")
+                        filters.append("asset_id=%s")
+                        params.append(asset_id)
+                    for parameter, operator in (("desde", ">="), ("hasta", "<=")):
+                        value = str(query.get(parameter, [""])[0]).strip()
+                        if value:
+                            try:
+                                parsed_date = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                                if parsed_date.tzinfo is not None:
+                                    parsed_date = parsed_date.astimezone().replace(tzinfo=None)
+                            except ValueError:
+                                raise RequestError(400, f"{parameter} debe ser una fecha ISO 8601") from None
+                            filters.append(f"report_date{operator}%s")
+                            params.append(parsed_date)
+                    where = "WHERE " + " AND ".join(filters) if filters else ""
                     telemetry_table, _ = _telemetry_source(cursor)
                     if telemetry_table == "raw_gps":
-                        cursor.execute("""SELECT asset_id,asset_name,report_date,event_name,
-                            latitude,longitude,speed,NULL AS gps_speed,NULL AS heading,
-                            NULL AS ignition FROM raw_gps
-                            ORDER BY report_date DESC,report_id DESC LIMIT %s""", (limit,))
+                        cursor.execute(
+                            f"""SELECT asset_id,asset_name,report_date,event_name,latitude,
+                            longitude,speed,gps_speed,heading,ignition,driver_name,
+                            driver_last_name,driver_document_number FROM raw_gps {where}
+                            ORDER BY report_date DESC,report_id DESC LIMIT %s OFFSET %s""",
+                            tuple(params + [limit, offset]),
+                        )
                     else:
-                        cursor.execute("""SELECT asset_id,asset_name,report_date,event_name,
-                            latitude,longitude,speed,gps_speed,heading,ignition
-                            FROM telemetria_raw
-                            ORDER BY report_date DESC,report_id DESC LIMIT %s""", (limit,))
+                        cursor.execute(
+                            f"""SELECT asset_id,asset_name,report_date,event_name,latitude,
+                            longitude,speed,gps_speed,heading,ignition,NULL AS driver_name,
+                            NULL AS driver_last_name,NULL AS driver_document_number
+                            FROM telemetria_raw {where}
+                            ORDER BY report_date DESC,report_id DESC LIMIT %s OFFSET %s""",
+                            tuple(params + [limit, offset]),
+                        )
                     self.respond(200, {
-                        "reportes": cursor.fetchall(),
-                        "limite": limit,
+                        "reportes": cursor.fetchall(), "limite": limit, "offset": offset,
                         "origen": telemetry_table,
+                        "filtros": {"vehiculo": asset_id or None,
+                                    "desde": query.get("desde", [None])[0],
+                                    "hasta": query.get("hasta", [None])[0]},
                     })
 
                 elif path == "/api/modelo/telemetria":

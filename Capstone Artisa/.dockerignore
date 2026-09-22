@@ -11,6 +11,8 @@
 !ETLs/**
 !modelo_machine/
 !modelo_machine/**
+!processing/
+!processing/**
 !endpoints/
 !endpoints/**
 !front/
@@ -25,3 +27,4 @@
 **/*.pyc
 **/.env
 **/.env.*
+

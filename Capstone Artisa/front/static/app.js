@@ -229,7 +229,14 @@ function renderRouteMonitor(routes) {
   refreshSelectionStyles();
 }
 
+function vehicleDriver(vehicle) {
+  return [vehicle.driver_name, vehicle.driver_last_name].filter(Boolean).join(" ") || "Conductor sin informar";
+}
+
 function vehicleStatus(vehicle) {
+  const timestamp = new Date(vehicle.timestamp).getTime();
+  const stale = Number.isFinite(timestamp) && Date.now() - timestamp > 30 * 60 * 1000;
+  if (stale) return {label: "Sin señal reciente", className: "off"};
   const speed = Number(vehicle.speed_kmh || 0);
   if (speed > 3) return {label: "En movimiento", className: "moving"};
   if (vehicle.ignition !== null && vehicle.ignition !== undefined && Number(vehicle.ignition) === 0) {
@@ -244,7 +251,7 @@ function renderLiveFleet(vehicles) {
   $("vehicle-live-count").textContent = format(vehicles.length);
   const query = $("monitor-search").value.trim().toLocaleLowerCase("es");
   const ordered = [...vehicles]
-    .filter((vehicle) => `${vehicle.vehicle_id} ${vehicle.vehicle_name}`.toLocaleLowerCase("es").includes(query))
+    .filter((vehicle) => `${vehicle.vehicle_id} ${vehicle.vehicle_name} ${vehicleDriver(vehicle)}`.toLocaleLowerCase("es").includes(query))
     .sort((first, second) => Number(second.speed_kmh || 0) - Number(first.speed_kmh || 0));
   list.replaceChildren();
   for (const vehicle of ordered) {
@@ -264,7 +271,7 @@ function renderLiveFleet(vehicles) {
     const speed = vehicle.speed_kmh === null || vehicle.speed_kmh === undefined
       ? "s/d"
       : format(vehicle.speed_kmh, 1) + " km/h";
-    detail.textContent = status.label + " · " + speed + " · " + (vehicle.route_id || "sin ruta agrupada");
+    detail.textContent = status.label + " · " + speed + " · " + vehicleDriver(vehicle);
     copy.append(name, detail);
     button.append(icon, copy);
     button.addEventListener("click", () => selectVehicle(vehicle));
@@ -396,11 +403,13 @@ function truckPopup(vehicle) {
     ? "Sin velocidad"
     : format(vehicle.speed_kmh, 1) + " km/h";
   details.textContent = speed + " · " + (vehicle.event || "Sin evento");
+  const driver = document.createElement("small");
+  driver.textContent = "Conductor: " + vehicleDriver(vehicle);
   const route = document.createElement("small");
   route.textContent = "Ruta agrupada: " + (vehicle.route_id || "sin asignar");
   const date = document.createElement("small");
   date.textContent = "Última posición: " + formatUtc(vehicle.timestamp);
-  wrapper.append(title, identifier, state, details, route, date);
+  wrapper.append(title, identifier, state, details, driver, route, date);
   return wrapper;
 }
 
@@ -765,12 +774,18 @@ function renderDashboardDonut(containerId, items, centerLabel) {
   container.append(chart, legend);
 }
 
-function renderDashboard(data) {
+function renderDashboard(data, metrics = {}) {
   const summary = data.summary || {};
-  $("dashboard-reports").textContent = format(summary.available_report_count || 0);
-  $("dashboard-trips").textContent = format(summary.trip_count || data.trips.length);
-  $("dashboard-routes").textContent = format(summary.route_count || data.routes.length);
-  $("dashboard-stop-events").textContent = format(summary.stop_event_count || 0);
+  const operation = metrics.operacion || {};
+  const quality = metrics.calidad || {};
+  const routeMetrics = metrics.rutas || {};
+  $("dashboard-reports").textContent = format(quality.validos || summary.available_report_count || 0);
+  $("dashboard-trips").textContent = format(operation.viajes || data.trips.length);
+  $("dashboard-routes").textContent = format(
+    Number(routeMetrics.HIGH || 0) + Number(routeMetrics.MEDIUM || 0) + Number(routeMetrics.LOW || 0)
+    || data.routes.length
+  );
+  $("dashboard-stop-events").textContent = format(operation.paradas || summary.stop_event_count || 0);
   $("dashboard-snapshot").textContent = "Corte " + formatDataDay(data.snapshotDate);
   $("dashboard-snapshot").className = "status simulation";
 
@@ -805,10 +820,16 @@ function renderDashboard(data) {
     .sort((first, second) => second.value - first.value);
   renderDashboardBars("dashboard-stop-zones", stopZoneItems, "#6f42a6");
 
-  const routeLevels = {HIGH: 0, MEDIUM: 0, LOW: 0};
-  for (const route of data.routes) {
-    const level = routeProperties(route).usage_level;
-    if (Object.hasOwn(routeLevels, level)) routeLevels[level] += 1;
+  const routeLevels = {
+    HIGH: Number(routeMetrics.HIGH || 0),
+    MEDIUM: Number(routeMetrics.MEDIUM || 0),
+    LOW: Number(routeMetrics.LOW || 0)
+  };
+  if (routeLevels.HIGH + routeLevels.MEDIUM + routeLevels.LOW === 0) {
+    for (const route of data.routes) {
+      const level = routeProperties(route).usage_level;
+      if (Object.hasOwn(routeLevels, level)) routeLevels[level] += 1;
+    }
   }
   renderDashboardDonut("dashboard-route-levels", [
     {label: "Más usadas", value: routeLevels.HIGH, color: "#14532d"},
@@ -816,12 +837,19 @@ function renderDashboard(data) {
     {label: "Poco usadas", value: routeLevels.LOW, color: "#dc2626"}
   ], "rutas");
 
-  const fleet = {moving: 0, stopped: 0, off: 0};
-  for (const vehicle of data.vehicles) fleet[vehicleStatus(vehicle).className] += 1;
+  const fleetMetrics = metrics.flota || {};
+  const fleet = {
+    moving: Number(fleetMetrics.en_movimiento || 0),
+    stopped: Number(fleetMetrics.detenidos || 0),
+    off: Number(fleetMetrics.sin_senal || 0)
+  };
+  if (fleet.moving + fleet.stopped + fleet.off === 0) {
+    for (const vehicle of data.vehicles) fleet[vehicleStatus(vehicle).className] += 1;
+  }
   renderDashboardDonut("dashboard-fleet-status", [
     {label: "En movimiento", value: fleet.moving, color: "#58a566"},
     {label: "Detenidos", value: fleet.stopped, color: "#e88836"},
-    {label: "Apagados", value: fleet.off, color: "#708083"}
+    {label: "Sin señal", value: fleet.off, color: "#708083"}
   ], "vehículos");
 
   const topRoutes = [...data.routes]
@@ -995,20 +1023,21 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true; $("refresh").disabled = true;
   try {
-    const [state, summary, dataset, telemetrySummary, telemetryDataset, mapPayload] = await Promise.all([
+    const [state, summary, dataset, telemetrySummary, telemetryDataset, mapPayload, dashboard] = await Promise.all([
       api("/api/estado"),
       api("/api/resumen"),
       api("/api/viajes?limite=500"),
       api("/api/telemetria/resumen"),
       api("/api/telemetria?limite=30"),
-      api("/api/mapa")
+      api("/api/mapa"),
+      api("/api/dashboard")
     ]);
     if (!window.ArtisaMapData) throw new Error("No se cargó el adaptador del mapa.");
     const mapData = window.ArtisaMapData.adaptMapPayload(mapPayload);
     renderState(state);
     renderTelemetry(telemetrySummary, telemetryDataset, state);
     renderHeatmap(mapData);
-    renderDashboard(mapData);
+    renderDashboard(mapData, dashboard);
     $("trip-count").textContent = format(summary.viajes);
     $("prediction-count").textContent = format(summary.predicciones);
     $("destination-count").textContent = format(summary.destinos);
@@ -1086,4 +1115,4 @@ $("reset-map-view").addEventListener("click", resetMapSelection);
 window.addEventListener("hashchange", syncDatasetView);
 syncDatasetView();
 if (token()) refresh();
-setInterval(refresh, 15000);
+setInterval(refresh, 300000);

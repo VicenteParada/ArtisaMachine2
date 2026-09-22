@@ -33,10 +33,12 @@ services:
       start_period: 30s
       retries: 12
     restart: unless-stopped
+    mem_limit: 1g
 
   mongodb:
     image: mongo:8.0
     container_name: artisa-mongodb
+    profiles: ["historical"]
     volumes:
       - mongodb_data:/data/db
     healthcheck:
@@ -46,20 +48,24 @@ services:
       start_period: 20s
       retries: 12
     restart: unless-stopped
+    mem_limit: 1400m
 
   etl:
     build:
       context: .
       dockerfile: ETLs/Dockerfile
     container_name: artisa-etl
+    profiles: ["historical"]
     environment:
       <<: *db-environment
       MONGO_URI: ${MONGO_DOCKER_URI:-mongodb://mongodb:27017}
       MONGO_DATABASE: ${MONGO_DATABASE:-gps_data}
       MONGO_COLLECTION: ${MONGO_COLLECTION:-raw_gps}
       MONGO_TIMEOUT_SECONDS: ${MONGO_TIMEOUT_SECONDS:-10}
-      TELEMETRY_BATCH_SIZE: ${TELEMETRY_BATCH_SIZE:-2000}
+      TELEMETRY_BATCH_SIZE: ${TELEMETRY_BATCH_SIZE:-5000}
       TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-300}
+      ETL_AUTOSTART: ${ETL_AUTOSTART:-0}
+      ETL_MAX_BLOCKS_PER_CYCLE: ${ETL_MAX_BLOCKS_PER_CYCLE:-1}
     depends_on:
       mariadb:
         condition: service_healthy
@@ -67,6 +73,7 @@ services:
         condition: service_healthy
     healthcheck: *python-health
     restart: unless-stopped
+    mem_limit: 512m
     init: true
 
   machine:
@@ -80,6 +87,7 @@ services:
         condition: service_healthy
     healthcheck: *python-health
     restart: unless-stopped
+    mem_limit: 768m
     init: true
 
   endpoints:
@@ -99,6 +107,7 @@ services:
         condition: service_healthy
     healthcheck: *python-health
     restart: unless-stopped
+    mem_limit: 384m
     init: true
 
   front:
@@ -113,6 +122,7 @@ services:
         condition: service_healthy
     healthcheck: *python-health
     restart: unless-stopped
+    mem_limit: 256m
     init: true
 
   auth:
@@ -130,6 +140,7 @@ services:
       start_period: 5s
       retries: 12
     restart: unless-stopped
+    mem_limit: 128m
     init: true
 
   nginx:
@@ -152,8 +163,11 @@ services:
       start_period: 5s
       retries: 12
     restart: unless-stopped
+    mem_limit: 128m
     init: true
 
 volumes:
   mariadb_data:
   mongodb_data:
+
+
