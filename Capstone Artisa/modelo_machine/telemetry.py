@@ -79,8 +79,11 @@ def cycle(previous_version, radius_km, min_samples, max_rows):
             connection.commit()
             return previous_version
         cursor.execute(
-            "SELECT asset_id, latitude, longitude, speed FROM raw_gps "
-            "ORDER BY report_date DESC LIMIT %s",
+            "SELECT gps.asset_id, gps.latitude, gps.longitude, gps.speed FROM raw_gps AS gps "
+            "INNER JOIN vehiculos AS v ON v.asset_id = gps.asset_id "
+            "INNER JOIN tipos_vehiculo AS t ON t.id_tipo = v.id_tipo "
+            "WHERE t.nombre = 'CAMION' "
+            "ORDER BY gps.report_date DESC LIMIT %s",
             (max_rows,),
         )
         rows = cursor.fetchall()
