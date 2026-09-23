@@ -625,7 +625,7 @@ function renderFleetMap(data) {
 
   const sourceLabel = data.sourceMode === "TELEMETRY_PROCESSED_SIMULATION"
     ? "Telemetría procesada"
-    : (data.sourceMode === "SIMULATION_PROCESSED" ? "Simulación aislada" : "Datos procesados");
+    : (data.sourceMode === "SIMULATION_PROCESSED" ? "Simulación aislada" : "Muestra GPS reciente");
   const minutes = Math.max(1, Math.round(Number(data.metadata.refresh_seconds || 300) / 60));
   $("map-last-update").textContent = sourceLabel + " · corte " +
     formatDataDay(data.snapshotDate) + " · actualización cada " + minutes + " min";
@@ -951,12 +951,12 @@ function renderTrips() {
     id.textContent = row.id;
     route.append(id);
     tr.append(route);
-    for (const text of [`${format(row.distancia_km, 1)} km`, `${format(row.duracion_horas, 2)} h`]) {
+    for (const text of [row.distancia_km === null ? "Sin dato" : `${format(row.distancia_km, 1)} km`, `${format(row.duracion_horas, 2)} h`]) {
       const td = document.createElement("td"); td.textContent = text; tr.append(td);
     }
     const prediction = document.createElement("td");
     const label = document.createElement("span"); label.className = "estimate";
-    label.textContent = row.duracion_estimada === null ? "Pendiente" : `${format(row.duracion_estimada, 2)} h`;
+    label.textContent = row.duracion_estimada === null ? "No disponible" : `${format(row.duracion_estimada, 2)} h`;
     prediction.append(label); tr.append(prediction); body.append(tr);
   }
   if (!visible.length) {
@@ -1047,32 +1047,39 @@ function renderTelemetry(summary, dataset, state) {
 function renderState(state) {
   const components = state.componentes || {};
   const count = Object.values(components).filter((status) => status === "ok").length;
-  $("system-status").textContent = `${count} de 5 servicios disponibles`;
-  $("system-status").className = `status ${count === 5 ? "" : "warning"}`;
+  $("system-status").textContent = format(count) + " de 5 servicios disponibles";
+  $("system-status").className = "status " + (count === 5 ? "" : "warning");
   for (const node of document.querySelectorAll("[data-service]")) {
     const okay = components[node.dataset.service] === "ok";
     const label = node.querySelector(".node-status");
     label.textContent = okay ? "En funcionamiento" : "Sin respuesta reciente";
-    label.className = `node-status ${okay ? "ok" : "bad"}`;
+    label.className = "node-status " + (okay ? "ok" : "bad");
   }
-  if (state.etl) {
-    const etl = state.etl;
-    $("last-sync").textContent = `Última carga: ${new Date(etl.ultima_carga).toLocaleString("es-CL")}`;
-    $("source-count").textContent = `${format(etl.leidos)} filas leídas · ${etl.rechazados} descartadas`;
-    $("etl-summary").textContent = `Origen: ${etl.origen}. Se normalizan ciudades y números, se validan rangos y se descartan IDs duplicados. ${etl.validos} filas válidas de ${etl.leidos}. Versión: ${etl.dataset_version.slice(0, 12)}.`;
+  const etl = state.etl;
+  if (etl) {
+    $("last-sync").textContent = etl.ultima_carga
+      ? "Última carga: " + formatUtc(etl.ultima_carga)
+      : "ETL aún sin primera carga";
+    $("source-count").textContent = "Muestra de simulación separada del ETL real";
+    $("etl-summary").textContent =
+      "La telemetría real procede de MongoDB, se valida en bloques y se conserva en raw_gps. " +
+      format(etl.validos || 0) + " registros válidos y " +
+      format(etl.rechazados || 0) + " rechazados de " +
+      format(etl.leidos || 0) + " leídos. Esta vista de viajes usa datos simulados independientes.";
     $("rejections").replaceChildren();
-    for (const rejected of etl.rechazos) {
-      const item = document.createElement("li"); item.textContent = `Fila ${rejected.fila}: ${rejected.motivo}`;
+    for (const rejected of (etl.rechazos || []).slice(0, 10)) {
+      const item = document.createElement("li");
+      item.textContent = rejected.motivo || rejected.reason || JSON.stringify(rejected);
       $("rejections").append(item);
     }
   }
-  if (state.modelo) {
-    const metrics = state.modelo.metricas;
-    $("model-error").textContent = `${format(metrics.mae_horas * 60, 1)} min`;
-    $("model-name").textContent = "Regresión lineal · scikit-learn";
-    $("model-training").textContent = `${metrics.filas_entrenamiento} viajes para entrenar · ${metrics.filas_evaluacion} para evaluar. Modelo final: ${metrics.filas_modelo_final} viajes.`;
-  }
-
+  const model = state.modelo_telemetria;
+  const metrics = model && model.metricas ? model.metricas : {};
+  $("model-error").textContent = model ? format(metrics.zonas_detectadas || 0) : "—";
+  $("model-name").textContent = model ? "DBSCAN · zonas GPS" : "Modelo de zonas pendiente";
+  $("model-training").textContent = model
+    ? format(metrics.reportes_entrenamiento || 0) + " reportes usados para identificar zonas frecuentes."
+    : "El modelo de zonas se activará después de la carga histórica.";
 }
 
 async function refresh() {
@@ -1173,3 +1180,8 @@ window.addEventListener("hashchange", syncDatasetView);
 syncDatasetView();
 if (token()) refresh();
 setInterval(refresh, 300000);
+
+// El esquema compartido no incluye predicciones de duración; evita ofrecer una acción engañosa.
+for (const control of $("prediction-form").querySelectorAll("input, button")) control.disabled = true;
+predictionMessage("MODELO DE DURACIÓN NO DISPONIBLE",
+  "El modelo actual detecta zonas geoespaciales. La estimación de duración requiere datos y entrenamiento adicionales.");

@@ -7,7 +7,6 @@ COPY common/ common/
 COPY DB/schema.sql DB/schema.sql
 COPY simulacion/ simulacion/
 COPY endpoints/ endpoints/
-COPY app.py schema.sql ./
 USER 10001:10001
 EXPOSE 8000
 CMD ["python", "-m", "endpoints.api"]

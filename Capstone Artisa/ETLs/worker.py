@@ -1,4 +1,4 @@
-"""Trabajador ETL controlado; queda pausado salvo activación explícita."""
+"""MongoDB (gps_data.raw_gps) -> ETL -> MariaDB. Sondea cada TELEMETRY_INTERVAL_SECONDS."""
 
 import os
 import threading
@@ -7,56 +7,38 @@ from urllib.parse import urlsplit
 
 from common.db import initialize_db
 from common.http import JsonHandler, serve
-from ETLs.telemetry import (
-    TelemetryConfig,
-    mark_status,
-    progress_snapshot,
-    record_error,
-    run_batches,
-)
+from ETLs.telemetry import TelemetryConfig, record_error, run_once
 
 
-def _boolean_env(name, default=False):
-    value = os.environ.get(name, "1" if default else "0").strip().casefold()
-    return value in {"1", "true", "yes", "si", "sí", "on"}
-
-
-INTERVAL = int(os.environ.get("TELEMETRY_INTERVAL_SECONDS", "300"))
-MAX_BLOCKS_PER_CYCLE = int(os.environ.get("ETL_MAX_BLOCKS_PER_CYCLE", "1"))
-AUTOSTART = _boolean_env("ETL_AUTOSTART", False)
-STATE = {"last_success": 0.0, "error": None, "estado": "iniciando"}
+INTERVAL = int(os.environ.get("TELEMETRY_INTERVAL_SECONDS", "30"))
+STATE = {"last_success": 0.0, "error": None, "estado": "pendiente"}
 
 
 def loop():
-    try:
-        initialize_db()
-        config = TelemetryConfig.from_env()
-        if not AUTOSTART:
-            mark_status("pausado")
-            STATE.update(last_success=time.monotonic(), error=None, estado="pausado")
-    except Exception as error:
-        STATE.update(error=f"{type(error).__name__}: {error}", estado="error")
-        return
-
+    initialized = False
+    config = None
     while True:
-        if not AUTOSTART:
-            STATE.update(last_success=time.monotonic(), progreso=progress_snapshot())
-            time.sleep(min(30, INTERVAL))
-            continue
         try:
-            results = run_batches(config, max_blocks=MAX_BLOCKS_PER_CYCLE)
-            result = results[-1]
+            if not initialized:
+                initialize_db()
+                config = TelemetryConfig.from_env()
+                initialized = True
+            result = run_once(config)
             STATE.update(last_success=time.monotonic(), error=None, **result)
-            print(
-                f"ETL: ciclo controlado; {result['validos']} guardados, "
-                f"{result['rechazados']} rechazados; progreso {result['progreso_pct']}%",
-                flush=True,
-            )
+            if result["recibidos"]:
+                print(
+                    f"ETL: {result['validos']} guardados, {result['rechazados']} descartados; "
+                    f"total {result['total_validos']} ({result['estado']})",
+                    flush=True,
+                )
+            if result["estado"] != "esperando":
+                continue  # aun hay mas datos atrasados en Mongo: sigue drenando sin esperar
         except Exception as error:
             message = f"{type(error).__name__}: {error}"
-            STATE.update(error=message, estado="error")
+            STATE["error"] = message
             try:
-                record_error(message)
+                if initialized:
+                    record_error(message)
             except Exception:
                 pass
             print(f"ETL: ciclo fallido ({message})", flush=True)
@@ -68,14 +50,10 @@ class Handler(JsonHandler):
         if urlsplit(self.path).path != "/health":
             self.respond(404, {"error": "Ruta no encontrada"})
             return
-        age = time.monotonic() - STATE["last_success"]
-        stable = STATE.get("estado") in {"pausado", "completado"}
-        ready = STATE["error"] is None and (stable or age < max(60, INTERVAL * 3))
+        ready = STATE["error"] is None and time.monotonic() - STATE["last_success"] < max(60, INTERVAL * 3)
         state = {key: value for key, value in STATE.items() if key != "last_success"}
-        self.respond(
-            200 if ready else 503,
-            {"servicio": "etl", "status": "ok" if ready else "unavailable", "telemetria": state},
-        )
+        self.respond(200 if ready else 503, {"servicio": "etl", "status": "ok" if ready else "unavailable",
+                                                "telemetria": state})
 
 
 if __name__ == "__main__":
