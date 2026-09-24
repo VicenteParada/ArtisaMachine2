@@ -36,9 +36,8 @@ modelo ni sus solicitudes.
 - auth/ y nginx/: inicio de sesión y entrada HTTP del puerto 8080.
 - simulacion/: datos de demostración separados del histórico.
 
-El archivo app.py de la raíz es una demostración anterior y no forma parte de
-los servicios activos. Los módulos processing/ y ETLs/realtime.py son
-experimentos históricos; no deben ejecutarse sobre este esquema de seis tablas.
+Los módulos processing/ y ETLs/realtime.py son experimentos históricos; no deben
+ejecutarse sobre este esquema de seis tablas.
 
 ## Arranque y seguimiento en WSL
 

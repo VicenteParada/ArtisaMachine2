@@ -1,8 +1,5 @@
 *
-!app.py
-!Dockerfile
 !requirements.txt
-!schema.sql
 !common/
 !common/**
 !DB/
