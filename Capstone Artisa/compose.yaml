@@ -79,6 +79,8 @@ services:
       context: .
       dockerfile: modelo_machine/Dockerfile
     container_name: artisa-machine
+    volumes:
+      - ./exports:/app/exports
     environment:
       <<: *db-environment
       TELEMETRY_MODEL_MAX_ROWS: ${TELEMETRY_MODEL_MAX_ROWS:-5000}
@@ -91,12 +93,32 @@ services:
     mem_limit: 768m
     init: true
 
+  route-catalog:
+    build:
+      context: .
+      dockerfile: modelo_machine/Dockerfile
+    profiles: ["historical"]
+    command: ["python", "-m", "modelo_machine.route_catalog"]
+    volumes:
+      - ./exports:/app/exports
+    environment:
+      <<: *db-environment
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    mem_limit: 1g
+    init: true
+
   endpoints:
     build:
       context: .
       dockerfile: endpoints/Dockerfile
     container_name: artisa-endpoints
+    volumes:
+      - ./exports:/app/exports:ro
     environment:
+      MAP_CATALOG_FILE: /app/exports/route_catalog.json
+      MAP_CATALOG_PILOT_FILE: /app/exports/route_catalog_pilot.json
       <<: *db-environment
       MAP_DATA_SOURCE: ${MAP_DATA_SOURCE:-telemetry}
       MAP_SIMULATION_FILE: ${MAP_SIMULATION_FILE:-/app/simulacion/mapa_procesado.json}

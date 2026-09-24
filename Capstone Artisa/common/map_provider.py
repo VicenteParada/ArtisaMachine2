@@ -9,7 +9,7 @@ from pathlib import Path
 from threading import Lock
 import time
 
-from common.telemetry_map import analyze_telemetry
+from common.telemetry_map import analyze_telemetry, _distance_km, _point_segment_distance_km
 
 
 ROUTE_STYLES = {
@@ -280,7 +280,8 @@ def normalize_processed_map(raw):
     readings = [_reading(reading, route_ids, reading_ids) for reading in raw.get("readings", [])]
     if not routes and not vehicles and not readings:
         raise MapDataError("El proveedor del mapa no contiene datos geograficos")
-    _validate_usage(routes, trips)
+    if raw.get("source_mode") not in ("HISTORICAL_GPS_CATALOG", "HISTORICAL_GPS_PILOT"):
+        _validate_usage(routes, trips)
 
     ordered_routes = sorted(
         routes,
@@ -302,7 +303,7 @@ def normalize_processed_map(raw):
         "available_report_count": int(
             source_summary.get("available_report_count", window_report_count)
         ),
-        "trip_count": len(trips),
+        "trip_count": int(source_summary.get("trip_count", len(trips))),
         "route_count": len(routes),
         "vehicle_count": len(vehicles),
         "stop_count": len(stops),
@@ -454,6 +455,129 @@ def _telemetry_source(cursor):
     return int((cursor.fetchone() or {}).get("validos") or 0)
 
 
+def _historical_catalog():
+    source = Path(os.environ.get("MAP_CATALOG_FILE", "/app/exports/route_catalog.json"))
+    if not source.is_file():
+        pilot = Path(os.environ.get("MAP_CATALOG_PILOT_FILE", "/app/exports/route_catalog_pilot.json"))
+        source = pilot if pilot.is_file() else source
+    if not source.is_file():
+        return None
+    try:
+        catalog = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise MapDataError(f"El catálogo histórico no se puede leer: {error}") from error
+    if not catalog.get("routes"):
+        raise MapDataError("El catálogo histórico no contiene rutas")
+    return catalog
+
+
+def _latest_vehicle_rows(cursor):
+    """Últimas cinco lecturas por camión usando el índice asset_id/report_date."""
+    cursor.execute("SELECT asset_id FROM raw_gps GROUP BY asset_id")
+    assets = [row["asset_id"] for row in cursor.fetchall() if row.get("asset_id")]
+    rows = []
+    for asset in assets:
+        cursor.execute(
+            """SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
+            speed,heading,ignition,event_name,driver_name,driver_last_name,
+            driver_document_number FROM raw_gps WHERE asset_id=%s
+            ORDER BY report_date DESC LIMIT 5""", (asset,))
+        rows.extend(cursor.fetchall())
+    return rows
+
+
+def _vehicle_from_raw(row):
+    return {
+        "vehicle_id": row["asset_id"],
+        "vehicle_name": row.get("asset_name") or row["asset_id"],
+        "route_id": None,
+        "latitude": row["latitude"], "longitude": row["longitude"],
+        "timestamp": row["report_date"].isoformat(),
+        "speed_kmh": row.get("speed"), "heading": row.get("heading"),
+        "ignition": row.get("ignition"), "event": row.get("event_name"),
+        "driver_name": row.get("driver_name"),
+        "driver_last_name": row.get("driver_last_name"),
+        "driver_document_number": row.get("driver_document_number"),
+    }
+
+
+def _match_route(track, routes):
+    """Requiere dos posiciones y dirección; si no hay evidencia devuelve None."""
+    if len(track) < 2:
+        return None
+    first, last = track[0], track[-1]
+    start = (float(first["latitude"]), float(first["longitude"]))
+    finish = (float(last["latitude"]), float(last["longitude"]))
+    if _distance_km(start, finish) < 0.2:
+        return None
+    direction = (finish[0] - start[0], finish[1] - start[1])
+    direction_length = (direction[0] ** 2 + direction[1] ** 2) ** 0.5
+    best = (0.8, None)
+    for route_id, points, lat_min, lat_max, lon_min, lon_max in routes:
+        if not (lat_min - 0.01 <= finish[0] <= lat_max + 0.01 and
+                lon_min - 0.01 <= finish[1] <= lon_max + 0.01):
+            continue
+        first_distance = min(_point_segment_distance_km(start, a, b)
+                             for a, b in zip(points, points[1:]))
+        last_distance = min(_point_segment_distance_km(finish, a, b)
+                            for a, b in zip(points, points[1:]))
+        if max(first_distance, last_distance) > 0.8:
+            continue
+        route_direction = (points[-1][0] - points[0][0],
+                           points[-1][1] - points[0][1])
+        route_length = (route_direction[0] ** 2 + route_direction[1] ** 2) ** 0.5
+        if route_length > 0 and (
+            direction[0] * route_direction[0] + direction[1] * route_direction[1]
+        ) / (direction_length * route_length) < 0.3:
+            continue
+        score = first_distance + last_distance
+        if score < best[0]:
+            best = (score, route_id)
+    return best[1]
+
+
+def _apply_historical_catalog(raw, catalog, rows):
+    complete = bool(catalog.get("metadata", {}).get("catalog_complete"))
+    raw["source_mode"] = "HISTORICAL_GPS_CATALOG" if complete else "HISTORICAL_GPS_PILOT"
+    raw["description"] = (
+        "Rutas calculadas con el histórico completo de MariaDB."
+        if complete else "Ensayo de rutas históricas parcial; aún no representa toda la flota."
+    )
+    raw["routes"] = catalog["routes"]
+    raw["trips"] = []
+    raw["stops"] = catalog.get("stops", [])[:80]
+    raw["summary"]["trip_count"] = catalog["summary"]["trip_count"]
+    raw["summary"]["stop_event_count"] = catalog["summary"].get("stop_event_count", 0)
+    raw["metadata"].update(catalog.get("metadata", {}))
+    raw["metadata"]["stop_marker_limit"] = 80
+    raw["metadata"]["route_grouping"] = "Agrupación de viajes por origen, destino y forma GPS"
+    raw["metadata"]["classification"] = (
+        "Uso histórico = número de viajes completos por ruta. "
+        "Los puntos GPS y camiones distintos no determinan el color."
+    )
+    raw["metadata"]["data_retention"] = "raw_gps permanece intacta en MariaDB."
+    by_asset = defaultdict(list)
+    for row in sorted(rows, key=lambda item: item["report_date"]):
+        asset = str(row.get("asset_id") or "")
+        if asset:
+            by_asset[asset].append(row)
+    raw["vehicles"] = [_vehicle_from_raw(points[-1]) for points in by_asset.values()
+                       if points]
+    route_index = []
+    for route in raw["routes"]:
+        coordinates = route["geometry"]["coordinates"]
+        points = [(lat, lon) for lon, lat in coordinates]
+        route_index.append((
+            route["route_id"], points,
+            min(point[0] for point in points), max(point[0] for point in points),
+            min(point[1] for point in points), max(point[1] for point in points),
+        ))
+    for vehicle in raw["vehicles"]:
+        track = by_asset.get(vehicle["vehicle_id"], [])[-5:]
+        vehicle["route_id"] = _match_route(track, route_index)
+    return raw
+
+
 def load_telemetry_map(cursor):
     """Analiza una muestra reciente de raw_gps, sin tablas derivadas persistentes."""
     max_reports = _environment_integer("MAP_MAX_REPORTS", 3000, 100, 10000)
@@ -461,7 +585,7 @@ def load_telemetry_map(cursor):
     available_report_count = _telemetry_source(cursor)
     cursor.execute(
         """SELECT report_id,asset_id,asset_name,report_date,latitude,longitude,
-        speed,event_name,driver_name,driver_last_name,driver_document_number
+        speed,heading,ignition,event_name,driver_name,driver_last_name,driver_document_number
         FROM raw_gps ORDER BY report_date DESC,report_id DESC LIMIT %s""",
         (max_reports,),
     )
@@ -469,9 +593,11 @@ def load_telemetry_map(cursor):
     if not rows:
         raise MapDataError("MariaDB aun no contiene telemetria para procesar")
     analysis = analyze_telemetry(rows, current_rows=rows)
-    data = normalize_processed_map(
-        _telemetry_contract(analysis, available_report_count, refresh_seconds)
-    )
+    raw = _telemetry_contract(analysis, available_report_count, refresh_seconds)
+    catalog = _historical_catalog()
+    if catalog:
+        raw = _apply_historical_catalog(raw, catalog, _latest_vehicle_rows(cursor))
+    data = normalize_processed_map(raw)
     data["metadata"]["telemetry_table"] = "raw_gps"
     data["metadata"]["sample_size"] = len(rows)
     return data

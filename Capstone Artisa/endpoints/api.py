@@ -2,15 +2,17 @@
 
 from datetime import datetime
 import json
+import re
 import socket
 import time
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import pymysql
 
 from common.db import connect_db
 from common.http import JsonHandler, RequestError, serve
 from common.map_provider import MapDataError, get_map_data, load_processed_map
+from common.vehicle_journey import load_vehicle_journey
 
 
 STARTED_AT = time.monotonic()
@@ -111,6 +113,17 @@ class Handler(JsonHandler):
                     self.respond(200, _map(cursor))
                 elif path == "/api/dashboard":
                     self.respond(200, _dashboard(_map(cursor)))
+                elif path.startswith("/api/vehiculos/") and path.endswith("/recorrido"):
+                    asset_id = unquote(path[len("/api/vehiculos/"):-len("/recorrido")]).strip("/")
+                    if not re.fullmatch(r"[A-Za-z0-9_-]{1,16}", asset_id):
+                        raise RequestError(400, "asset_id inválido")
+                    day = parse_qs(parsed.query).get("fecha", [None])[0]
+                    try:
+                        journey = load_vehicle_journey(cursor, asset_id, day)
+                    except ValueError as error:
+                        raise RequestError(400, str(error)) from error
+                    self.respond(200 if journey else 404,
+                                 journey or {"error": "No hay recorrido para esa fecha"})
                 elif path == "/api/telemetria/resumen":
                     cursor.execute(
                         "SELECT MIN(report_date) AS desde,MAX(report_date) AS hasta FROM raw_gps"

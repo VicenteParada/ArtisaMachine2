@@ -14,22 +14,30 @@ en bloques de 5000 y confirma los registros y el cursor juntos en MariaDB. El
 volumen de MariaDB conserva lo ya cargado al parar y reanudar el contenedor.
 Los datos de MongoDB y MariaDB son locales y no se suben a GitHub.
 
-El mapa y el dashboard leen una muestra reciente de hasta 3000 reportes de
-raw_gps cada cinco minutos. Infieren trayectos y paradas de esa ventana, mientras
-el total histórico se consulta en raw_gps_estado. La clasificación verde,
-naranja y roja se aplica a las rutas inferidas en la ventana. El trazado sigue
-puntos GPS filtrados; aún no hay ajuste exacto a la red vial. Los camiones
-muestran la última posición dentro de esa muestra, que puede ser antigua si no
-se recibe telemetría nueva. La sección de datos simulados usa
-simulacion/mapa_procesado.json y no mezcla esos datos con raw_gps. La predicción
-de duración queda deshabilitada porque el esquema compartido no contiene ese
-modelo ni sus solicitudes.
+El mapa toma la última posición disponible de cada vehículo en raw_gps. Cada
+cinco minutos vuelve a consultar esas posiciones; esto no convierte el histórico
+en telemetría en vivo. Si un vehículo no transmite, aparece como «sin señal»
+con la hora de su última lectura. Al seleccionarlo se consulta, bajo demanda,
+su recorrido GPS del último día registrado: trazado, distancia y paradas
+observadas. El día no equivale necesariamente a una jornada laboral.
+
+Las rutas coloreadas proceden de un catálogo generado fuera de la petición web.
+El procesamiento por camión lee MariaDB en secuencia, agrupa recorridos completos
+por origen, destino y forma GPS, y clasifica según pasadas por ruta. El catálogo
+piloto usa solo cinco camiones y se identifica claramente como parcial. El
+proceso completo se escribe en exports/route_catalog.json cuando termina; la
+API cambia automáticamente a ese archivo en el siguiente refresco. La geometría
+es una traza GPS representativa, sin map matching vial confirmado. El dashboard
+de métricas todavía resume una ventana reciente; sus cifras no deben tomarse
+como indicadores de las 23 millones de lecturas.
 
 ## Carpetas activas
 
 - DB/schema.sql: definición compartida de las seis tablas.
 - ETLs/telemetry.py y ETLs/worker.py: carga MongoDB → MariaDB.
 - modelo_machine/telemetry.py: clustering geoespacial → modelo_telemetria_estado.
+- modelo_machine/route_catalog.py: catálogo histórico versionado y reanudable.
+- common/vehicle_journey.py: ficha y recorrido GPS de un camión en un día observado.
 - common/map_provider.py y common/telemetry_map.py: contrato y análisis del mapa.
 - endpoints/api.py: API de estado, telemetría, mapa, dashboard y faenas.
 - front/static/: interfaz; front/server.py sirve archivos y transmite la API.
@@ -70,20 +78,22 @@ La carga de los archivos históricos disponibles ya terminó. El modelo DBSCAN a
 
 ## Agregar nuevas semanas de reportes
 
-Los archivos disponibles cubren del 1 de abril al 26 de mayo de 2026. Cuando
-lleguen semanas posteriores, copia los JSON originales a
+La última lectura disponible en esta instalación es del 8 de septiembre de
+2026. Cuando lleguen archivos posteriores, copia los JSON originales a
 C:\Users\angel\Desktop\base de datos completa con nombres como
-reportes_semana_09_20260527.json. No muevas los ocho archivos anteriores.
+reportes_semana_17_20260909.json. Conserva los nombres originales y los archivos anteriores.
 
 En PowerShell de VS Code, primero revisa qué archivos nuevos detecta el
 importador. Este paso no modifica ninguna base de datos:
 
-    wsl.exe -e bash "/mnt/c/Users/angel/Documents/ChatGPT/Artisa/Capstone Artisa/scripts/import_mongodb.sh" "/mnt/c/Users/angel/Desktop/base de datos completa" 20260527 --dry-run
+    wsl.exe -e bash "/mnt/c/Users/angel/Documents/ChatGPT/Artisa/Capstone Artisa/scripts/import_mongodb.sh" "/mnt/c/Users/angel/Desktop/base de datos completa" 20260909 --dry-run
 
-Si muestra solo las semanas nuevas y sus archivos tienen el mismo formato JSON
-que los originales, ejecútalo sin --dry-run:
+El valor 20260909 es un ejemplo: sustitúyelo por la primera fecha realmente
+nueva si los archivos recibidos comienzan otro día. Si el ensayo muestra solo
+las semanas nuevas y tienen el mismo formato JSON que los originales, ejecútalo
+sin --dry-run con esa misma fecha:
 
-    wsl.exe -e bash "/mnt/c/Users/angel/Documents/ChatGPT/Artisa/Capstone Artisa/scripts/import_mongodb.sh" "/mnt/c/Users/angel/Desktop/base de datos completa" 20260527
+    wsl.exe -e bash "/mnt/c/Users/angel/Documents/ChatGPT/Artisa/Capstone Artisa/scripts/import_mongodb.sh" "/mnt/c/Users/angel/Desktop/base de datos completa" 20260909
 
 El script detiene temporalmente el ETL y el modelo, carga solo las semanas
 pendientes en MongoDB y vuelve a iniciar el ETL. No detengas el PC ni cierres
@@ -100,12 +110,35 @@ Si aparece un archivo .artisa-en-proceso, la importación se interrumpió;
 revisa cuántos documentos entraron antes de reintentar para evitar duplicados.
 No borres los volúmenes de Docker ni reinicies el cursor del ETL. Los archivos
 JSON y los marcadores de importación quedan fuera de GitHub.
+
+## Catálogo de rutas históricas
+
+Con MariaDB funcionando, desde la carpeta Capstone Artisa:
+
+    wsl.exe -e docker compose build route-catalog
+    wsl.exe -e docker compose run --rm route-catalog
+
+El proceso genera un archivo SQLite de trabajo en exports/ después de cada
+camión. Si se interrumpe, el mismo comando lo reanuda desde el siguiente camión.
+El JSON definitivo solo reemplaza al anterior al finalizar el conjunto completo.
+No borres exports/ si necesitas continuar. Para verificar la cobertura, revisa
+metadata.processed_report_count, metadata.source_report_count y
+metadata.catalog_complete en exports/route_catalog.json. Si la fuente cambia,
+se crea automáticamente un nuevo checkpoint versionado.
+
+La ruta del camión se asigna solo si varias posiciones, dirección y proximidad
+aportan evidencia suficiente. En otro caso la ficha dice «Sin clasificar».
+Patente y fin de jornada no están confirmados en la fuente; se muestran como
+no informados. Las paradas y distancias son inferencias GPS, no un registro
+certificado de operaciones.
+
 ## Limitaciones actuales
 
-Las rutas y paradas del mapa son inferencias exploratorias de una ventana, no
-resultados persistidos de todo el histórico. El modelo DBSCAN identifica zonas
-frecuentes, no trayectos completos ni tiempos de viaje. La sincronización con
-una fuente en vivo y el map matching vial todavía no están implementados.
-Las columnas heredadas adicionales que ya existían en raw_gps y raw_gps_estado
-se conservaron en el volumen para no perder telemetría ni progreso; el código
-nuevo solo necesita las columnas definidas en DB/schema.sql.
+El ajuste a la red vial aún no está implementado. Algunos saltos con GPS
+insuficiente pueden seguirse viendo como tramos rectos y requieren revisión
+manual antes de tomar decisiones operativas. Tampoco existe una fuente en vivo
+conectada: la pantalla enseña las últimas lecturas importadas, aunque sean
+antiguas. El modelo DBSCAN identifica zonas frecuentes, no trayectos completos
+ni tiempos de viaje. Las columnas heredadas adicionales que ya existían en
+raw_gps y raw_gps_estado se conservaron en el volumen para no perder
+telemetría ni progreso; el esquema compartido no se amplió.
