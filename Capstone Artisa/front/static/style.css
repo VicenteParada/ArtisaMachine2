@@ -379,3 +379,12 @@
   font-weight: 700;
 }
 .popup-journey-button:hover { background: #124b89; }
+
+/* Las vías del mapa base no compiten con la clasificación verde/naranja/roja. */
+#heatmap-map .leaflet-tile-pane { filter: grayscale(.72) saturate(.55) contrast(.96) brightness(1.04); }
+
+/* La vista principal resume únicamente rutas y vehículos. */
+.heatmap-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 690px) {
+  .heatmap-metrics { grid-template-columns: minmax(0, 1fr); }
+}

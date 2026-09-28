@@ -58,7 +58,7 @@
       <a id="overview-link" href="#flujo"><span>▦</span> Arquitectura</a>
       <a data-dataset-link="dashboard" href="#dashboard"><span>▥</span> Dashboard</a>
       <a data-dataset-link="real" href="#datos-reales"><span>⌖</span> Datos reales</a>
-      <a data-dataset-link="heatmap" href="#mapa-calor"><span>◉</span> Mapa de calor</a>
+      <a data-dataset-link="heatmap" href="#mapa-calor"><span>◉</span> Mapa de rutas</a>
       <a data-dataset-link="simulated" href="#datos-simulados"><span>◇</span> Datos simulados</a>
     </nav>
     <div class="sidebar-note"><span class="dot"></span> Entorno local<p>Origen, transformación y predicciones en un mismo proyecto.</p><span class="tag">TELEMETRÍA REAL + DEMO</span></div>
@@ -90,7 +90,7 @@
     <nav class="dataset-tabs" aria-label="Espacios de análisis">
       <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores y gráficos operativos</small></span></a>
       <a class="dataset-tab" data-dataset-tab="real" href="#datos-reales"><span class="dataset-icon">⌖</span><span><strong>Datos reales</strong><small>API de origen → ETL → MariaDB</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de calor</strong><small>Rutas completas y paradas</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de rutas</strong><small>Rutas históricas y camiones</small></span></a>
       <a class="dataset-tab" data-dataset-tab="simulated" href="#datos-simulados"><span class="dataset-icon">◇</span><span><strong>Datos simulados</strong><small>Viajes de demostración → Machine Learning</small></span></a>
     </nav>
     <div id="dashboard" class="dataset-space" data-dataset-view="dashboard" hidden>
@@ -155,7 +155,7 @@
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
       <section class="panel heatmap-panel">
-        <div class="section-top"><div><span class="eyebrow">03 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas y paradas</h2></div><span id="heatmap-source-status" class="status simulation">Muestra reciente</span></div>
+        <div class="section-top"><div><span class="eyebrow">03 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas históricas</h2></div><span id="heatmap-source-status" class="status simulation">Muestra reciente</span></div>
         <p id="heatmap-intro" class="telemetry-intro">Consultando la fuente del mapa y su cobertura histórica…</p>
         <div class="route-filter-panel">
           <span>Mostrar rutas</span>
@@ -171,21 +171,18 @@
           <div class="map-layer-actions" role="group" aria-label="Controlar capas del mapa">
             <label class="map-layer-toggle routes"><input type="checkbox" data-map-layer="routes" checked> Rutas</label>
             <label class="map-layer-toggle vehicles"><input type="checkbox" data-map-layer="vehicles" checked> Vehículos</label>
-            <label class="map-layer-toggle stops"><input type="checkbox" data-map-layer="stops" checked> Paradas</label>
-            <label class="map-layer-toggle readings"><input type="checkbox" data-map-layer="readings"> Mostrar lecturas GPS</label>
           </div>
         </div>
         <div class="real-metrics heatmap-metrics" aria-label="Resumen del mapa de calor">
           <article><span>Recorridos analizados</span><strong id="heatmap-trips">—</strong><small>Trips asociados a rutas</small></article>
           <article><span>Vehículos</span><strong id="heatmap-vehicles">—</strong><small>Última posición por vehículo</small></article>
           <article><span>Rutas identificadas</span><strong id="heatmap-routes">—</strong><small>Agrupaciones de recorridos</small></article>
-          <article><span>Zonas de parada visibles</span><strong id="heatmap-stops">—</strong><small>Las más frecuentes del catálogo</small></article>
         </div>
         <div class="heatmap-layout">
           <article class="map-card">
             <div class="map-title"><div><strong>Monitoreo de rutas y flota</strong><small id="heatmap-zones">Preparando datos técnicos…</small></div><div class="map-title-actions"><span id="map-last-update">Cargando contrato del mapa…</span><button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button></div></div>
-            <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa interactivo de rutas, paradas y camiones"><span class="map-loading">Cargando cartografía…</span></div>
-            <div class="heat-legend"><span>Uso bajo</span><i></i><span>Uso medio</span><i></i><span>Uso alto</span><i></i><b class="legend-stop">○ Parada</b><b class="legend-truck">🚚 Camión</b><b class="legend-reading">● Lectura técnica</b><small>Rutas punteadas: trazo GPS sin ajuste vial</small></div>
+            <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa interactivo de rutas históricas y camiones"><span class="map-loading">Cargando cartografía…</span></div>
+            <div class="heat-legend"><span>Uso bajo</span><i></i><span>Uso medio</span><i></i><span>Uso alto</span><i></i><b class="legend-truck">🚚 Camión</b><small>Trazos representativos de GPS; sin ajuste vial exacto</small></div>
           </article>
           <aside class="route-insights" aria-label="Explorador de rutas y vehículos">
             <article class="monitor-panel">
@@ -207,18 +204,16 @@
                   <div><dt>Inicio observado</dt><dd id="journey-start">—</dd></div>
                   <div><dt>Última posición</dt><dd id="journey-end">—</dd></div>
                   <div><dt>Distancia GPS</dt><dd id="journey-distance">—</dd></div>
-                  <div><dt>Paradas</dt><dd id="journey-stops">—</dd></div>
                   <div><dt>Tiempo en movimiento</dt><dd id="journey-moving">—</dd></div>
                   <div><dt>Viajes encadenados</dt><dd id="journey-chains">—</dd></div>
                   <div><dt>Ruta histórica</dt><dd id="journey-route">—</dd></div>
                 </dl>
                 <small id="journey-note"></small>
-                <button id="journey-hide" type="button">Ocultar recorrido</button>
+                <button id="journey-hide" type="button">Volver a vista general</button>
               </div>
             </article>
             <article class="route-highlight most"><span>RUTA MÁS USADA</span><strong id="most-route">Calculando…</strong><small id="most-route-usage">—</small></article>
             <article class="route-highlight least"><span>RUTA MENOS USADA</span><strong id="least-route">Calculando…</strong><small id="least-route-usage">—</small></article>
-            <article class="stop-ranking"><span class="eyebrow">PARADAS DESTACADAS</span><ol id="stop-ranking"><li>Calculando…</li></ol></article>
             <article class="geo-model">
               <span class="eyebrow">FUENTE DEL MAPA</span>
               <strong id="geo-model-zones">Contrato procesado</strong>

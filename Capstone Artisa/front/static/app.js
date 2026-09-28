@@ -172,16 +172,15 @@ function routeUsageSummary(route) {
 }
 
 const ROUTE_DRAW_ORDER = ["LOW", "MEDIUM", "HIGH"];
-const mapLayerVisibility = {routes: true, vehicles: true, stops: true, readings: false};
+const mapLayerVisibility = {routes: true, vehicles: true};
 let activeRouteFilter = "ALL";
 let activeMonitorTab = "routes";
 let fleetMap = null;
-let readingLayer = null;
 const routeLayers = {LOW: null, MEDIUM: null, HIGH: null};
-let stopLayer = null;
 let truckLayer = null;
 let journeyLayer = null;
 let journeyRequest = 0;
+let activeJourneyVehicleId = null;
 let pendingMapBounds = null;
 let mapHasFitted = false;
 let currentMapData = null;
@@ -228,8 +227,8 @@ function refreshSelectionStyles() {
   for (const [routeId, record] of routeMapLayers) {
     const selected = routeId === selectedRouteId;
     record.halo.setStyle({
-      weight: selected ? record.baseWeight + 5 : record.baseWeight + 2,
-      opacity: selected ? 0.9 : 0.45
+      weight: selected ? record.haloWeight + 3 : record.haloWeight,
+      opacity: selected ? 1 : record.haloOpacity
     });
     record.line.setStyle({
       weight: selected ? record.baseWeight + 3 : record.baseWeight,
@@ -302,7 +301,25 @@ function renderRouteMonitor(routes) {
 }
 
 function vehicleDriver(vehicle) {
-  return [vehicle.driver_name, vehicle.driver_last_name].filter(Boolean).join(" ") || "Conductor sin informar";
+  const structured = [vehicle.driver_name, vehicle.driver_last_name]
+    .map((part) => String(part || "").trim()).filter(Boolean).join(" ");
+  if (structured) return structured;
+  // Algunos nombres incluyen una referencia al conductor, pero no es un dato verificado.
+  const match = String(vehicle.vehicle_name || "").match(
+    /^\d+-Camioneta-([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)([A-ZÁÉÍÓÚÑ][a-záéíóúñ]*)$/u
+  );
+  if (match) {
+    const surname = match[2].length === 1 ? match[2] + "." : match[2];
+    return `${match[1]} ${surname} (según nombre del vehículo)`;
+  }
+  return "No informado";
+}
+
+function vehiclePlate(vehicle) {
+  const explicit = String(vehicle.patente || vehicle.plate || vehicle.license_plate || "").trim();
+  if (explicit) return explicit;
+  const id = String(vehicle.vehicle_id || "").trim().toUpperCase();
+  return /^(?:[A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/.test(id) ? id : null;
 }
 
 function vehicleStatus(vehicle) {
@@ -346,7 +363,7 @@ function renderLiveFleet(vehicles) {
     detail.textContent = status.label + " · " + speed + " · " + vehicleDriver(vehicle);
     copy.append(name, detail);
     button.append(icon, copy);
-    button.addEventListener("click", () => { selectVehicle(vehicle); showVehicleJourney(vehicle); });
+    button.addEventListener("click", () => selectVehicle(vehicle));
     item.append(button);
     list.append(item);
   }
@@ -385,7 +402,7 @@ function setMonitorTab(tab) {
 function applyRouteFilter() {
   if (!fleetMap) return;
   for (const level of ROUTE_DRAW_ORDER) {
-    const visible = mapLayerVisibility.routes &&
+    const visible = mapLayerVisibility.routes && !activeJourneyVehicleId &&
       (activeRouteFilter === "ALL" || activeRouteFilter === level);
     setLayerVisibility(routeLayers[level], visible);
   }
@@ -393,16 +410,19 @@ function applyRouteFilter() {
     const selected = button.dataset.routeFilter === activeRouteFilter;
     button.classList.toggle("is-active", selected);
     button.setAttribute("aria-pressed", selected ? "true" : "false");
-    button.disabled = !mapLayerVisibility.routes;
+    button.disabled = !mapLayerVisibility.routes || !!activeJourneyVehicleId;
   }
   if (currentMapData) renderRouteMonitor(currentMapData.routes);
 }
 
 function applyMapLayerVisibility() {
   if (!fleetMap) return;
-  setLayerVisibility(readingLayer, mapLayerVisibility.readings);
-  setLayerVisibility(stopLayer, mapLayerVisibility.stops);
-  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles);
+  for (const [vehicleId, marker] of truckMarkers) {
+    const visible = !activeJourneyVehicleId || vehicleId === activeJourneyVehicleId;
+    if (visible && !truckLayer.hasLayer(marker)) truckLayer.addLayer(marker);
+    if (!visible && truckLayer.hasLayer(marker)) truckLayer.removeLayer(marker);
+  }
+  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles || !!activeJourneyVehicleId);
   applyRouteFilter();
 }
 
@@ -422,18 +442,16 @@ function initializeFleetMap() {
   }).addTo(fleetMap);
 
   for (const [paneName, zIndex] of [
-    ["readingPane", 350], ["routeLowPane", 410], ["routeMediumPane", 420],
-    ["routeHighPane", 430], ["stopPane", 600], ["journeyPane", 625], ["truckPane", 650]
+    ["routeLowPane", 410], ["routeMediumPane", 420],
+    ["routeHighPane", 430], ["journeyPane", 625], ["truckPane", 650]
   ]) {
     fleetMap.createPane(paneName).style.zIndex = String(zIndex);
   }
 
-  readingLayer = L.layerGroup();
   for (const level of ROUTE_DRAW_ORDER) routeLayers[level] = L.layerGroup();
-  stopLayer = L.layerGroup();
   truckLayer = L.layerGroup();
   journeyLayer = L.featureGroup().addTo(fleetMap);
-  $("journey-hide").addEventListener("click", hideJourney);
+  $("journey-hide").addEventListener("click", resetMapSelection);
   applyMapLayerVisibility();
 }
 
@@ -488,7 +506,7 @@ function truckPopup(vehicle) {
   const date = document.createElement("small");
   date.textContent = "Última posición: " + formatUtc(vehicle.timestamp);
   const plate = document.createElement("small");
-  plate.textContent = "Patente: no informada en la fuente";
+  plate.textContent = "Patente: " + (vehiclePlate(vehicle) || "No informada");
   const viewJourney = document.createElement("button");
   viewJourney.type = "button";
   viewJourney.className = "popup-journey-button";
@@ -528,6 +546,8 @@ function selectRoute(route, focus = true) {
 function selectVehicle(vehicle, focus = true) {
   const marker = truckMarkers.get(vehicle.vehicle_id);
   if (!marker || !fleetMap) return;
+  if (selectedVehicleId && selectedVehicleId !== vehicle.vehicle_id &&
+      (activeJourneyVehicleId || !$("journey-detail").hidden)) hideJourney();
   selectedVehicleId = vehicle.vehicle_id;
   selectedRouteId = null;
   for (const record of routeMapLayers.values()) record.line.closeTooltip();
@@ -557,6 +577,8 @@ function selectVehicle(vehicle, focus = true) {
 function hideJourney() {
   journeyRequest += 1;
   if (journeyLayer) journeyLayer.clearLayers();
+  activeJourneyVehicleId = null;
+  applyMapLayerVisibility();
   const detail = $("journey-detail");
   if (detail) detail.hidden = true;
 }
@@ -564,6 +586,8 @@ function hideJourney() {
 async function showVehicleJourney(vehicle) {
   if (!journeyLayer) return;
   const request = ++journeyRequest;
+  activeJourneyVehicleId = vehicle.vehicle_id;
+  applyMapLayerVisibility();
   journeyLayer.clearLayers();
   const panel = $("journey-detail");
   panel.hidden = false;
@@ -576,15 +600,9 @@ async function showVehicleJourney(vehicle) {
     for (const path of paths) {
       if (path.length < 2) continue;
       L.polyline(path.map((point) => [point[1], point[0]]), {
-        pane: "journeyPane", color: "#1964b5", weight: 5, opacity: 0.94
+        pane: "journeyPane", color: "#1964b5", weight: 7, opacity: 1,
+        lineCap: "round", lineJoin: "round"
       }).addTo(journeyLayer);
-    }
-    for (const stop of journey.paradas || []) {
-      L.circleMarker([stop.latitude, stop.longitude], {
-        pane: "journeyPane", radius: 6, color: "#6f42a6",
-        fillColor: "#fff", fillOpacity: 1, weight: 3
-      }).bindTooltip(format(stop.duracion_minutos, 1) +
-        " min detenido · " + stop.inicio).addTo(journeyLayer);
     }
     const route = currentMapData && currentMapData.routes.find(
       (item) => routeProperties(item).route_id === vehicle.route_id);
@@ -592,12 +610,11 @@ async function showVehicleJourney(vehicle) {
       ? routeProperties(route).usage_label + " · " + vehicle.route_id
       : "Sin clasificar";
     const driver = [journey.driver_name, journey.driver_last_name].filter(Boolean).join(" ");
-    $("journey-plate").textContent = journey.patente || "No informada";
-    $("journey-driver").textContent = driver || "No informado";
+    $("journey-plate").textContent = journey.patente || vehiclePlate(vehicle) || "No informada";
+    $("journey-driver").textContent = driver || vehicleDriver(vehicle);
     $("journey-start").textContent = journey.inicio.replace("T", " ");
     $("journey-end").textContent = journey.termino_observado.replace("T", " ");
     $("journey-distance").textContent = format(journey.distancia_km, 1) + " km";
-    $("journey-stops").textContent = format((journey.paradas || []).length);
     $("journey-moving").textContent = format(journey.tiempo_movimiento_minutos || 0, 1) + " min estimados";
     $("journey-chains").textContent = "No determinados";
     $("journey-route").textContent = category;
@@ -606,17 +623,20 @@ async function showVehicleJourney(vehicle) {
     setSelectionDetail(
       "RECORRIDO OBSERVADO · " + journey.fecha, journey.asset_name,
       format(journey.lecturas) + " posiciones · " +
-        format(journey.distancia_km, 1) + " km · " +
-        format((journey.paradas || []).length) + " paradas",
+        format(journey.distancia_km, 1) + " km",
       "Última posición: " + journey.termino_observado.replace("T", " ") +
         " · " + category
     );
+    fleetMap.closePopup();
     if (journeyLayer.getLayers().length && journeyLayer.getBounds().isValid()) {
       fleetMap.fitBounds(journeyLayer.getBounds(), {padding: [45, 45], maxZoom: 13});
     }
   } catch (error) {
-    if (request === journeyRequest) $("journey-note").textContent =
-      "No se pudo consultar el recorrido: " + error.message;
+    if (request === journeyRequest) {
+      activeJourneyVehicleId = null;
+      applyMapLayerVisibility();
+      $("journey-note").textContent = "No se pudo consultar el recorrido: " + error.message;
+    }
   }
 }
 
@@ -645,23 +665,10 @@ function renderFleetMap(data) {
   initializeFleetMap();
   if (!fleetMap) return;
   currentMapData = data;
-  readingLayer.clearLayers();
   for (const level of ROUTE_DRAW_ORDER) routeLayers[level].clearLayers();
-  stopLayer.clearLayers();
   truckLayer.clearLayers();
   truckMarkers.clear();
   routeMapLayers.clear();
-
-  for (const reading of data.readings) {
-    const radius = 4 + Math.min(4, Math.sqrt(Number(reading.reading_count || 0)) / 4);
-    L.circleMarker([reading.latitude, reading.longitude], {
-      pane: "readingPane", radius, color: "#1d4ed8", weight: 1, opacity: 0.8,
-      fillColor: "#60a5fa", fillOpacity: 0.32
-    }).bindTooltip(textTooltip(
-      reading.reading_id + " · " + format(reading.reading_count) +
-      " lecturas técnicas · " + format(reading.vehicle_count) + " vehículos"
-    )).addTo(readingLayer);
-  }
 
   const routes = [...data.routes].sort((first, second) => {
     const firstLevel = ROUTE_DRAW_ORDER.indexOf(routeProperties(first).usage_level);
@@ -677,17 +684,18 @@ function renderFleetMap(data) {
     if (!layer || !route.geometry || route.geometry.type !== "LineString") continue;
     const pane = level === "HIGH" ? "routeHighPane" : (level === "MEDIUM" ? "routeMediumPane" : "routeLowPane");
     const feature = {type: "Feature", properties, geometry: route.geometry};
-    const unverified = (data.sourceMode === "HISTORICAL_GPS_CATALOG" ||
-      data.sourceMode === "HISTORICAL_GPS_PILOT") && !properties.map_matching;
-    const dashArray = unverified ? "12 5" : null;
-    const baseWeight = level === "HIGH" ? 4.5 : (level === "MEDIUM" ? 3.5 : 2.5);
-    const baseOpacity = level === "HIGH" ? 0.95 : (level === "MEDIUM" ? 0.78 : 0.6);
+    const baseWeight = level === "HIGH" ? 5.2 : (level === "MEDIUM" ? 4.2 : 2.2);
+    const baseOpacity = level === "HIGH" ? 0.95 : (level === "MEDIUM" ? 0.84 : 0.38);
+    const haloWeight = baseWeight + 1.5;
+    const haloOpacity = level === "LOW" ? 0.16 : 0.65;
     const halo = L.geoJSON(feature, {
-      style: {pane, color: "#ffffff", weight: baseWeight + 2, opacity: 0.45, dashArray,
-        lineCap: "round", lineJoin: "round", interactive: false}
+      pane, interactive: false,
+      style: {color: "#ffffff", weight: haloWeight, opacity: haloOpacity,
+        lineCap: "round", lineJoin: "round"}
     }).addTo(layer);
     const line = L.geoJSON(feature, {
-      style: {pane, color: properties.color, weight: baseWeight, opacity: baseOpacity, dashArray,
+      pane,
+      style: {color: properties.color, weight: baseWeight, opacity: baseOpacity,
         lineCap: "round", lineJoin: "round"}
     }).bindTooltip(textTooltip(
       (properties.usage_label || level) + " · " + (properties.route_id || "Ruta") +
@@ -698,30 +706,17 @@ function renderFleetMap(data) {
     line.on("mouseover", () => line.setStyle({weight: baseWeight + 2, opacity: 1}));
     line.on("mouseout", refreshSelectionStyles);
     routeMapLayers.set(properties.route_id, {
-      route, halo, line, bounds: line.getBounds(), baseWeight, baseOpacity
+      route, halo, line, bounds: line.getBounds(), baseWeight, baseOpacity,
+      haloWeight, haloOpacity
     });
   }
   updateRouteFilterCounts(routes);
-
-  for (const stop of data.stops) {
-    const radius = 7 + Math.min(7, Math.sqrt(Number(stop.vehicle_count || 0)) * 2);
-    const duration = stop.duration_minutes === null || stop.duration_minutes === undefined
-      ? "duración pendiente de consolidar"
-      : format(stop.duration_minutes, 0) + " min";
-    L.circleMarker([stop.latitude, stop.longitude], {
-      pane: "stopPane", radius, color: "#6f42a6", weight: 3,
-      fillColor: "#ffffff", fillOpacity: 0.9
-    }).bindTooltip(textTooltip(
-      stop.label + " · " + format(stop.stop_event_count || 0) + " detenciones · " +
-      format(stop.vehicle_count) + " vehículos · " + duration
-    )).addTo(stopLayer);
-  }
 
   for (const vehicle of data.vehicles) {
     const marker = L.marker([vehicle.latitude, vehicle.longitude], {
       pane: "truckPane", icon: truckIcon(vehicle), zIndexOffset: 1000
     }).bindPopup(truckPopup(vehicle));
-    marker.on("click", () => { selectVehicle(vehicle, false); showVehicleJourney(vehicle); });
+    marker.on("click", () => selectVehicle(vehicle, false));
     marker.addTo(truckLayer);
     truckMarkers.set(vehicle.vehicle_id, marker);
   }
@@ -770,7 +765,6 @@ function renderFleetMap(data) {
     const vehicle = data.vehicles.find((value) => value.vehicle_id === selectedVehicleId);
     if (vehicle) {
       selectVehicle(vehicle, false);
-      if (!$("journey-detail").hidden) showVehicleJourney(vehicle);
     } else resetMapSelection();
   } else {
     refreshSelectionStyles();
@@ -782,7 +776,6 @@ function renderHeatmap(data) {
   const summary = data.summary;
   $("heatmap-trips").textContent = format(summary.trip_count || 0);
   $("heatmap-vehicles").textContent = format(summary.vehicle_count || 0);
-  $("heatmap-stops").textContent = format(summary.stop_count || 0);
   $("heatmap-routes").textContent = format(summary.route_count || 0);
   $("heatmap-zones").textContent = data.metadata.processed_report_count
     ? format(data.metadata.processed_report_count) + " de " +
@@ -804,25 +797,6 @@ function renderHeatmap(data) {
     metadata.classification, metadata.geometry, metadata.road_matching,
     metadata.data_retention
   ].filter(Boolean).join(" ");
-
-  const ranking = $("stop-ranking");
-  ranking.replaceChildren();
-  for (const stop of [...data.stops]
-    .sort((first, second) => Number(second.stop_event_count || 0) - Number(first.stop_event_count || 0))
-    .slice(0, 8)) {
-    const item = document.createElement("li");
-    const name = document.createElement("span");
-    name.textContent = stop.label || stop.stop_id;
-    const count = document.createElement("strong");
-    count.textContent = format(stop.stop_event_count || 0) + " det.";
-    item.append(name, count);
-    ranking.append(item);
-  }
-  if (!ranking.children.length) {
-    const item = document.createElement("li");
-    item.textContent = "No hay paradas en la ventana procesada.";
-    ranking.append(item);
-  }
 
   $("geo-model-zones").textContent = "Contrato procesado v" + (data.schemaVersion || "1");
   $("geo-model-detail").textContent = data.description + " " + (metadata.road_matching || "");
