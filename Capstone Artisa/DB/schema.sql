@@ -45,22 +45,6 @@ CREATE TABLE IF NOT EXISTS modelo_telemetria_estado (
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS tipos_vehiculo (
-    id_tipo TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    nombre VARCHAR(50) NOT NULL,
-    PRIMARY KEY (id_tipo),
-    UNIQUE KEY idx_tipos_vehiculo_nombre (nombre)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS vehiculos (
-    asset_id VARCHAR(16) NOT NULL,
-    id_tipo TINYINT UNSIGNED NOT NULL,
-    actualizado_en DATETIME(6) NOT NULL,
-    PRIMARY KEY (asset_id),
-    INDEX idx_vehiculos_id_tipo (id_tipo),
-    FOREIGN KEY (id_tipo) REFERENCES tipos_vehiculo(id_tipo)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS faenas (
     id INT NOT NULL AUTO_INCREMENT,
     external_id VARCHAR(32) NULL,
