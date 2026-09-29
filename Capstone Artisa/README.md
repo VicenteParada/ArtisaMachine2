@@ -85,11 +85,14 @@ Capstone Artisa/
 └── .env                     # Solo local; nunca subir a GitHub
 ```
 
-`app.py`, `schema.sql` y el `Dockerfile` de la raíz conservan la API inicial de
-mensajes como compatibilidad. Compose utiliza los Dockerfiles de las carpetas;
-los nuevos endpoints heredan las rutas de mensajes de `app.py`.
+El servidor inicial de mensajes fue retirado. Compose utiliza los Dockerfiles
+de los servicios; endpoints usa `common.http.JsonHandler` y `common.db`.
+El esquema operativo permanece en `DB/schema.sql`. No se eliminaron tablas
+ni datos existentes como parte de esta limpieza.
 
-## Qué hace la demostración
+## Referencia histórica: demostración inicial
+
+Esta sección describe el prototipo anterior; no es el contrato operativo actual.
 
 1. **Origen:** `origen/viajes.csv` contiene 124 filas sintéticas: 120 viajes válidos,
    un duplicado y tres filas inválidas para comprobar la limpieza. Las distancias
@@ -207,8 +210,6 @@ Todos se pueden consultar a través del frontend en `http://localhost:8080`.
 | GET | `/api/modelo/telemetria` | Métricas y zonas del modelo DBSCAN entrenado con GPS real |
 | POST | `/api/predicciones` | Crea una solicitud; responde 202 con ID y URL de consulta |
 | GET | `/api/predicciones/{id}` | Estado y resultado persistido de una solicitud |
-| GET/POST | `/mensajes` | Demostración anterior de lectura y escritura |
-| GET/DELETE | `/mensajes/{id}` | Consulta o elimina un mensaje concreto |
 
 Cuerpo para solicitar una predicción:
 
@@ -229,23 +230,35 @@ docker compose stop
 ```
 
 En PowerShell antepone `wsl -d Ubuntu --exec` a cada comando.
-`check.py` comprueba el frontend, la carga ETL, el modelo y dos solicitudes reales
-procesadas por Machine y almacenadas en MariaDB. También mantiene la prueba de
-mensajes, que crea y elimina únicamente su propio mensaje temporal. Las dos
-solicitudes de predicción quedan como registros de demostración.
+`scripts/check.py` realiza únicamente GET: comprueba `/`, `/health` y,
+si se proporciona `ARTISA_TEST_TOKEN` con un JWT vigente, `/api/estado`.
+Sin token informa que la comprobación protegida fue omitida; no valida
+completamente el acceso autenticado. No imprime ni guarda el token.
+No exige Machine, no modifica datos y no recrea contenedores.
 
-`python3 scripts/check.py --persistence` opcionalmente recrea MariaDB y comprueba
-que un mensaje temporal sobreviva. Produce una interrupción breve mientras arranca
-la base; no es necesario para iniciar el proyecto.
+Para proporcionar el token sin escribirlo en el historial de Bash:
+
+```bash
+read -r -s -p "JWT vigente: " ARTISA_TEST_TOKEN
+printf '\n'
+ARTISA_TEST_TOKEN="$ARTISA_TEST_TOKEN" python3 scripts/check.py
+unset ARTISA_TEST_TOKEN
+```
+
+`tests/check_auth_http.py` usa `ARTISA_TEST_PASSWORD` para pruebas de login.
+El comprobador de lectura no utiliza contraseñas ni ejecuta POST de autenticación.
+`scripts/check_pipeline.py` queda como referencia provisional del contrato antiguo;
+no se ejecuta desde `check.py` y todavía no valida el sistema actual.
+
 
 Detener o reconstruir los contenedores conserva los datos. No utilices
 `docker compose down --volumes` salvo que quieras eliminar la base.
 
 ## Configuración local
 
-Solo el frontend publica un puerto: `127.0.0.1:8080`. MariaDB, ETL, Machine y endpoints
-se comunican por la red interna de Compose. La página es una demo local sin
-usuarios ni autenticación; no se publica en Internet.
+Nginx es la entrada web en `127.0.0.1:8080` y protege las rutas `/api/`
+mediante Auth. El frontend permanece en la red interna de Compose.
+Consulta `docs/CONFIGURAR_ENTORNO.md` para el arranque y acceso actuales.
 
 `scripts/prepare_env.py` crea contraseñas aleatorias una sola vez y conserva `.env`
 si ya existe. No cambies estas contraseñas mientras uses el volumen actual sin

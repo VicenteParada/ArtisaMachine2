@@ -12,7 +12,8 @@
   <script src="/app.js" defer></script>
 </head>
 <body>
-  <section class="landing" aria-labelledby="landing-title">
+  <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
+  <section class="landing" aria-labelledby="landing-title" hidden>
     <div class="landing-visual">
       <div class="landing-glow landing-glow-one" aria-hidden="true"></div>
       <div class="landing-glow landing-glow-two" aria-hidden="true"></div>
@@ -36,7 +37,7 @@
           <input id="login-user" name="username" autocomplete="username" maxlength="64" spellcheck="false" required>
           <label for="login-password">Contraseña</label>
           <div class="password-field">
-            <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="64" aria-describedby="login-security" required>
+            <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="128" aria-describedby="login-security" required>
             <button id="toggle-password" class="password-toggle" type="button" aria-pressed="false">Mostrar</button>
           </div>
           <button class="landing-button" type="submit">Ingresar al sistema <span aria-hidden="true">→</span></button>
@@ -44,7 +45,7 @@
         </form>
         <div id="login-security" class="login-security">
           <span class="login-security-icon" aria-hidden="true">✓</span>
-          <span><strong>Acceso restringido</strong><small>Sesión temporal. La contraseña no se guarda en este dispositivo.</small></span>
+          <span><strong>Acceso restringido</strong><small>Acceso exclusivo para usuarios autorizados de Transportes Artisa.</small></span>
         </div>
       </div>
       <footer class="access-footer">© 2026 Transportes Artisa</footer>
@@ -63,7 +64,16 @@
     <div class="sidebar-note"><span class="dot"></span> Entorno local<p>Origen, transformación y análisis en un mismo proyecto.</p><span class="tag">TELEMETRÍA REAL</span></div>
   </aside>
   <main>
-    <header class="topbar"><span>Proyecto Artisa <span class="slash">/</span> <strong>Vista general</strong></span><a href="/health" target="_blank" rel="noopener">Estado del sistema ↗</a></header>
+    <header class="topbar">
+      <span>Proyecto Artisa <span class="slash">/</span> <strong>Vista general</strong></span>
+      <div class="topbar-actions">
+        <a href="/health" target="_blank" rel="noopener">Estado del sistema ↗</a>
+        <div class="session-user" aria-label="Sesión del administrador">
+          <span>Administrador</span>
+          <button id="logout" type="button">Cerrar sesión</button>
+        </div>
+      </div>
+    </header>
     <section class="heading">
       <div><div class="eyebrow">INTELIGENCIA PARA EL TRANSPORTE</div><h1>De los datos a la decisión.</h1><p>Telemetría real desde la API de origen, procesada por el ETL y almacenada en MariaDB.</p></div>
       <button class="button secondary" id="refresh" type="button">↻ Actualizar</button>

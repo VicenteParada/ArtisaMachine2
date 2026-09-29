@@ -19,15 +19,90 @@ function showApp() {
   window.scrollTo(0, 0);
 }
 
-function token() {
-  return sessionStorage.getItem("artisa_token");
+const TOKEN_KEY = "artisa_token";
+const EXPIRED_MESSAGE = "Tu sesión expiró. Ingresa nuevamente.";
+let activeToken = null;
+let sessionVersion = 0;
+let expiryTimer;
+const pendingRequests = new Set();
+
+// Esta comprobación es solo para la interfaz; Nginx/Auth verifican la firma.
+function tokenExpiration(value) {
+  try {
+    if (typeof value !== "string" || value.length > 4096) return 0;
+    const parts = value.split(".");
+    if (parts.length !== 3 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return 0;
+    const decode = (part) => {
+      const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
+      return atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="));
+    };
+    const header = JSON.parse(decode(parts[0]));
+    const payload = JSON.parse(decode(parts[1]));
+    if (header?.alg !== "HS256" || header?.typ !== "JWT" || decode(parts[2]).length !== 32) return 0;
+    return Number.isSafeInteger(payload?.exp) && payload.exp > Date.now() / 1000
+      ? payload.exp * 1000 : 0;
+  } catch { return 0; }
 }
 
-function logout() {
-  sessionStorage.removeItem("artisa_token");
-  sessionStorage.removeItem("artisa_user");
-  landing.hidden = false;
+function token() {
+  if (activeToken && !tokenExpiration(activeToken)) logout(EXPIRED_MESSAGE);
+  return activeToken;
+}
+
+function clearSessionWork() {
+  clearTimeout(expiryTimer);
+  sessionVersion++;
+  for (const controller of pendingRequests) controller.abort();
+  pendingRequests.clear();
+  refreshing = false;
+  $("refresh").disabled = false;
+  journeyRequest++;
+}
+
+function clearPassword() {
+  $("login-password").value = "";
+  $("login-password").type = "password";
+  $("toggle-password").textContent = "Mostrar";
+  $("toggle-password").setAttribute("aria-pressed", "false");
+}
+
+function logout(message = "") {
+  clearSessionWork();
+  activeToken = null;
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* Almacenamiento no disponible. */ }
+  clearPassword();
+  $("login-user").value = "";
   appShell.hidden = true;
+  landing.hidden = false;
+  history.replaceState(null, "", location.pathname + location.search);
+  $("login-error").textContent = message;
+  $("login-error").hidden = !message;
+}
+
+function scheduleExpiration() {
+  clearTimeout(expiryTimer);
+  const remaining = tokenExpiration(activeToken) - Date.now();
+  if (remaining <= 0) return logout(EXPIRED_MESSAGE);
+  expiryTimer = setTimeout(scheduleExpiration, Math.min(remaining, 2147483647));
+}
+
+function restoreSession() {
+  let saved;
+  try { saved = localStorage.getItem(TOKEN_KEY); } catch { saved = null; }
+  if (!tokenExpiration(saved)) {
+    logout(saved || activeToken ? EXPIRED_MESSAGE : $("login-error").textContent);
+    return;
+  }
+  const changed = activeToken !== saved;
+  if (changed) clearSessionWork();
+  activeToken = saved;
+  $("login-error").textContent = "";
+  $("login-error").hidden = true;
+  if (!location.hash) history.replaceState(null, "", "#dashboard");
+  syncDatasetView();
+  if (appShell.hidden) showApp();
+  scheduleExpiration();
+  if (changed) refresh();
 }
 
 loginForm.addEventListener("submit", async (event) => {
@@ -47,15 +122,17 @@ loginForm.addEventListener("submit", async (event) => {
       cache: "no-store",
       body: JSON.stringify({username, password})
     });
+    if (response.status === 401) throw new Error("Usuario o contraseña incorrectos");
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "No se pudo iniciar sesión.");
-    sessionStorage.setItem("artisa_token", payload.token);
-    sessionStorage.setItem("artisa_user", username);
-    passwordInput.value = "";
-    showApp();
-    refresh();
+    if (!tokenExpiration(payload.token)) throw new Error("El servidor devolvió una sesión no válida.");
+    try { localStorage.setItem(TOKEN_KEY, payload.token); }
+    catch { throw new Error("Permite el almacenamiento local para mantener tu sesión."); }
+    clearPassword();
+    history.replaceState(null, "", "#dashboard");
+    restoreSession();
   } catch (loginError) {
-    passwordInput.value = "";
+    clearPassword();
     error.textContent = loginError.message;
     error.hidden = false;
   } finally {
@@ -72,23 +149,33 @@ $("toggle-password").addEventListener("click", () => {
   passwordInput.focus();
 });
 
-if (token() && sessionStorage.getItem("artisa_user") && window.location.hash) {
-  showApp();
-} else if (token() || sessionStorage.getItem("artisa_user")) {
-  logout();
-}
+$("logout").addEventListener("click", () => logout());
 
 async function api(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  headers.set("Authorization", `Bearer ${token()}`);
-  const response = await fetch(path, {...options, headers, signal: AbortSignal.timeout(20000)});
-  const payload = await response.json();
-  if (response.status === 401) {
-    logout();
-    throw new Error("La sesión expiró. Ingresa nuevamente.");
+  const currentToken = token();
+  if (!currentToken) throw new Error(EXPIRED_MESSAGE);
+  const version = sessionVersion;
+  const controller = new AbortController();
+  pendingRequests.add(controller);
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", `Bearer ${currentToken}`);
+    const response = await fetch(path, {...options, headers, signal: controller.signal});
+    if (version !== sessionVersion) throw new Error("Petición de una sesión anterior cancelada.");
+    // Nginx puede devolver HTML en un 401: comprobarlo antes de leer JSON.
+    if (response.status === 401) {
+      logout(EXPIRED_MESSAGE);
+      throw new Error(EXPIRED_MESSAGE);
+    }
+    const payload = await response.json();
+    if (version !== sessionVersion || !token()) throw new Error(EXPIRED_MESSAGE);
+    if (!response.ok) throw new Error(payload.error || "El servicio está temporalmente ocupado.");
+    return payload;
+  } finally {
+    clearTimeout(timeout);
+    pendingRequests.delete(controller);
   }
-  if (!response.ok) throw new Error(payload.error || "El servicio está temporalmente ocupado.");
-  return payload;
 }
 
 function syncDatasetView() {
@@ -1048,14 +1135,16 @@ function renderTelemetry(summary, dataset, state) {
 
 function renderState(state) {
   const components = state.componentes || {};
-  const count = Object.values(components).filter((status) => status === "ok").length;
-  $("system-status").textContent = format(count) + " de 5 servicios disponibles";
-  $("system-status").className = "status " + (count === 5 ? "" : "warning");
+  const required = ["etl", "mariadb", "endpoints", "front"];
+  const count = required.filter((name) => components[name] === "ok").length;
+  $("system-status").textContent = format(count) + " de 4 servicios base disponibles";
+  $("system-status").className = "status " + (count === required.length ? "" : "warning");
   for (const node of document.querySelectorAll("[data-service]")) {
     const okay = components[node.dataset.service] === "ok";
     const label = node.querySelector(".node-status");
-    label.textContent = okay ? "En funcionamiento" : "Sin respuesta reciente";
-    label.className = "node-status " + (okay ? "ok" : "bad");
+    const pending = node.dataset.service === "machine" && !okay;
+    label.textContent = okay ? "En funcionamiento" : pending ? "Pendiente de integración" : "Sin respuesta reciente";
+    label.className = "node-status " + (okay ? "ok" : pending ? "neutral" : "bad");
   }
   const etl = state.etl;
   if (etl) {
@@ -1068,6 +1157,7 @@ function renderState(state) {
 async function refresh() {
   if (!token()) return;
   if (refreshing) return;
+  const version = sessionVersion;
   refreshing = true; $("refresh").disabled = true;
   try {
     const [state, telemetrySummary, telemetryDataset, mapPayload, dashboard] = await Promise.all([
@@ -1077,6 +1167,7 @@ async function refresh() {
       api("/api/mapa"),
       api("/api/dashboard")
     ]);
+    if (version !== sessionVersion || !token()) return;
     if (!window.ArtisaMapData) throw new Error("No se cargó el adaptador del mapa.");
     const mapData = window.ArtisaMapData.adaptMapPayload(mapPayload);
     renderState(state);
@@ -1086,6 +1177,7 @@ async function refresh() {
     $("notice").hidden = state.status === "ok";
     $("notice").textContent = "Una etapa no ha respondido recientemente o está preparando datos nuevos. Los datos mostrados corresponden a la última carga disponible.";
   } catch (error) {
+    if (version !== sessionVersion || !token()) return;
     $("notice").hidden = false;
     $("notice").textContent = "No se pudo actualizar el sistema. Los datos que ya ves pueden estar desactualizados. " + error.message;
     $("system-status").textContent = "Sin conexión con el sistema";
@@ -1093,7 +1185,9 @@ async function refresh() {
     for (const label of document.querySelectorAll(".node-status")) {
       label.textContent = "Estado sin verificar"; label.className = "node-status bad";
     }
-  } finally { refreshing = false; $("refresh").disabled = false; }
+  } finally {
+    if (version === sessionVersion) { refreshing = false; $("refresh").disabled = false; }
+  }
 }
 
 $("refresh").addEventListener("click", refresh);
@@ -1120,7 +1214,20 @@ $("monitor-search").addEventListener("input", () => {
   else renderLiveFleet(currentMapData ? currentMapData.vehicles : []);
 });
 $("reset-map-view").addEventListener("click", resetMapSelection);
-window.addEventListener("hashchange", syncDatasetView);
-syncDatasetView();
-if (token()) refresh();
+// Retirar el almacenamiento de la implementación anterior sin persistir el usuario.
+try {
+  sessionStorage.removeItem("artisa_token");
+  sessionStorage.removeItem("artisa_user");
+} catch { /* Puede estar deshabilitado. */ }
+window.addEventListener("hashchange", restoreSession);
+window.addEventListener("popstate", restoreSession);
+window.addEventListener("pageshow", restoreSession);
+window.addEventListener("pagehide", () => { appShell.hidden = true; landing.hidden = true; });
+window.addEventListener("storage", (event) => {
+  if (event.key === TOKEN_KEY || event.key === null) restoreSession();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) restoreSession();
+});
+restoreSession();
 setInterval(refresh, 300000);

@@ -1,11 +1,13 @@
 """Create or rotate the local administrator credentials in the ignored .env file."""
 
 import argparse
+import getpass
 import os
 from pathlib import Path
 import secrets
 import sys
 import tempfile
+import warnings
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -15,7 +17,7 @@ ENV_PATH = ROOT / ".env"
 AUTH_KEYS = {"AUTH_USERNAME", "AUTH_PASSWORD_HASH", "JWT_SECRET"}
 
 
-def configure(rotate=False):
+def configure(rotate=False, manual=False):
     if not ENV_PATH.is_file():
         raise SystemExit("Falta .env; ejecuta primero python3 scripts/prepare_env.py")
     lines = ENV_PATH.read_text(encoding="utf-8").splitlines()
@@ -31,7 +33,22 @@ def configure(rotate=False):
         print("La autenticacion local ya esta configurada.")
         return
 
-    password = secrets.token_urlsafe(24)
+    if manual:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", getpass.GetPassWarning)
+                password = getpass.getpass("Nueva contraseña: ")
+                confirmation = getpass.getpass("Repita la contraseña: ")
+        except getpass.GetPassWarning:
+            raise SystemExit("No se puede ocultar la entrada en esta terminal. No se modificó .env.")
+        except (EOFError, KeyboardInterrupt):
+            raise SystemExit("\nOperación cancelada. No se modificó .env.")
+        if not 4 <= len(password) <= 128:
+            raise SystemExit("La contraseña debe tener entre 4 y 128 caracteres. No se modificó .env.")
+        if password != confirmation:
+            raise SystemExit("Las contraseñas no coinciden. No se modificó .env.")
+    else:
+        password = secrets.token_urlsafe(24)
     preserved = [line for line in lines
                  if line.split("=", 1)[0].strip() not in AUTH_KEYS]
     content = "\n".join(preserved).rstrip("\n") + "\n"
@@ -48,11 +65,19 @@ def configure(rotate=False):
     finally:
         temporary.unlink(missing_ok=True)
     print("Usuario: admin")
-    print("Contrasena nueva (guardala ahora; no se conserva en texto): " + password)
+    if manual:
+        print("Contraseña actualizada correctamente.")
+    else:
+        print("Contrasena nueva (guardala ahora; no se conserva en texto): " + password)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rotate", action="store_true",
                         help="Genera una nueva contrasena e invalida los tokens anteriores")
-    configure(parser.parse_args().rotate)
+    parser.add_argument("--manual", action="store_true",
+                        help="Permite elegir una contraseña con entrada oculta")
+    args = parser.parse_args()
+    if args.manual and not args.rotate:
+        parser.error("--manual requiere --rotate")
+    configure(rotate=args.rotate, manual=args.manual)
