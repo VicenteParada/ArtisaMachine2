@@ -59,9 +59,8 @@
       <a data-dataset-link="dashboard" href="#dashboard"><span>▥</span> Dashboard</a>
       <a data-dataset-link="real" href="#datos-reales"><span>⌖</span> Datos reales</a>
       <a data-dataset-link="heatmap" href="#mapa-calor"><span>◉</span> Mapa de rutas</a>
-      <a data-dataset-link="simulated" href="#datos-simulados"><span>◇</span> Datos simulados</a>
     </nav>
-    <div class="sidebar-note"><span class="dot"></span> Entorno local<p>Origen, transformación y predicciones en un mismo proyecto.</p><span class="tag">TELEMETRÍA REAL + DEMO</span></div>
+    <div class="sidebar-note"><span class="dot"></span> Entorno local<p>Origen, transformación y análisis en un mismo proyecto.</p><span class="tag">TELEMETRÍA REAL</span></div>
   </aside>
   <main>
     <header class="topbar"><span>Proyecto Artisa <span class="slash">/</span> <strong>Vista general</strong></span><a href="/health" target="_blank" rel="noopener">Estado del sistema ↗</a></header>
@@ -76,14 +75,14 @@
       <div class="flow">
         <article class="node etl" data-service="etl"><span class="node-number">01</span><h3>ETL</h3><p>Extrae, limpia y carga</p><span class="node-status">Consultando…</span></article>
         <div class="flow-arrow arrow-a" aria-hidden="true">→</div>
-        <article class="node db" data-service="mariadb"><span class="node-number">02</span><h3>MariaDB</h3><p>Datos y predicciones</p><span class="node-status">Consultando…</span></article>
+        <article class="node db" data-service="mariadb"><span class="node-number">02</span><h3>MariaDB</h3><p>Telemetría validada</p><span class="node-status">Consultando…</span></article>
         <div class="flow-arrow arrow-b" aria-hidden="true">→</div>
         <article class="node api" data-service="endpoints"><span class="node-number">04</span><h3>Endpoints</h3><p>Consulta de resultados</p><span class="node-status">Consultando…</span></article>
         <div class="flow-arrow arrow-c" aria-hidden="true">→</div>
         <article class="node front" data-service="front"><span class="node-number">05</span><h3>Frontend</h3><p>Visualiza y explora</p><span class="node-status">Consultando…</span></article>
         <div class="machine-link">↕ <span>Lee datos · guarda resultados</span></div>
-        <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Aprende la duración de los viajes</p><span class="node-status">Consultando…</span></article>
-        <div class="flow-explanation"><strong>Cinco contenedores, un proyecto.</strong><p>El ETL carga el origen en MariaDB. El modelo lee esos datos y guarda sus predicciones. Los endpoints las entregan a esta pantalla.</p></div>
+        <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Identifica zonas GPS</p><span class="node-status">Consultando…</span></article>
+        <div class="flow-explanation"><strong>Servicios conectados.</strong><p>El ETL carga la telemetría en MariaDB. El modelo analiza zonas GPS y los endpoints entregan los resultados a esta pantalla.</p></div>
       </div>
       <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada 15 s</span></div>
     </section>
@@ -91,7 +90,6 @@
       <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores y gráficos operativos</small></span></a>
       <a class="dataset-tab" data-dataset-tab="real" href="#datos-reales"><span class="dataset-icon">⌖</span><span><strong>Datos reales</strong><small>API de origen → ETL → MariaDB</small></span></a>
       <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de rutas</strong><small>Rutas históricas y camiones</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="simulated" href="#datos-simulados"><span class="dataset-icon">◇</span><span><strong>Datos simulados</strong><small>Viajes de demostración → Machine Learning</small></span></a>
     </nav>
     <div id="dashboard" class="dataset-space" data-dataset-view="dashboard" hidden>
       <section class="panel dashboard-panel">
@@ -99,23 +97,17 @@
           <div><span class="eyebrow">02 / PANEL OPERATIVO</span><h2>Dashboard de rutas y flota</h2></div>
           <span id="dashboard-snapshot" class="status neutral">Preparando indicadores…</span>
         </div>
-        <p class="telemetry-intro">Resumen visual de la telemetría procesada. Los gráficos se actualizan con el mismo bloque de datos del mapa y permiten identificar las zonas con mayor actividad, concentración de paradas y estado de la flota.</p>
+        <p class="telemetry-intro">Resumen visual de la telemetría procesada. Los gráficos se actualizan con el mismo bloque de datos del mapa y permiten identificar las zonas con mayor actividad, el uso de las rutas y el estado de la flota.</p>
         <div class="dashboard-kpis" aria-label="Indicadores principales del dashboard">
           <article><span>Reportes disponibles</span><strong id="dashboard-reports">—</strong><small>Telemetría conservada en MariaDB</small></article>
           <article><span>Recorridos analizados</span><strong id="dashboard-trips">—</strong><small>Viajes dentro de la ventana procesada</small></article>
           <article><span>Rutas identificadas</span><strong id="dashboard-routes">—</strong><small>Agrupaciones geoespaciales completas</small></article>
-          <article><span>Eventos de detención</span><strong id="dashboard-stop-events">—</strong><small>Detenciones detectadas en las zonas</small></article>
         </div>
         <div class="dashboard-grid">
-          <article class="dashboard-card">
+          <article class="dashboard-card dashboard-wide">
             <div class="dashboard-card-heading"><div><span class="eyebrow">ACTIVIDAD GEOGRÁFICA</span><h3>Uso de rutas por zona</h3></div><span class="chart-unit">Recorridos</span></div>
             <p>La actividad de cada ruta se asigna a la zona donde se encuentra el centro de su geometría.</p>
             <div id="dashboard-route-zones" class="dashboard-bars" aria-label="Gráfico de uso de rutas por zona"><span class="chart-empty">Cargando zonas…</span></div>
-          </article>
-          <article class="dashboard-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">DETENCIONES</span><h3>Paradas por zona</h3></div><span class="chart-unit">Eventos</span></div>
-            <p>Compara la cantidad de detenciones detectadas y los vehículos asociados a cada zona.</p>
-            <div id="dashboard-stop-zones" class="dashboard-bars stops" aria-label="Gráfico de paradas por zona"><span class="chart-empty">Cargando paradas…</span></div>
           </article>
           <article class="dashboard-card dashboard-donut-card">
             <div class="dashboard-card-heading"><div><span class="eyebrow">CLASIFICACIÓN</span><h3>Nivel de uso de rutas</h3></div></div>
@@ -123,8 +115,8 @@
             <div id="dashboard-route-levels" class="dashboard-donut-wrap" aria-label="Distribución de rutas por nivel de uso"></div>
           </article>
           <article class="dashboard-card dashboard-donut-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">FLOTA ACTUAL</span><h3>Estado de los vehículos</h3></div></div>
-            <p>Clasificación basada en velocidad e ignición de la última posición disponible.</p>
+            <div class="dashboard-card-heading"><div><span class="eyebrow">FLOTA ACTUAL</span><h3>Disponibilidad de los vehículos</h3></div></div>
+            <p>Estado de señal y encendido según la última posición disponible.</p>
             <div id="dashboard-fleet-status" class="dashboard-donut-wrap" aria-label="Distribución del estado de la flota"></div>
           </article>
           <article class="dashboard-card dashboard-wide">
@@ -134,9 +126,27 @@
           </article>
           <aside class="dashboard-highlights" aria-label="Hallazgos destacados">
             <article><span>ZONA CON MAYOR USO</span><strong id="dashboard-most-route-zone">—</strong><small id="dashboard-most-route-zone-detail">Calculando recorridos…</small></article>
-            <article><span>ZONA CON MÁS PARADAS</span><strong id="dashboard-most-stop-zone">—</strong><small id="dashboard-most-stop-zone-detail">Calculando detenciones…</small></article>
           </aside>
         </div>
+        <section class="dashboard-card dashboard-heatmap-card" aria-labelledby="dashboard-heatmap-title">
+          <div class="dashboard-card-heading">
+            <div><span class="eyebrow">ANÁLISIS ESPACIAL</span><h3 id="dashboard-heatmap-title">Mapa de calor de uso de rutas</h3></div>
+            <span class="chart-unit">Pendiente</span>
+          </div>
+          <p>Este espacio mostrará la concentración geográfica de recorridos históricos según el nivel de uso de cada ruta.</p>
+          <div id="dashboard-route-heatmap" class="dashboard-heatmap-stage" role="img" aria-label="Espacio reservado para el mapa de calor; todavía no muestra datos">
+            <div class="dashboard-heatmap-empty">
+              <span class="dashboard-heatmap-symbol" aria-hidden="true">⌖</span>
+              <strong>Mapa de calor en preparación</strong>
+              <span>Las rutas y su intensidad aún no se muestran en este apartado.</span>
+            </div>
+          </div>
+          <div class="dashboard-heatmap-legend" aria-label="Colores previstos para el nivel de uso de las rutas">
+            <span><i class="low" aria-hidden="true"></i>Poco uso</span>
+            <span><i class="medium" aria-hidden="true"></i>Uso medio</span>
+            <span><i class="high" aria-hidden="true"></i>Alto uso</span>
+          </div>
+        </section>
         <div class="dashboard-method"><strong>Cómo se definen las zonas</strong><span id="dashboard-method">Se calculan automáticamente desde las coordenadas del bloque procesado.</span></div>
       </section>
     </div>    <div id="datos-reales" class="dataset-space" data-dataset-view="real">
@@ -146,16 +156,14 @@
         <div class="real-metrics" aria-label="Resumen de telemetría real">
           <article><span>Reportes guardados</span><strong id="telemetry-count">—</strong><small>Límite inicial: 5.000 lecturas</small></article>
           <article><span>Vehículos observados</span><strong id="vehicle-count">—</strong><small>Identificados por asset_id</small></article>
-          <article><span>Velocidad promedio</span><strong id="average-speed">—</strong><small>Según speed del origen</small></article>
-          <article><span>Velocidad máxima</span><strong id="maximum-speed">—</strong><small>Dentro de la muestra cargada</small></article>
         </div>
         <div class="telemetry-range"><span id="telemetry-range">Esperando rango temporal…</span><span id="telemetry-quality">Esperando control de calidad…</span></div>
-        <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha UTC</th><th>Evento</th><th>Velocidad</th><th>Coordenadas</th><th>Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="6" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
+        <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha UTC</th><th>Evento</th><th>Coordenadas</th><th>Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
       </section>
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
       <section class="panel heatmap-panel">
-        <div class="section-top"><div><span class="eyebrow">03 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas históricas</h2></div><span id="heatmap-source-status" class="status simulation">Muestra reciente</span></div>
+        <div class="section-top"><div><span class="eyebrow">03 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas históricas</h2></div><span id="heatmap-source-status" class="status info">Muestra reciente</span></div>
         <p id="heatmap-intro" class="telemetry-intro">Consultando la fuente del mapa y su cobertura histórica…</p>
         <div class="route-filter-panel">
           <span>Mostrar rutas</span>
@@ -223,36 +231,6 @@
         </div>
         <details class="heatmap-method"><summary>¿Cómo se calcula este mapa?</summary><p id="heatmap-method">Esperando la metodología…</p></details>
       </section>
-    </div>
-    <div id="datos-simulados" class="dataset-space" data-dataset-view="simulated" hidden>
-      <div class="space-heading"><span class="eyebrow">04 / LABORATORIO</span><h2>Datos simulados</h2><p>Este espacio contiene únicamente el conjunto de demostración y sus predicciones.</p></div>
-      <section class="metrics" aria-label="Resumen de datos simulados">
-        <article><span>Viajes procesados</span><strong id="trip-count">—</strong><small id="source-count">Esperando el origen</small></article>
-        <article><span>Predicciones de duración</span><strong id="prediction-count">—</strong><small>No incluidas en el esquema actual</small></article>
-        <article><span>Zonas detectadas por ML</span><strong id="model-error">—</strong><small>Clustering geoespacial DBSCAN</small></article>
-        <article><span>Destinos de ejemplo</span><strong id="destination-count">—</strong><small>Rutas del conjunto sintético</small></article>
-      </section>
-      <div class="workspace-grid">
-        <section id="viajes" class="panel data-panel">
-          <div class="section-top"><div><span class="eyebrow">05 / RESULTADOS SIMULADOS</span><h2>Viajes procesados</h2></div><span class="tag">MARIA DB → API</span></div>
-          <label class="search"><span>⌕</span><input id="search" type="search" placeholder="Buscar origen, destino o ID…" aria-label="Buscar viajes"></label>
-          <div class="table-scroll"><table><thead><tr><th>Viaje / ruta</th><th>Distancia</th><th>Duración del dato</th><th>Estimación ML</th></tr></thead><tbody id="trip-rows"><tr><td colspan="4" class="empty">Cargando viajes…</td></tr></tbody></table></div>
-          <div class="table-footer"><span id="table-count">Consultando MariaDB…</span><button id="show-all" type="button" class="text-button">Ver todos</button></div>
-          <details><summary>¿Qué hizo el ETL con el origen simulado?</summary><p id="etl-summary">Cargando trazabilidad…</p><ul id="rejections"></ul></details>
-        </section>
-        <section id="simulador" class="panel simulator">
-          <span class="eyebrow">06 / MACHINE LEARNING</span><h2>Simula un viaje</h2><p>La estimación de duración está pendiente; el modelo actual identifica zonas GPS.</p>
-          <form id="prediction-form">
-            <label for="distance">Distancia <span>km</span></label><input id="distance" name="distancia_km" type="number" min="1" max="2000" step="0.1" value="180" required>
-            <label for="load">Carga <span>kg</span></label><input id="load" name="carga_kg" type="number" min="1" max="40000" step="1" value="8000" required>
-            <label for="stops">Paradas</label><input id="stops" name="paradas" type="number" min="0" max="30" step="1" value="2" required>
-            <button id="predict" class="button primary" type="submit">Estimar duración <span>↗</span></button>
-          </form>
-          <div id="prediction-result" class="prediction-result" role="status" aria-live="polite"><span>LISTO PARA EXPLORAR</span><p>La estimación de duración no está disponible en este esquema.</p></div>
-          <p class="disclaimer">Demostración con datos sintéticos. Las estimaciones no están validadas para operaciones reales.</p>
-          <div class="model-info"><span id="model-name">Modelo de zonas</span><small id="model-training">Esperando entrenamiento…</small></div>
-        </section>
-      </div>
     </div>
     <footer><span>ARTISA <span class="slash">/</span> Del origen al frontend</span><span>ETL · MariaDB · Machine Learning · Endpoints · Frontend</span></footer>
   </main>

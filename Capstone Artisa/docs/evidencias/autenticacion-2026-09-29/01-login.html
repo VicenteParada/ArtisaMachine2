@@ -1,0 +1,16 @@
+<!doctype html><html lang="es"><meta charset="utf-8">
+<title>Inicio de sesión · Artisa</title><style>
+*{box-sizing:border-box}body{margin:0;background:#eaf1f5;color:#18323c;font:20px Arial,sans-serif}
+main{width:1220px;margin:55px auto;padding:44px 52px;background:white;border-radius:20px;
+box-shadow:0 15px 40px #203d4b1b}header{border-bottom:4px solid #66b7d1;padding-bottom:25px}
+h1{font-size:38px;margin:10px 0}p{color:#49616a;line-height:1.5}.eyebrow{font-size:16px;
+font-weight:700;color:#187696;letter-spacing:.13em;text-transform:uppercase}table{border-collapse:collapse;
+width:100%;margin-top:36px}th,td{padding:20px 14px;border-bottom:1px solid #d7e3e8;text-align:left}
+th{background:#e8f5f9;font-size:17px}td{font-size:18px}code{font-size:16px}.pass{color:#167545;
+font-weight:700}.fail{color:#b42318;font-weight:700}footer{margin-top:34px;font-size:16px;
+color:#607780}</style><main><header><div class="eyebrow">Transportes Artisa · evidencia de pruebas</div>
+<h1>Inicio de sesión</h1><p>Ejecutado: 2026-09-29 10:57:44 Hora verano Sudamérica Pacífico · Entorno: http://127.0.0.1:8080</p>
+</header><table><thead><tr><th>Prueba</th><th>Solicitud</th><th>Esperado</th><th>Obtenido</th>
+<th>Resultado</th></tr></thead><tbody><tr><td>Página principal</td><td><code>GET /</code></td><td>200</td><td><strong>200</strong></td><td class='pass'>CORRECTO</td></tr><tr><td>Credenciales correctas</td><td><code>POST /auth/login</code></td><td>200</td><td><strong>200</strong></td><td class='pass'>CORRECTO</td></tr><tr><td>Contraseña incorrecta</td><td><code>POST /auth/login</code></td><td>401</td><td><strong>401</strong></td><td class='pass'>CORRECTO</td></tr><tr><td>JSON mal formado</td><td><code>POST /auth/login</code></td><td>400</td><td><strong>400</strong></td><td class='pass'>CORRECTO</td></tr></tbody></table><footer>
+Pruebas HTTP directas al servicio local. No se guardan contraseñas, tokens ni datos de telemetría.
+</footer></main></html>

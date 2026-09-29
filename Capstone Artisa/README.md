@@ -44,6 +44,19 @@ como indicadores de las 23 millones de lecturas.
 - auth/ y nginx/: inicio de sesión y entrada HTTP del puerto 8080.
 - simulacion/: datos de demostración separados del histórico.
 
+## Acceso de administrador
+
+Antes de iniciar los contenedores, ejecuta `python3 scripts/prepare_env.py`
+desde `Capstone Artisa`. Este comando genera una contraseña aleatoria para
+`admin`, su hash y la clave de firma JWT en el `.env` local. La contraseña se
+muestra una sola vez: guárdala en un gestor de contraseñas. El archivo `.env`
+está excluido de Git. Si necesitas cambiar la contraseña, ejecuta
+`python3 scripts/setup_auth.py --rotate` y recrea `auth` y `nginx` con Docker
+Compose. Eso invalida los tokens previos. Los intentos de inicio de sesión
+fallidos devuelven 401 y Nginx limita las solicitudes repetidas. Antes de
+publicar la aplicación fuera de localhost, configura HTTPS y un despliegue
+seguro; el servidor local actual usa HTTP.
+
 Los módulos processing/ y ETLs/realtime.py son experimentos históricos; no deben
 ejecutarse sobre este esquema de seis tablas.
 

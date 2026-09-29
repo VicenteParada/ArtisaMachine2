@@ -11,34 +11,7 @@ const formatUtc = (value) => value ? new Intl.DateTimeFormat("es-CL", {
 const formatDataDay = (value) => value ? new Intl.DateTimeFormat("es-CL", {
   dateStyle: "long", timeZone: "UTC"
 }).format(new Date(value + "T12:00:00Z")) : "Sin fecha";
-let trips = [];
-let expanded = false;
 let refreshing = false;
-const LOGIN_USERNAME = "admin";
-const LOGIN_PASSWORD = "admin";
-const LOGIN_MAX_ATTEMPTS = 5;
-const LOGIN_LOCK_MS = 30_000;
-
-function loginLockSeconds() {
-  const lockedUntil = Number(sessionStorage.getItem("artisa_login_locked_until") || 0);
-  return Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
-}
-
-function resetLoginAttempts() {
-  sessionStorage.removeItem("artisa_login_attempts");
-  sessionStorage.removeItem("artisa_login_locked_until");
-}
-
-function registerInvalidLogin() {
-  const attempts = Number(sessionStorage.getItem("artisa_login_attempts") || 0) + 1;
-  if (attempts >= LOGIN_MAX_ATTEMPTS) {
-    sessionStorage.setItem("artisa_login_attempts", "0");
-    sessionStorage.setItem("artisa_login_locked_until", String(Date.now() + LOGIN_LOCK_MS));
-    return "Demasiados intentos. Espera 30 segundos antes de volver a intentarlo.";
-  }
-  sessionStorage.setItem("artisa_login_attempts", String(attempts));
-  return `Usuario o contraseña incorrectos. Quedan ${LOGIN_MAX_ATTEMPTS - attempts} intentos.`;
-}
 
 function showApp() {
   landing.hidden = true;
@@ -63,24 +36,11 @@ loginForm.addEventListener("submit", async (event) => {
   const error = $("login-error");
   const usernameInput = $("login-user");
   const passwordInput = $("login-password");
-  const remainingLock = loginLockSeconds();
-  if (remainingLock > 0) {
-    error.textContent = `Acceso bloqueado temporalmente. Intenta nuevamente en ${remainingLock} segundos.`;
-    error.hidden = false;
-    passwordInput.value = "";
-    passwordInput.focus();
-    return;
-  }
   button.disabled = true;
   error.hidden = true;
   try {
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
-    if (username !== LOGIN_USERNAME || password !== LOGIN_PASSWORD) {
-      passwordInput.value = "";
-      passwordInput.focus();
-      throw new Error(registerInvalidLogin());
-    }
     const response = await fetch("/auth/login", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -90,12 +50,12 @@ loginForm.addEventListener("submit", async (event) => {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "No se pudo iniciar sesión.");
     sessionStorage.setItem("artisa_token", payload.token);
-    sessionStorage.setItem("artisa_user", LOGIN_USERNAME);
-    resetLoginAttempts();
+    sessionStorage.setItem("artisa_user", username);
     passwordInput.value = "";
     showApp();
     refresh();
   } catch (loginError) {
+    passwordInput.value = "";
     error.textContent = loginError.message;
     error.hidden = false;
   } finally {
@@ -112,7 +72,7 @@ $("toggle-password").addEventListener("click", () => {
   passwordInput.focus();
 });
 
-if (token() && sessionStorage.getItem("artisa_user") === LOGIN_USERNAME && window.location.hash) {
+if (token() && sessionStorage.getItem("artisa_user") && window.location.hash) {
   showApp();
 } else if (token() || sessionStorage.getItem("artisa_user")) {
   logout();
@@ -132,10 +92,11 @@ async function api(path, options = {}) {
 }
 
 function syncDatasetView() {
-  const simulatedHashes = new Set(["#datos-simulados", "#viajes", "#simulador"]);
+  if (["#datos-simulados", "#viajes", "#simulador"].includes(window.location.hash)) {
+    history.replaceState(null, "", "#datos-reales");
+  }
   let view = "real";
-  if (simulatedHashes.has(window.location.hash)) view = "simulated";
-  else if (window.location.hash === "#mapa-calor") view = "heatmap";
+  if (window.location.hash === "#mapa-calor") view = "heatmap";
   else if (window.location.hash === "#dashboard") view = "dashboard";
   for (const space of document.querySelectorAll("[data-dataset-view]")) {
     space.hidden = space.dataset.datasetView !== view;
@@ -331,7 +292,7 @@ function vehicleStatus(vehicle) {
   if (vehicle.ignition !== null && vehicle.ignition !== undefined && Number(vehicle.ignition) === 0) {
     return {label: "Apagado", className: "off"};
   }
-  return {label: "Detenido", className: "stopped"};
+  return {label: "Con señal reciente", className: "moving"};
 }
 
 function renderLiveFleet(vehicles) {
@@ -738,26 +699,32 @@ function renderFleetMap(data) {
     formatDataDay(data.snapshotDate) +
     " · posiciones cada " + minutes + " min";
   $("heatmap-source-status").textContent = sourceLabel;
-  $("heatmap-intro").textContent = data.description +
+  $("heatmap-intro").textContent =
     (isHistorical
       ? " Verde, naranja y rojo representan recorridos históricos agrupados. El camión muestra su última lectura disponible."
       : " Los colores pertenecen a las rutas de esta vista; el camión muestra su última lectura disponible.");
 
-  if (data.bounds) {
-    pendingMapBounds = L.latLngBounds(
-      [data.bounds.latitude_min, data.bounds.longitude_min],
-      [data.bounds.latitude_max, data.bounds.longitude_max]
-    );
-    if (data.sourceMode === "HISTORICAL_GPS_PILOT" && data.routes.length) {
-      const routeBounds = L.latLngBounds([]);
-      for (const route of data.routes) {
-        for (const point of route.geometry.coordinates) {
-          routeBounds.extend([point[1], point[0]]);
-        }
+  const visibleBounds = L.latLngBounds([]);
+  for (const route of data.routes) {
+    if (!route.geometry || route.geometry.type !== "LineString") continue;
+    for (const point of route.geometry.coordinates) {
+      const longitude = Number(point[0]);
+      const latitude = Number(point[1]);
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        visibleBounds.extend([latitude, longitude]);
       }
-      if (routeBounds.isValid()) pendingMapBounds = routeBounds;
     }
   }
+  if (data.sourceMode !== "HISTORICAL_GPS_PILOT" || !visibleBounds.isValid()) {
+    for (const vehicle of data.vehicles) {
+      const latitude = Number(vehicle.latitude);
+      const longitude = Number(vehicle.longitude);
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        visibleBounds.extend([latitude, longitude]);
+      }
+    }
+  }
+  pendingMapBounds = visibleBounds.isValid() ? visibleBounds : null;
   if (selectedRouteId) {
     const route = data.routes.find((value) => routeProperties(value).route_id === selectedRouteId);
     if (route) selectRoute(route, false); else resetMapSelection();
@@ -799,7 +766,8 @@ function renderHeatmap(data) {
   ].filter(Boolean).join(" ");
 
   $("geo-model-zones").textContent = "Contrato procesado v" + (data.schemaVersion || "1");
-  $("geo-model-detail").textContent = data.description + " " + (metadata.road_matching || "");
+  $("geo-model-detail").textContent = metadata.road_matching ||
+    "Rutas calculadas con la telemetría disponible.";
   renderFleetMap(data);
 }
 const DASHBOARD_ZONES = ["Zona Norte", "Zona Centro", "Zona Sur", "Zona Oeste", "Zona Este"];
@@ -821,31 +789,26 @@ function routeCenter(route) {
 }
 
 function dashboardBounds(data) {
-  const supplied = data.bounds || {};
-  const bounds = {
-    latitudeMin: Number(supplied.latitude_min),
-    latitudeMax: Number(supplied.latitude_max),
-    longitudeMin: Number(supplied.longitude_min),
-    longitudeMax: Number(supplied.longitude_max)
-  };
-  if (Object.values(bounds).every(Number.isFinite)) return bounds;
   const points = [];
   for (const route of data.routes) {
     const point = routeCenter(route);
     if (point) points.push(point);
   }
-  for (const stop of data.stops) {
-    const latitude = Number(stop.latitude);
-    const longitude = Number(stop.longitude);
+  for (const vehicle of data.vehicles) {
+    const latitude = Number(vehicle.latitude);
+    const longitude = Number(vehicle.longitude);
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) points.push({latitude, longitude});
+  }
+  if (!points.length) {
+    return {latitudeMin: -34, latitudeMax: -33, longitudeMin: -71, longitudeMax: -70};
   }
   const latitudes = points.map((point) => point.latitude);
   const longitudes = points.map((point) => point.longitude);
   return {
-    latitudeMin: Math.min(...latitudes, -34),
-    latitudeMax: Math.max(...latitudes, -33),
-    longitudeMin: Math.min(...longitudes, -71),
-    longitudeMax: Math.max(...longitudes, -70)
+    latitudeMin: Math.min(...latitudes),
+    latitudeMax: Math.max(...latitudes),
+    longitudeMin: Math.min(...longitudes),
+    longitudeMax: Math.max(...longitudes)
   };
 }
 
@@ -949,9 +912,8 @@ function renderDashboard(data, metrics = {}) {
     Number(routeMetrics.HIGH || 0) + Number(routeMetrics.MEDIUM || 0) + Number(routeMetrics.LOW || 0)
     || data.routes.length
   );
-  $("dashboard-stop-events").textContent = format(operation.paradas || summary.stop_event_count || 0);
   $("dashboard-snapshot").textContent = "Corte " + formatDataDay(data.snapshotDate);
-  $("dashboard-snapshot").className = "status simulation";
+  $("dashboard-snapshot").className = "status info";
 
   const bounds = dashboardBounds(data);
   const routeZones = zoneAccumulator();
@@ -968,21 +930,6 @@ function renderDashboard(data, metrics = {}) {
     .map((zone) => ({...zone, detail: `${format(zone.count)} rutas · ${format(zone.vehicles)} participaciones de vehículos`}))
     .sort((first, second) => second.value - first.value);
   renderDashboardBars("dashboard-route-zones", routeZoneItems, "#246c55");
-
-  const stopZones = zoneAccumulator();
-  for (const stop of data.stops) {
-    const latitude = Number(stop.latitude);
-    const longitude = Number(stop.longitude);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
-    const zone = stopZones.get(dashboardZone(latitude, longitude, bounds));
-    zone.value += Number(stop.stop_event_count || 0);
-    zone.count += 1;
-    zone.vehicles += Number(stop.vehicle_count || 0);
-  }
-  const stopZoneItems = [...stopZones.values()]
-    .map((zone) => ({...zone, detail: `${format(zone.count)} zonas de parada · ${format(zone.vehicles)} participaciones de vehículos`}))
-    .sort((first, second) => second.value - first.value);
-  renderDashboardBars("dashboard-stop-zones", stopZoneItems, "#6f42a6");
 
   const routeLevels = {
     HIGH: Number(routeMetrics.HIGH || 0),
@@ -1001,19 +948,11 @@ function renderDashboard(data, metrics = {}) {
     {label: "Poco usadas", value: routeLevels.LOW, color: "#dc2626"}
   ], "rutas");
 
-  const fleetMetrics = metrics.flota || {};
-  const fleet = {
-    moving: Number(fleetMetrics.en_movimiento || 0),
-    stopped: Number(fleetMetrics.detenidos || 0),
-    off: Number(fleetMetrics.sin_senal || 0)
-  };
-  if (fleet.moving + fleet.stopped + fleet.off === 0) {
-    for (const vehicle of data.vehicles) fleet[vehicleStatus(vehicle).className] += 1;
-  }
+  const fleet = {moving: 0, off: 0};
+  for (const vehicle of data.vehicles) fleet[vehicleStatus(vehicle).className] += 1;
   renderDashboardDonut("dashboard-fleet-status", [
-    {label: "En movimiento", value: fleet.moving, color: "#58a566"},
-    {label: "Detenidos", value: fleet.stopped, color: "#e88836"},
-    {label: "Sin señal", value: fleet.off, color: "#708083"}
+    {label: "Con señal", value: fleet.moving, color: "#58a566"},
+    {label: "Sin señal o apagados", value: fleet.off, color: "#708083"}
   ], "vehículos");
 
   const topRoutes = [...data.routes]
@@ -1035,54 +974,15 @@ function renderDashboard(data, metrics = {}) {
   $("dashboard-most-route-zone-detail").textContent = mostRouteZone
     ? `${format(mostRouteZone.value)} recorridos en ${format(mostRouteZone.count)} rutas`
     : "No hay rutas suficientes en el bloque.";
-  const mostStopZone = stopZoneItems[0];
-  $("dashboard-most-stop-zone").textContent = mostStopZone ? mostStopZone.label : "Sin datos";
-  $("dashboard-most-stop-zone-detail").textContent = mostStopZone
-    ? `${format(mostStopZone.value)} detenciones en ${format(mostStopZone.count)} zonas detectadas`
-    : "No hay paradas suficientes en el bloque.";
   $("dashboard-method").textContent =
     "Las coordenadas se dividen en cinco zonas relativas al centro del área observada: norte, centro, sur, oeste y este. " +
     "Cada ruta conserva una sola clasificación y se cuenta en la zona de su centro geométrico. Actualización automática con el mismo bloque del mapa.";
 }
-function renderTrips() {
-  const query = $("search").value.trim().toLocaleLowerCase("es");
-  const filtered = trips.filter((row) => `${row.id} ${row.origen} ${row.destino}`.toLocaleLowerCase("es").includes(query));
-  const visible = expanded ? filtered : filtered.slice(0, 10);
-  const body = $("trip-rows");
-  body.replaceChildren();
-  for (const row of visible) {
-    const tr = document.createElement("tr");
-    const route = document.createElement("td");
-    route.textContent = `${row.origen} → ${row.destino}`;
-    const id = document.createElement("small");
-    id.textContent = row.id;
-    route.append(id);
-    tr.append(route);
-    for (const text of [row.distancia_km === null ? "Sin dato" : `${format(row.distancia_km, 1)} km`, `${format(row.duracion_horas, 2)} h`]) {
-      const td = document.createElement("td"); td.textContent = text; tr.append(td);
-    }
-    const prediction = document.createElement("td");
-    const label = document.createElement("span"); label.className = "estimate";
-    label.textContent = row.duracion_estimada === null ? "No disponible" : `${format(row.duracion_estimada, 2)} h`;
-    prediction.append(label); tr.append(prediction); body.append(tr);
-  }
-  if (!visible.length) {
-    const row = document.createElement("tr"); const cell = document.createElement("td");
-    cell.colSpan = 4; cell.className = "empty"; cell.textContent = "No se encontraron viajes.";
-    row.append(cell); body.append(row);
-  }
-  $("table-count").textContent = `${visible.length} de ${filtered.length} viajes`;
-  $("show-all").hidden = filtered.length <= 10;
-  $("show-all").textContent = expanded ? "Ver menos" : "Ver todos";
-}
-
 function renderTelemetry(summary, dataset, state) {
   const reports = dataset.reportes || [];
   const telemetryState = state.telemetria || {};
   $("telemetry-count").textContent = format(summary.reportes);
   $("vehicle-count").textContent = format(summary.vehiculos);
-  $("average-speed").textContent = `${format(summary.velocidad_promedio, 1)} km/h`;
-  $("maximum-speed").textContent = `${format(summary.velocidad_maxima, 1)} km/h`;
   $("telemetry-range").textContent = summary.reportes
     ? `Desde ${formatUtc(summary.desde)} hasta ${formatUtc(summary.hasta)}`
     : "Todavía no hay reportes importados.";
@@ -1122,11 +1022,6 @@ function renderTelemetry(summary, dataset, state) {
     event.textContent = report.event_name || "Sin evento";
     tr.append(event);
 
-    const speed = document.createElement("td");
-    const speedValue = report.gps_speed ?? report.speed;
-    speed.textContent = speedValue === null || speedValue === undefined ? "Sin dato" : `${format(speedValue, 1)} km/h`;
-    tr.append(speed);
-
     const coordinates = document.createElement("td");
     coordinates.textContent = report.latitude === null || report.longitude === null
       ? "Sin coordenadas"
@@ -1143,7 +1038,7 @@ function renderTelemetry(summary, dataset, state) {
   if (!reports.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 6;
+    cell.colSpan = 5;
     cell.className = "empty";
     cell.textContent = "No hay telemetría disponible para mostrar.";
     row.append(cell);
@@ -1167,26 +1062,7 @@ function renderState(state) {
     $("last-sync").textContent = etl.ultima_carga
       ? "Última carga: " + formatUtc(etl.ultima_carga)
       : "ETL aún sin primera carga";
-    $("source-count").textContent = "Muestra de simulación separada del ETL real";
-    $("etl-summary").textContent =
-      "La telemetría real procede de MongoDB, se valida en bloques y se conserva en raw_gps. " +
-      format(etl.validos || 0) + " registros válidos y " +
-      format(etl.rechazados || 0) + " rechazados de " +
-      format(etl.leidos || 0) + " leídos. Esta vista de viajes usa datos simulados independientes.";
-    $("rejections").replaceChildren();
-    for (const rejected of (etl.rechazos || []).slice(0, 10)) {
-      const item = document.createElement("li");
-      item.textContent = rejected.motivo || rejected.reason || JSON.stringify(rejected);
-      $("rejections").append(item);
-    }
   }
-  const model = state.modelo_telemetria;
-  const metrics = model && model.metricas ? model.metricas : {};
-  $("model-error").textContent = model ? format(metrics.zonas_detectadas || 0) : "—";
-  $("model-name").textContent = model ? "DBSCAN · zonas GPS" : "Modelo de zonas pendiente";
-  $("model-training").textContent = model
-    ? format(metrics.reportes_entrenamiento || 0) + " reportes usados para identificar zonas frecuentes."
-    : "El modelo de zonas se activará después de la carga histórica.";
 }
 
 async function refresh() {
@@ -1194,10 +1070,8 @@ async function refresh() {
   if (refreshing) return;
   refreshing = true; $("refresh").disabled = true;
   try {
-    const [state, summary, dataset, telemetrySummary, telemetryDataset, mapPayload, dashboard] = await Promise.all([
+    const [state, telemetrySummary, telemetryDataset, mapPayload, dashboard] = await Promise.all([
       api("/api/estado"),
-      api("/api/resumen"),
-      api("/api/viajes?limite=500"),
       api("/api/telemetria/resumen"),
       api("/api/telemetria?limite=30"),
       api("/api/mapa"),
@@ -1209,10 +1083,6 @@ async function refresh() {
     renderTelemetry(telemetrySummary, telemetryDataset, state);
     renderHeatmap(mapData);
     renderDashboard(mapData, dashboard);
-    $("trip-count").textContent = format(summary.viajes);
-    $("prediction-count").textContent = format(summary.predicciones);
-    $("destination-count").textContent = format(summary.destinos);
-    trips = dataset.viajes; renderTrips();
     $("notice").hidden = state.status === "ok";
     $("notice").textContent = "Una etapa no ha respondido recientemente o está preparando datos nuevos. Los datos mostrados corresponden a la última carga disponible.";
   } catch (error) {
@@ -1226,40 +1096,7 @@ async function refresh() {
   } finally { refreshing = false; $("refresh").disabled = false; }
 }
 
-function predictionMessage(title, text, value = null, error = false) {
-  const result = $("prediction-result"); result.replaceChildren();
-  result.className = `prediction-result${error ? " error" : ""}`;
-  const label = document.createElement("span"); label.textContent = title; result.append(label);
-  if (value !== null) {const number = document.createElement("strong"); number.textContent = `${format(value, 2)} horas`; result.append(number);}
-  const paragraph = document.createElement("p"); paragraph.textContent = text; result.append(paragraph);
-}
-
-$("prediction-form").addEventListener("submit", async (event) => {
-  event.preventDefault(); $("predict").disabled = true;
-  predictionMessage("PROCESANDO", "Enviando la solicitud al modelo…");
-  let pendingPath = null;
-  try {
-    const input = {distancia_km: Number($("distance").value), carga_kg: Number($("load").value), paradas: Number($("stops").value)};
-    const request = await api("/api/predicciones", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(input)});
-    pendingPath = request.consulta;
-    const deadline = Date.now() + 25000;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      const result = await api(pendingPath);
-      if (result.estado === "completada") {
-        predictionMessage("DURACIÓN ESTIMADA", `Resultado guardado en MariaDB. Modelo ${result.dataset_version.slice(0, 8)}.`, result.duracion_estimada);
-        return;
-      }
-    }
-    throw new Error("La solicitud sigue pendiente. Puedes consultar su estado en el enlace inferior.");
-  } catch (error) {
-    predictionMessage("NO SE PUDO COMPLETAR", error.message, null, true);
-    if (pendingPath) {const link = document.createElement("a"); link.href = pendingPath; link.textContent = "Consultar solicitud ↗"; link.target = "_blank"; link.rel = "noopener"; $("prediction-result").append(link);}
-  } finally { $("predict").disabled = false; }
-});
 $("refresh").addEventListener("click", refresh);
-$("search").addEventListener("input", renderTrips);
-$("show-all").addEventListener("click", () => {expanded = !expanded; renderTrips();});
 for (const button of document.querySelectorAll("[data-route-filter]")) {
   button.addEventListener("click", () => {
     activeRouteFilter = button.dataset.routeFilter || "ALL";
@@ -1287,8 +1124,3 @@ window.addEventListener("hashchange", syncDatasetView);
 syncDatasetView();
 if (token()) refresh();
 setInterval(refresh, 300000);
-
-// El esquema compartido no incluye predicciones de duración; evita ofrecer una acción engañosa.
-for (const control of $("prediction-form").querySelectorAll("input, button")) control.disabled = true;
-predictionMessage("MODELO DE DURACIÓN NO DISPONIBLE",
-  "El modelo actual detecta zonas geoespaciales. La estimación de duración requiere datos y entrenamiento adicionales.");
