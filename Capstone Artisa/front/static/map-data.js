@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const REQUIRED_ARRAYS = ["routes", "trips", "stops", "vehicles", "readings"];
+  const REQUIRED_ARRAYS = ["routes", "trips", "vehicles", "readings"];
 
   function asArray(value, field) {
     if (!Array.isArray(value)) throw new Error("El contrato del mapa no contiene " + field + ".");
@@ -50,14 +50,11 @@
       schemaVersion: payload.schema_version,
       sourceMode: payload.source_mode,
       snapshotDate: payload.snapshot_date,
-      description: payload.description,
       routes,
       trips: [...payload.trips],
-      stops: [...payload.stops],
       vehicles: [...payload.vehicles],
       readings: [...payload.readings],
       summary: {...(payload.summary || {})},
-      bounds: payload.bounds ? {...payload.bounds} : null,
       ranking: {
         mostUsed: rankedRoute(ranking.most_used),
         leastUsed: rankedRoute(ranking.least_used)
