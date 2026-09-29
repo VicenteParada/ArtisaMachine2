@@ -14,6 +14,21 @@ x-python-health: &python-health
   retries: 12
 
 services:
+  mongodb:
+    image: mongo:8.0
+    container_name: artisa-mongodb
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
+    restart: unless-stopped
+
   mariadb:
     image: mariadb:11.8
     container_name: artisa-mariadb
@@ -41,7 +56,7 @@ services:
     container_name: artisa-etl
     environment:
       <<: *db-environment
-      MONGO_URI: ${MONGO_URI:-mongodb://host.docker.internal:27017}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
       MONGO_DATABASE: ${MONGO_DATABASE:-gps_data}
       MONGO_COLLECTION: ${MONGO_COLLECTION:-raw_gps}
       MONGO_TIMEOUT_SECONDS: ${MONGO_TIMEOUT_SECONDS:-10}
@@ -146,3 +161,4 @@ services:
 
 volumes:
   mariadb_data:
+  mongodb_data:
