@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 import secrets
+import subprocess
+import sys
 
 
 env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -26,3 +28,6 @@ else:
             "TELEMETRY_INTERVAL_SECONDS=30\n"
         )
     print("Archivo .env creado con credenciales locales aleatorias.")
+
+subprocess.run([sys.executable, str(env_path.parent / "scripts" / "setup_auth.py")],
+               cwd=env_path.parent, check=True)
