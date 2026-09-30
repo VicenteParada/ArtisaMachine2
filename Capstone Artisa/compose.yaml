@@ -14,6 +14,21 @@ x-python-health: &python-health
   retries: 12
 
 services:
+  mongodb:
+    image: mongo:8.0
+    container_name: artisa-mongodb
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
+    restart: unless-stopped
+
   mariadb:
     image: mariadb:11.8
     container_name: artisa-mariadb
@@ -33,45 +48,27 @@ services:
       start_period: 30s
       retries: 12
     restart: unless-stopped
-    mem_limit: 1g
-
-  mongodb:
-    image: mongo:8.0
-    container_name: artisa-mongodb
-    profiles: ["historical"]
-    volumes:
-      - mongodb_data:/data/db
-    healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
-      interval: 5s
-      timeout: 5s
-      start_period: 20s
-      retries: 12
-    restart: unless-stopped
-    mem_limit: 1400m
 
   etl:
     build:
       context: .
       dockerfile: ETLs/Dockerfile
     container_name: artisa-etl
-    profiles: ["historical"]
     environment:
       <<: *db-environment
-      MONGO_URI: ${MONGO_DOCKER_URI:-mongodb://mongodb:27017}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
       MONGO_DATABASE: ${MONGO_DATABASE:-gps_data}
       MONGO_COLLECTION: ${MONGO_COLLECTION:-raw_gps}
       MONGO_TIMEOUT_SECONDS: ${MONGO_TIMEOUT_SECONDS:-10}
-      TELEMETRY_BATCH_SIZE: ${TELEMETRY_BATCH_SIZE:-5000}
-      TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-300}
+      TELEMETRY_BATCH_SIZE: ${TELEMETRY_BATCH_SIZE:-2000}
+      TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       mariadb:
         condition: service_healthy
-      mongodb:
-        condition: service_healthy
     healthcheck: *python-health
     restart: unless-stopped
-    mem_limit: 512m
     init: true
 
   machine:
@@ -79,34 +76,17 @@ services:
       context: .
       dockerfile: modelo_machine/Dockerfile
     container_name: artisa-machine
-    volumes:
-      - ./exports:/app/exports
     environment:
       <<: *db-environment
-      TELEMETRY_MODEL_MAX_ROWS: ${TELEMETRY_MODEL_MAX_ROWS:-5000}
-      TELEMETRY_MODEL_INTERVAL_SECONDS: ${TELEMETRY_MODEL_INTERVAL_SECONDS:-300}
+      TELEMETRY_MODEL_MAX_ROWS: ${TELEMETRY_MODEL_MAX_ROWS:-20000}
+      TELEMETRY_MODEL_RADIUS_KM: ${TELEMETRY_MODEL_RADIUS_KM:-0.8}
+      TELEMETRY_MODEL_MIN_SAMPLES: ${TELEMETRY_MODEL_MIN_SAMPLES:-5}
+      TELEMETRY_MODEL_INTERVAL_SECONDS: ${TELEMETRY_MODEL_INTERVAL_SECONDS:-30}
     depends_on:
       mariadb:
         condition: service_healthy
     healthcheck: *python-health
     restart: unless-stopped
-    mem_limit: 768m
-    init: true
-
-  route-catalog:
-    build:
-      context: .
-      dockerfile: modelo_machine/Dockerfile
-    profiles: ["historical"]
-    command: ["python", "-m", "modelo_machine.route_catalog"]
-    volumes:
-      - ./exports:/app/exports
-    environment:
-      <<: *db-environment
-    depends_on:
-      mariadb:
-        condition: service_healthy
-    mem_limit: 1g
     init: true
 
   endpoints:
@@ -114,23 +94,19 @@ services:
       context: .
       dockerfile: endpoints/Dockerfile
     container_name: artisa-endpoints
-    volumes:
-      - ./exports:/app/exports:ro
     environment:
-      MAP_CATALOG_FILE: /app/exports/route_catalog.json
-      MAP_CATALOG_PILOT_FILE: /app/exports/route_catalog_pilot.json
       <<: *db-environment
-      MAP_DATA_SOURCE: ${MAP_DATA_SOURCE:-telemetry}
-      MAP_SIMULATION_FILE: ${MAP_SIMULATION_FILE:-/app/simulacion/mapa_procesado.json}
-      MAP_MAX_REPORTS: ${MAP_MAX_REPORTS:-3000}
-      MAP_REFRESH_SECONDS: ${MAP_REFRESH_SECONDS:-300}
-      ETL_HEALTH_MAX_AGE_SECONDS: ${ETL_HEALTH_MAX_AGE_SECONDS:-900}
+      TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
     depends_on:
       mariadb:
         condition: service_healthy
-    healthcheck: *python-health
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
     restart: unless-stopped
-    mem_limit: 384m
     init: true
 
   front:
@@ -143,11 +119,16 @@ services:
     depends_on:
       endpoints:
         condition: service_healthy
-    healthcheck: *python-health
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/front-health', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
     restart: unless-stopped
-    mem_limit: 256m
     init: true
 
+  # Nginx es la entrada web en localhost:8080: /auth/* va a auth y el resto a front.
   auth:
     build:
       context: .
@@ -157,7 +138,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Ejecuta python3 scripts/prepare_env.py}
       AUTH_USERNAME: ${AUTH_USERNAME:?Ejecuta python3 scripts/prepare_env.py}
       AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:?Ejecuta python3 scripts/prepare_env.py}
-      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-43200}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3).read()"]
       interval: 5s
@@ -165,7 +146,6 @@ services:
       start_period: 5s
       retries: 12
     restart: unless-stopped
-    mem_limit: 128m
     init: true
 
   nginx:
@@ -175,7 +155,6 @@ services:
     container_name: artisa-nginx
     ports:
       - "127.0.0.1:8080:8080"
-      - "[::1]:8080:8080"
     depends_on:
       auth:
         condition: service_healthy
@@ -188,11 +167,8 @@ services:
       start_period: 5s
       retries: 12
     restart: unless-stopped
-    mem_limit: 128m
     init: true
 
 volumes:
   mariadb_data:
   mongodb_data:
-
-

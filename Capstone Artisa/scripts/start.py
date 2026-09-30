@@ -1,4 +1,4 @@
-"""Inicia todo el proyecto con un solo comando desde Ubuntu/WSL."""
+"""Inicia los servicios base del proyecto Artisa con Docker Compose."""
 
 from pathlib import Path
 import subprocess
@@ -6,11 +6,16 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parent.parent
+print("Preparando entorno...", flush=True)
 subprocess.run([sys.executable, str(ROOT / "scripts" / "prepare_env.py")], check=True)
+print("Iniciando servicios base de Artisa...", flush=True)
 subprocess.run(
-    ["docker", "compose", "up", "--detach", "--build", "--wait",
-     "--wait-timeout", "180", "mariadb", "endpoints", "front", "auth", "nginx"],
-    cwd=ROOT, check=True,
+    [
+        "docker", "compose", "up", "--detach", "--build", "--wait",
+        "--wait-timeout", "180",
+        "mongodb", "mariadb", "etl", "endpoints", "front", "auth", "nginx",
+    ],
+    cwd=ROOT,
+    check=True,
 )
 print("Artisa en funcionamiento: http://localhost:8080")
-print("El modelo de zonas se inicia por separado al terminar la carga histórica.")

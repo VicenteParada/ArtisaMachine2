@@ -8,8 +8,6 @@
 !ETLs/**
 !modelo_machine/
 !modelo_machine/**
-!processing/
-!processing/**
 !endpoints/
 !endpoints/**
 !front/
@@ -18,10 +16,7 @@
 !auth/**
 !nginx/
 !nginx/**
-!simulacion/
-!simulacion/**
 **/__pycache__/
 **/*.pyc
 **/.env
 **/.env.*
-

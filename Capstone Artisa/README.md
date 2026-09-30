@@ -1,157 +1,260 @@
-# Artisa: telemetría histórica y mapa local
+# Artisa Transportes
 
-La aplicación se abre en http://localhost:8080. El código de esta rama usa el
-mismo esquema MariaDB de seis tablas acordado por el equipo:
+Sistema de telemetría con datos reales. La entrada web es
+[http://localhost:8080](http://localhost:8080), publicada por Nginx.
 
-- raw_gps: reportes GPS aceptados.
-- raw_gps_estado: cursor, avance y rechazos del ETL.
-- modelo_telemetria_estado: métricas y zonas del modelo DBSCAN.
-- tipos_vehiculo y vehiculos: catálogo de vehículos.
-- faenas: geocercas.
+```mermaid
+flowchart LR
+    MongoDB --> ETL --> MariaDB --> Endpoints --> Front --> Nginx --> Browser
+    Nginx --> Auth
+    MariaDB -. Integración pendiente .-> Machine
+```
 
-El origen histórico local es MongoDB (gps_data.raw_gps). El ETL lee documentos
-en bloques de 5000 y confirma los registros y el cursor juntos en MariaDB. El
-volumen de MariaDB conserva lo ya cargado al parar y reanudar el contenedor.
-Los datos de MongoDB y MariaDB son locales y no se suben a GitHub.
+## Arranque actual
 
-El mapa toma la última posición disponible de cada vehículo en raw_gps. Cada
-cinco minutos vuelve a consultar esas posiciones; esto no convierte el histórico
-en telemetría en vivo. Si un vehículo no transmite, aparece como «sin señal»
-con la hora de su última lectura. Al seleccionarlo se consulta, bajo demanda,
-su recorrido GPS del último día registrado: trazado, distancia y paradas
-observadas. El día no equivale necesariamente a una jornada laboral.
+Desde la carpeta del proyecto:
 
-Las rutas coloreadas proceden de un catálogo generado fuera de la petición web.
-El procesamiento por camión lee MariaDB en secuencia, agrupa recorridos completos
-por origen, destino y forma GPS, y clasifica según pasadas por ruta. El catálogo
-piloto usa solo cinco camiones y se identifica claramente como parcial. El
-proceso completo se escribe en exports/route_catalog.json cuando termina; la
-API cambia automáticamente a ese archivo en el siguiente refresco. La geometría
-es una traza GPS representativa, sin map matching vial confirmado. El dashboard
-de métricas todavía resume una ventana reciente; sus cifras no deben tomarse
-como indicadores de las 23 millones de lecturas.
+```bash
+python3 scripts/start.py
+```
 
-## Carpetas activas
+El comando prepara `.env` sin reemplazar una autenticación ya configurada y
+levanta `mongodb`, `mariadb`, `etl`, `endpoints`, `front`, `auth` y `nginx`.
+Espera sus comprobaciones de salud. Machine permanece definido en Compose,
+pero no se inicia con este comando. No se importan históricos automáticamente.
 
-- DB/schema.sql: definición compartida de las seis tablas.
-- ETLs/telemetry.py y ETLs/worker.py: carga MongoDB → MariaDB.
-- modelo_machine/telemetry.py: clustering geoespacial → modelo_telemetria_estado.
-- modelo_machine/route_catalog.py: catálogo histórico versionado y reanudable.
-- common/vehicle_journey.py: ficha y recorrido GPS de un camión en un día observado.
-- common/map_provider.py y common/telemetry_map.py: contrato y análisis del mapa.
-- endpoints/api.py: API de estado, telemetría, mapa, dashboard y faenas.
-- front/static/: interfaz; front/server.py sirve archivos y transmite la API.
-- auth/ y nginx/: inicio de sesión y entrada HTTP del puerto 8080.
-- simulacion/: datos de demostración separados del histórico.
+Consulta [Configurar el entorno](docs/CONFIGURAR_ENTORNO.md) para instalación,
+acceso privado del administrador, sesiones de 12 horas y cambio de contraseña.
+No guardes contraseñas, hashes reales ni secretos JWT en Git.
 
-## Acceso de administrador
+## Componentes actuales
 
-Antes de iniciar los contenedores, ejecuta `python3 scripts/prepare_env.py`
-desde `Capstone Artisa`. Este comando genera una contraseña aleatoria para
-`admin`, su hash y la clave de firma JWT en el `.env` local. La contraseña se
-muestra una sola vez: guárdala en un gestor de contraseñas. El archivo `.env`
-está excluido de Git. Si necesitas cambiar la contraseña, ejecuta
-`python3 scripts/setup_auth.py --rotate` y recrea `auth` y `nginx` con Docker
-Compose. Eso invalida los tokens previos. Los intentos de inicio de sesión
-fallidos devuelven 401 y Nginx limita las solicitudes repetidas. Antes de
-publicar la aplicación fuera de localhost, configura HTTPS y un despliegue
-seguro; el servidor local actual usa HTTP.
+- `ETLs/`: lee MongoDB y escribe `raw_gps` y su estado en MariaDB.
+- `DB/schema.sql`: esquema que inicializa el ETL.
+- `endpoints/` y `common/`: API independiente y utilidades HTTP/MariaDB.
+- `front/`: interfaz y proxy interno hacia endpoints.
+- `auth/` y `nginx/`: autenticación JWT y entrada pública protegida.
+- `modelo_machine/`: trabajador DBSCAN pendiente de integración; sus zonas no
+  equivalen a rutas, viajes ni clasificaciones de uso.
+- `scripts/`: arranque, configuración y comprobaciones; recuperación histórica
+  explícita y separada del inicio normal.
 
-Los módulos processing/ y ETLs/realtime.py son experimentos históricos; no deben
-ejecutarse sobre este esquema de seis tablas.
+## Rutas vigentes
 
-## Arranque y seguimiento en WSL
+Nginx protege `/api/*`. `/` sirve la interfaz; la raíz interna de endpoints
+lista sus rutas. `/health` es compacto y público; Machine pendiente no degrada
+por sí solo la salud del sistema base.
 
-Desde PowerShell de VS Code, situado en la carpeta Capstone Artisa, inicia la
-aplicación sin arrancar el modelo durante la carga histórica:
+| Método | Ruta | Estado actual |
+| --- | --- | --- |
+| POST | `/auth/login` | Autenticación real |
+| GET | `/auth/health` | Salud de Auth |
+| GET | `/health` | Salud operativa compacta |
+| GET | `/api/estado` | Diagnóstico ETL y Machine |
+| GET | `/api/faenas` | Catálogo existente |
+| GET | `/api/modelo/telemetria` | Estado y zonas DBSCAN existentes |
+| GET | `/api/telemetria?limite=30` | `pending`, fuente `company_api`, sin consulta a históricos |
+| GET | `/api/telemetria/resumen` | `pending`, fuente `company_api`, totales `null` |
+| GET | `/api/mapa` | `PENDING_MACHINE`, sin rutas ni viajes inventados |
+| GET | `/api/dashboard` | `pending`, sin métricas calculadas |
 
-    wsl.exe -e docker compose up -d --build mariadb endpoints front auth nginx
+El recorrido por vehículo no está implementado y su acción permanece desactivada
+mientras Machine está pendiente. El frontend muestra pendientes, no ceros ficticios.
+La telemetría actual depende de la futura API de la empresa. No se muestran
+los históricos de `raw_gps` como datos actuales. Mientras está pendiente,
+`limite` se acepta sin efecto y no se consulta MariaDB para estas dos rutas.
 
-En esta instalación, la carga histórica se ejecuta en los contenedores
-artisa-mongodb-historico y artisa-etl-historico-main. Para reanudarla:
+## Comprobar y detener
 
-    wsl.exe -e docker start artisa-mongodb-historico artisa-etl-historico-main
+En Ubuntu/WSL, desde esta carpeta:
 
-Para pausarla sin perder el cursor:
+```bash
+python3 -m unittest discover -s tests -v
+python3 scripts/check.py
+docker compose ps
+docker compose logs --tail 30
+docker compose stop
+```
 
-    wsl.exe -e docker stop artisa-etl-historico-main
+En PowerShell antepone `wsl -d Ubuntu --exec` a cada comando.
+`scripts/check.py` realiza únicamente GET: comprueba `/`, `/health` y,
+si se proporciona `ARTISA_TEST_TOKEN` con un JWT vigente, `/api/estado`.
+Sin token informa que la comprobación protegida fue omitida; no valida
+completamente el acceso autenticado. No imprime ni guarda el token.
+No exige Machine, no modifica datos y no recrea contenedores.
 
-Para ver los últimos bloques:
+Para proporcionar el token sin escribirlo en el historial de Bash:
 
-    wsl.exe -e docker logs --tail 20 artisa-etl-historico-main
+```bash
+read -r -s -p "JWT vigente: " ARTISA_TEST_TOKEN
+printf '\n'
+ARTISA_TEST_TOKEN="$ARTISA_TEST_TOKEN" python3 scripts/check.py
+unset ARTISA_TEST_TOKEN
+```
 
-Para ver el avance exacto del ETL desde PowerShell:
+`tests/check_auth_http.py` usa `ARTISA_TEST_PASSWORD` para pruebas de login.
+El comprobador de lectura no utiliza contraseñas ni ejecuta POST de autenticación.
+`scripts/check_pipeline.py` queda como referencia provisional del contrato antiguo;
+no se ejecuta desde `check.py` y todavía no valida el sistema actual.
 
-    "SELECT leidos, validos, rechazados, estado FROM raw_gps_estado WHERE id=1;" | wsl.exe -e docker exec -i artisa-mariadb sh -c 'mariadb --user="$MARIADB_USER" --password="$MARIADB_PASSWORD" "$MARIADB_DATABASE"'
 
-No uses docker compose down -v: esa opción elimina los volúmenes con los datos.
-La carga de los archivos históricos disponibles ya terminó. El modelo DBSCAN analiza hasta 5000 posiciones recientes por ciclo para limitar el uso de memoria. Se inicia con:
+Detener o reconstruir los contenedores conserva los datos. No utilices
+`docker compose down --volumes` salvo que quieras eliminar la base.
 
-    wsl.exe -e docker compose up -d machine
+## Configuración local
 
-## Agregar nuevas semanas de reportes
+Nginx es la entrada web en `127.0.0.1:8080` y protege las rutas `/api/`
+mediante Auth. El frontend permanece en la red interna de Compose.
+Consulta `docs/CONFIGURAR_ENTORNO.md` para el arranque y acceso actuales.
 
-La última lectura disponible en esta instalación es del 8 de septiembre de
-2026. Cuando lleguen archivos posteriores, copia los JSON originales a
-C:\Users\angel\Desktop\base de datos completa con nombres como
-reportes_semana_17_20260909.json. Conserva los nombres originales y los archivos anteriores.
+`scripts/prepare_env.py` crea contraseñas aleatorias una sola vez y conserva `.env`
+si ya existe. No cambies estas contraseñas mientras uses el volumen actual sin
+actualizar también las cuentas de MariaDB. `.env` no entra en Git ni en las imágenes.
+La tabla de mensajes y el volumen de la prueba anterior se conservan.
 
-En PowerShell de VS Code, primero revisa qué archivos nuevos detecta el
-importador. Este paso no modifica ninguna base de datos:
+## Pendiente de integración Machine
 
-    wsl.exe -e bash "/mnt/c/Users/angel/Documents/ChatGPT/Artisa/Capstone Artisa/scripts/import_mongodb.sh" "/mnt/c/Users/angel/Desktop/base de datos completa" 20260909 --dry-run
+El trabajador requiere los catálogos `vehiculos` y `tipos_vehiculo`, ausentes
+del esquema versionado. Existen en la base persistente actual, pero su
+provisión reproducible queda pendiente junto con Machine. Ninguna ruta actual
+del frontend depende de ellos.
+`common/telemetry_map.py` se conserva como referencia legacy utilizada por sus
+pruebas; no está conectado a los endpoints activos.
 
-El valor 20260909 es un ejemplo: sustitúyelo por la primera fecha realmente
-nueva si los archivos recibidos comienzan otro día. Si el ensayo muestra solo
-las semanas nuevas y tienen el mismo formato JSON que los originales, ejecútalo
-sin --dry-run con esa misma fecha:
+## Salud del ETL
 
-    wsl.exe -e bash "/mnt/c/Users/angel/Documents/ChatGPT/Artisa/Capstone Artisa/scripts/import_mongodb.sh" "/mnt/c/Users/angel/Desktop/base de datos completa" 20260909
+Endpoints recibe el mismo `TELEMETRY_INTERVAL_SECONDS` que el worker y aplica
+su margen de salud: `max(60, intervalo × 3)`. Con 30 segundos, el umbral es 90;
+con 300, sería 900. No se confunde con el refresco visual de cinco minutos.
 
-El script detiene temporalmente el ETL y el modelo, carga solo las semanas
-pendientes en MongoDB y vuelve a iniciar el ETL. No detengas el PC ni cierres
-la terminal durante la importación de un archivo. Para seguir el paso a MariaDB:
+## Archivo histórico del prototipo
 
-    wsl.exe -e docker logs --tail 20 -f artisa-etl-historico-main
+Todo lo que sigue se conserva únicamente como documentación histórica.
+Las rutas, archivos, variables y procedimientos descritos aquí pueden no existir
+en la versión actual. No ejecutar estas instrucciones para operar el sistema.
 
-También puedes consultar raw_gps_estado con el comando de arriba. Cuando el
-estado vuelva a esperando, inicia nuevamente el modelo:
+### Referencia histórica: demostración inicial
 
-    wsl.exe -e docker start artisa-machine
+Esta sección describe el prototipo anterior; no es el contrato operativo actual.
 
-Si aparece un archivo .artisa-en-proceso, la importación se interrumpió;
-revisa cuántos documentos entraron antes de reintentar para evitar duplicados.
-No borres los volúmenes de Docker ni reinicies el cursor del ETL. Los archivos
-JSON y los marcadores de importación quedan fuera de GitHub.
+1. **Origen:** `origen/viajes.csv` contiene 124 filas sintéticas: 120 viajes válidos,
+   un duplicado y tres filas inválidas para comprobar la limpieza. Las distancias
+   y duraciones son ficticias, aunque las ciudades tienen nombres reales.
+2. **ETL:** revisa el archivo cada 15 segundos. Normaliza nombres, espacios y comas
+   decimales, valida rangos y rechaza duplicados. La carga se confirma en una
+   transacción, con versión SHA-256, conteos y motivos de rechazo.
+3. **MariaDB:** conserva viajes, estado de la carga, metadatos del modelo,
+   predicciones y solicitudes en el volumen persistente `artisa_mariadb_data`.
+4. **Machine Learning:** entrena una regresión lineal con distancia, carga y paradas
+   para estimar duración en horas. Evalúa con una división reproducible 80/20,
+   reporta el error absoluto medio (MAE) y ajusta el modelo final con todos los
+   registros válidos. Guarda una predicción por viaje. Reentrena al cambiar la
+   versión del origen o reiniciarse el trabajador.
+5. **Endpoints y frontend:** la pantalla consulta datos, estado y predicciones a
+   través de la API. El formulario registra una solicitud pendiente en MariaDB;
+   Machine la procesa en su siguiente ciclo (cada 2 segundos), guarda el resultado
+   y la pantalla lo consulta por ID. Los endpoints no ejecutan el modelo.
 
-## Catálogo de rutas históricas
+El modelo es demostrativo y no está validado para estimar operaciones reales.
+El MAE mostrado corresponde a las filas reservadas para evaluación, no al ajuste
+sobre todas las filas ni a viajes reales.
 
-Con MariaDB funcionando, desde la carpeta Capstone Artisa:
+### Primer ETL de telemetría real
 
-    wsl.exe -e docker compose build route-catalog
-    wsl.exe -e docker compose run --rm route-catalog
+El mismo contenedor `etl` consulta la API SQL mediante `POST`, lee la lista `rows`,
+normaliza las fechas a UTC, valida identificadores y coordenadas y guarda los datos
+en `telemetria_raw`. `report_id` es la clave primaria, por lo que repetir una página
+actualiza sus datos y no crea duplicados.
 
-El proceso genera un archivo SQLite de trabajo en exports/ después de cada
-camión. Si se interrumpe, el mismo comando lo reanuda desde el siguiente camión.
-El JSON definitivo solo reemplaza al anterior al finalizar el conjunto completo.
-No borres exports/ si necesitas continuar. Para verificar la cobertura, revisa
-metadata.processed_report_count, metadata.source_report_count y
-metadata.catalog_complete en exports/route_catalog.json. Si la fuente cambia,
-se crea automáticamente un nuevo checkpoint versionado.
+La extracción usa paginación por `(report_date, report_id)`, sin `OFFSET`. El cursor
+y los conteos se guardan en `telemetria_etl_estado`, dentro de la misma transacción
+que la página procesada. La configuración inicial limita la prueba a 5.000 filas de
+un solo día para no solicitar accidentalmente los 28,8 millones de registros.
 
-La ruta del camión se asigna solo si varias posiciones, dirección y proximidad
-aportan evidencia suficiente. En otro caso la ficha dice «Sin clasificar».
-Patente y fin de jornada no están confirmados en la fuente; se muestran como
-no informados. Las paradas y distancias son inferencias GPS, no un registro
-certificado de operaciones.
+### Entrenamiento geoespacial y mapa operativo
 
-## Limitaciones actuales
+Machine entrena automáticamente un modelo no supervisado DBSCAN sobre hasta 20.000
+posiciones válidas de `telemetria_raw`. El modelo agrupa puntos a menos de 0,8 km,
+identifica zonas frecuentes y guarda su versión, cobertura y fecha de entrenamiento
+en `modelo_telemetria_estado`. Se reentrena cuando cambia el cursor del ETL real.
 
-El ajuste a la red vial aún no está implementado. Algunos saltos con GPS
-insuficiente pueden seguirse viendo como tramos rectos y requieren revisión
-manual antes de tomar decisiones operativas. Tampoco existe una fuente en vivo
-conectada: la pantalla enseña las últimas lecturas importadas, aunque sean
-antiguas. El modelo DBSCAN identifica zonas frecuentes, no trayectos completos
-ni tiempos de viaje. Las columnas heredadas adicionales que ya existían en
-raw_gps y raw_gps_estado se conservaron en el volumen para no perder
-telemetría ni progreso; el esquema compartido no se amplió.
+El mapa usa cartografía OpenStreetMap mediante Leaflet, representa los tramos con líneas sólidas y los divide en tercios: rojo para uso bajo,
+naranja para uso medio y verde oscuro para uso alto, las paradas con círculos violetas y la última posición conocida
+de cada vehículo con un icono de camión. El frontend consulta la API cada 15 segundos;
+cuando el origen entregue datos en tiempo real, los marcadores se actualizarán por el
+mismo flujo sin cambiar la interfaz. La cartografía base requiere conexión a Internet.
+
+Configura estas variables únicamente en `.env`:
+
+```dotenv
+SOURCE_API_URL=http://HOST_ORIGEN:3003/sql
+SOURCE_API_TIMEOUT_SECONDS=90
+TELEMETRY_START=2026-03-31T00:00:00
+TELEMETRY_END=2026-04-01T00:00:00
+TELEMETRY_BATCH_SIZE=500
+TELEMETRY_MAX_TOTAL_ROWS=5000
+TELEMETRY_INTERVAL_SECONDS=300
+TELEMETRY_CATCHUP_INTERVAL_SECONDS=5
+TELEMETRY_RETRY_INTERVAL_SECONDS=60
+TELEMETRY_CONTINUOUS=0
+TELEMETRY_PAGES_PER_CYCLE=1
+```
+
+El ETL requiere acceso a la red local del origen. En modo fijo, para ampliar el
+histórico cambia la ventana de fechas y reinicia `etl`; el cursor se reinicia pero
+los reportes permanecen por `report_id`. Con `TELEMETRY_CONTINUOUS=1`, el fin de la
+ventana avanza hasta la hora actual, se conserva el cursor y se buscan datos nuevos
+cada `TELEMETRY_INTERVAL_SECONDS`. Cada ciclo procesa como máximo
+`TELEMETRY_BATCH_SIZE × TELEMETRY_PAGES_PER_CYCLE` registros. Si todavía hay datos
+atrasados, el siguiente bloque comienza después de `TELEMETRY_CATCHUP_INTERVAL_SECONDS`;
+al alcanzar el origen, el ETL espera 5 minutos antes de buscar novedades.
+Si la red del origen se interrumpe, reintenta despues de
+TELEMETRY_RETRY_INTERVAL_SECONDS sin perder el cursor ni duplicar reportes.
+
+### Cambiar el origen
+
+Edita `origen/viajes.csv` y guarda el archivo. No hace falta reconstruir las imágenes;
+el ETL lo relee automáticamente. Conserva estas columnas:
+
+```csv
+id,origen,destino,distancia_km,carga_kg,paradas,duracion_horas
+VIAJE-001,Antofagasta,Calama,220,8000,2,4.5
+```
+
+Se necesitan al menos 10 viajes válidos para entrenar el modelo. El ejemplo de una
+fila ilustra el formato. Rangos: distancia 1–2000 km, carga 1–40000 kg, paradas
+enteras 0–30 y duración observada 0,01–100 horas. Límite del archivo demo: 5 MB.
+La duración observada es la variable que el modelo aprende a predecir.
+
+Un CSV sin filas válidas o sin las columnas requeridas se rechaza y se conserva
+la carga anterior. Repetir el mismo archivo no duplica viajes. Si se retira un ID
+válido del archivo, deja de formar parte de la versión activa; su fila histórica
+permanece almacenada. La API muestra solo viajes de la versión activa.
+
+El CSV sigue disponible para probar el modelo sintético. La API real se configura
+por separado mediante las variables del primer ETL de telemetría.
+
+### Endpoints
+
+Todos se pueden consultar a través del frontend en `http://localhost:8080`.
+
+| Método | Ruta | Uso |
+| --- | --- | --- |
+| GET | `/` | Pantalla del proyecto |
+| GET | `/health` | Salud del recorrido (503 si hay una etapa sin respuesta reciente) |
+| GET | `/api/estado` | Estado, versión del origen, rechazos y metadatos del modelo |
+| GET | `/api/resumen` | Totales de viajes, predicciones y destinos |
+| GET | `/api/viajes?limite=20` | Viajes de la carga activa con sus predicciones; máximo 500 |
+| GET | `/api/telemetria/resumen` | Conteos y rango temporal de la telemetría real |
+| GET | `/api/telemetria?limite=30` | Muestra reciente de telemetría real para la página; máximo 200 |
+| GET | `/api/telemetria/mapa-calor` | Densidad, tramos, paradas y última posición de cada camión |
+| GET | `/api/modelo` | Métricas de evaluación y coeficientes de la regresión simulada |
+| GET | `/api/modelo/telemetria` | Métricas y zonas del modelo DBSCAN entrenado con GPS real |
+| POST | `/api/predicciones` | Crea una solicitud; responde 202 con ID y URL de consulta |
+| GET | `/api/predicciones/{id}` | Estado y resultado persistido de una solicitud |
+
+Cuerpo para solicitar una predicción:
+
+```json
+{"distancia_km":180,"carga_kg":8000,"paradas":2}
+```

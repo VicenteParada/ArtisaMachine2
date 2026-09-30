@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 import json
 import math
 import os
+import re
+import unicodedata
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,24 @@ def _connect_db(autocommit=True):
     # Importacion diferida: las transformaciones se pueden probar sin drivers instalados.
     from common.db import connect_db
     return connect_db(autocommit=autocommit)
+
+
+# Vehiculos que NO son camion siempre traen una de estas palabras en su asset_name
+# (ej. "716-Camioneta-CesarM", "Lampa-Furgon", "Mantencion"); los camiones reales se
+# nombran "<ubicacion>-<numero>" (ej. "Lampa-826", "Codelco-Calama-859") y nunca las
+# incluyen. Automatico: no requiere mantener ninguna lista de patentes a mano, se
+# aplica igual a vehiculos nuevos apenas aparecen en Mongo.
+PATRON_NO_CAMION = re.compile(r"camioneta|furgon|mantenc", re.IGNORECASE)
+
+
+def es_camion(asset_name):
+    """True si el nombre del vehiculo no contiene ninguna palabra de PATRON_NO_CAMION.
+    Sin nombre (asset_name ausente) no se puede confirmar que sea camion: se excluye
+    por seguridad, ya que todos los camiones reales traen nombre."""
+    if not asset_name:
+        return False
+    normalizado = unicodedata.normalize("NFKD", asset_name).encode("ascii", "ignore").decode("ascii")
+    return not PATRON_NO_CAMION.search(normalizado)
 
 
 def fetch_batch(config, after_id):
@@ -207,6 +227,7 @@ def run_once(config):
     state = _state_for(config)
     documents = fetch_batch(config, state["ultimo_mongo_id"])
     accepted, rejected = transform_rows(documents)
+    accepted = [row for row in accepted if es_camion(row["asset_name"])]
     try:
         previous_rejections = json.loads(state.get("rechazos_json") or "[]")
     except (TypeError, json.JSONDecodeError):

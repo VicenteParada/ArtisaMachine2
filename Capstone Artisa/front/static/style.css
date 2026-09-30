@@ -402,3 +402,12 @@
 @media (max-width: 690px) {
   .heatmap-metrics { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Sesión del administrador */
+.topbar-actions{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.session-user{display:flex;align-items:center;gap:12px;border-left:1px solid var(--line);padding-left:18px}
+.session-user>span{font-weight:600;color:var(--ink)}
+.session-user button{font:inherit;color:var(--green);background:transparent;border:1px solid var(--line);border-radius:6px;padding:8px 10px;cursor:pointer}
+.session-user button:hover{background:#edf5ee}
+.session-user button:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+@media(max-width:690px){.topbar{flex-wrap:wrap;padding:12px 0}.topbar-actions{width:100%;justify-content:space-between;gap:10px}.session-user{padding-left:10px;gap:8px}}

@@ -1,4 +1,5 @@
 import unittest
+
 from ETLs.telemetry import transform_rows
 
 
@@ -57,7 +58,6 @@ class TelemetryTests(unittest.TestCase):
         self.assertIn("duplicado", rejected[0]["motivo"])
         self.assertIn("asset_id", rejected[1]["motivo"])
         self.assertIn("latitude", rejected[2]["motivo"])
-
 
 
 if __name__ == "__main__":

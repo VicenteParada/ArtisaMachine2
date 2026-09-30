@@ -13,7 +13,7 @@ from auth.passwords import valid_password_hash, verify_password
 SECRET = os.environ["JWT_SECRET"].encode("utf-8")
 USERNAME = os.environ["AUTH_USERNAME"].strip()
 PASSWORD_HASH = os.environ["AUTH_PASSWORD_HASH"]
-TOKEN_TTL = int(os.environ.get("JWT_TTL_SECONDS", "3600"))
+TOKEN_TTL = int(os.environ.get("JWT_TTL_SECONDS", "43200"))
 if len(SECRET) < 32 or not USERNAME or not valid_password_hash(PASSWORD_HASH):
     raise RuntimeError("Configuracion de autenticacion insegura o incompleta")
 
