@@ -98,7 +98,7 @@ function restoreSession() {
   activeToken = saved;
   $("login-error").textContent = "";
   $("login-error").hidden = true;
-  if (!location.hash) history.replaceState(null, "", "#dashboard");
+  if (!location.hash) history.replaceState(null, "", "#datos-reales");
   syncDatasetView();
   if (appShell.hidden) showApp();
   scheduleExpiration();
@@ -129,7 +129,7 @@ loginForm.addEventListener("submit", async (event) => {
     try { localStorage.setItem(TOKEN_KEY, payload.token); }
     catch { throw new Error("Permite el almacenamiento local para mantener tu sesión."); }
     clearPassword();
-    history.replaceState(null, "", "#dashboard");
+    history.replaceState(null, "", "#datos-reales");
     restoreSession();
   } catch (loginError) {
     clearPassword();

@@ -18,6 +18,7 @@ ETL_STALE_SECONDS = max(60, int(os.getenv("TELEMETRY_INTERVAL_SECONDS", "30")) *
 
 PENDING_RESPONSES = {
     "/api/telemetria": {"status": "pending", "source": "company_api", "reportes": []},
+    "/api/modelo/telemetria": {"status": "pending", "message": "Pendiente de integración Machine"},
     "/api/mapa": {
         "schema_version": 1, "source_mode": "PENDING_MACHINE", "snapshot_date": None,
         "routes": [], "trips": [], "vehicles": [], "readings": [],
@@ -52,21 +53,8 @@ def pipeline_state(cursor, detailed=True):
         "FROM raw_gps_estado WHERE id=1"
     )
     etl = cursor.fetchone()
-    model_columns = "*" if detailed else "id"
-    try:
-        cursor.execute(
-            f"SELECT {model_columns}, TIMESTAMPDIFF(SECOND,ultima_revision,UTC_TIMESTAMP()) AS hace_segundos "
-            "FROM modelo_telemetria_estado WHERE id=1"
-        )
-        model = cursor.fetchone()
-    except pymysql.ProgrammingError as error:
-        if error.args[0] != 1146:  # La tabla opcional de Machine aún no existe.
-            raise
-        model = None
     etl_ready = bool(etl and etl["estado"] != "error"
                      and etl["hace_segundos"] is not None and 0 <= etl["hace_segundos"] < ETL_STALE_SECONDS)
-    model_ready = bool(model and model["hace_segundos"] is not None
-                       and 0 <= model["hace_segundos"] < 90)
     state = {
         "status": "ok" if etl_ready else "degraded",
         "servicio": "artisa-api",
@@ -74,7 +62,7 @@ def pipeline_state(cursor, detailed=True):
         "componentes": {
             "etl": "ok" if etl_ready else "unavailable",
             "mariadb": "ok",
-            "machine": "ok" if model_ready else "pending",
+            "machine": "pending",
             "endpoints": "ok",
         },
     }
@@ -84,9 +72,7 @@ def pipeline_state(cursor, detailed=True):
         "etl": ({k: v for k, v in etl.items() if k not in ("id", "rechazos_json")} | {
             "rechazos": json.loads(etl["rechazos_json"])
         }) if etl else None,
-        "modelo_telemetria": ({k: v for k, v in model.items() if k not in ("id", "metricas_json", "zonas_json")} | {
-            "metricas": json.loads(model["metricas_json"])
-        }) if model else None,
+        "modelo_telemetria": None,
         "uptime_seconds": round(time.monotonic() - STARTED_AT, 2),
     })
     return state
@@ -111,12 +97,12 @@ class Handler(JsonHandler):
         if path == "/":
             self.respond(200, {"servicio": "artisa-api", "contenedor": socket.gethostname(),
                                "mensaje": "Endpoints Artisa",
-                               "rutas": ["/health", "/api/estado", "/api/faenas", "/api/modelo/telemetria", *PENDING_RESPONSES]})
+                               "rutas": ["/health", "/api/estado", "/api/faenas", *PENDING_RESPONSES]})
             return
         if path in PENDING_RESPONSES:
             self.respond(200, PENDING_RESPONSES[path])
             return
-        if path not in ("/health", "/api/estado", "/api/faenas", "/api/modelo/telemetria"):
+        if path not in ("/health", "/api/estado", "/api/faenas"):
             self.respond(404, {"error": "Ruta no encontrada"})
             return
         try:
@@ -136,15 +122,6 @@ class Handler(JsonHandler):
                         for row in cursor.fetchall()
                     ]
                     self.respond(200, {"faenas": faenas})
-                elif path == "/api/modelo/telemetria":
-                    cursor.execute("SELECT * FROM modelo_telemetria_estado WHERE id=1")
-                    model = cursor.fetchone()
-                    if model:
-                        model = {k: v for k, v in model.items() if k not in ("id", "metricas_json", "zonas_json")} | {
-                            "metricas": json.loads(model["metricas_json"]),
-                            "zonas": json.loads(model["zonas_json"]),
-                        }
-                    self.respond(200 if model else 503, model or {"error": "Modelo de telemetria aun no disponible"})
         except pymysql.MySQLError as error:
             if path == "/health":
                 self.log_error("Error de MariaDB: %s", type(error).__name__)
