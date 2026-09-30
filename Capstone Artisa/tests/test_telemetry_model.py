@@ -1,7 +1,7 @@
 import unittest
 
 try:
-    from modelo_machine.telemetry import train_hotspots
+    from machine_learning.telemetry import train_hotspots
 except ModuleNotFoundError as error:
     if error.name not in {"numpy", "sklearn"}:
         raise

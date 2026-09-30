@@ -9,8 +9,8 @@
 !DB/schema.sql
 !ETLs/
 !ETLs/**
-!modelo_machine/
-!modelo_machine/**
+!machine_learning/
+!machine_learning/**
 !endpoints/
 !endpoints/**
 !front/

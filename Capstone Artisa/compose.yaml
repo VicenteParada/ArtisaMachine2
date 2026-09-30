@@ -59,7 +59,7 @@ services:
   machine:
     build:
       context: .
-      dockerfile: modelo_machine/Dockerfile
+      dockerfile: machine_learning/Dockerfile
     container_name: artisa-machine
     environment:
       <<: *db-environment

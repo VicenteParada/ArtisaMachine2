@@ -63,11 +63,18 @@ Capstone Artisa/
 ├── endpoints/               # API; consulta y registra solicitudes en MariaDB
 │   ├── Dockerfile
 │   └── api.py
-├── modelo_machine/          # Entrena, predice y escribe los resultados
+├── machine_learning/        # Entrena, predice y escribe los resultados; entregables
+│   │                        # reales del modelo (el Docker solo usa los .py)
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   ├── telemetry.py         # Clustering DBSCAN de posiciones reales
-│   └── worker.py
+│   ├── worker.py
+│   ├── generar_mapa.py      # Genera mapa_operativo.html desde las faenas en MariaDB
+│   ├── mapa_operativo.html
+│   └── pipeline_machine_learning.html   # Guia compartida con frontend
+├── guias_ml/                # Notebook de experimentacion libre; no forma parte
+│   │                        # del proyecto en produccion
+│   └── telemetria_colab.ipynb
 ├── DB/
 │   └── schema.sql           # Tablas del flujo; imagen oficial MariaDB
 ├── ETLs/
