@@ -94,7 +94,9 @@ services:
       context: .
       dockerfile: endpoints/Dockerfile
     container_name: artisa-endpoints
-    environment: *db-environment
+    environment:
+      <<: *db-environment
+      TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
     depends_on:
       mariadb:
         condition: service_healthy
@@ -136,7 +138,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Ejecuta python3 scripts/prepare_env.py}
       AUTH_USERNAME: ${AUTH_USERNAME:?Ejecuta python3 scripts/prepare_env.py}
       AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:?Ejecuta python3 scripts/prepare_env.py}
-      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-43200}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3).read()"]
       interval: 5s

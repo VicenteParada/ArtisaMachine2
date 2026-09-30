@@ -71,7 +71,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if self.command == "GET" and path == "/front-health":
             self.reply(200, b'{"status":"ok","servicio":"front"}')
-        elif path.startswith("/api/") or path == "/health" or path == "/mensajes" or path.startswith("/mensajes/"):
+        elif path.startswith("/api/") or path == "/health":
             self.proxy()
         elif self.command == "GET" and path in FILES:
             filename, content_type = FILES[path]

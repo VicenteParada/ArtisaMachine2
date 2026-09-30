@@ -1,2 +1,0 @@
-psycopg[binary]==3.2.10
-scikit-learn==1.7.2

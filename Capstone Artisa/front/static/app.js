@@ -19,15 +19,90 @@ function showApp() {
   window.scrollTo(0, 0);
 }
 
-function token() {
-  return sessionStorage.getItem("artisa_token");
+const TOKEN_KEY = "artisa_token";
+const EXPIRED_MESSAGE = "Tu sesión expiró. Ingresa nuevamente.";
+let activeToken = null;
+let sessionVersion = 0;
+let expiryTimer;
+const pendingRequests = new Set();
+
+// Esta comprobación es solo para la interfaz; Nginx/Auth verifican la firma.
+function tokenExpiration(value) {
+  try {
+    if (typeof value !== "string" || value.length > 4096) return 0;
+    const parts = value.split(".");
+    if (parts.length !== 3 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return 0;
+    const decode = (part) => {
+      const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
+      return atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="));
+    };
+    const header = JSON.parse(decode(parts[0]));
+    const payload = JSON.parse(decode(parts[1]));
+    if (header?.alg !== "HS256" || header?.typ !== "JWT" || decode(parts[2]).length !== 32) return 0;
+    return Number.isSafeInteger(payload?.exp) && payload.exp > Date.now() / 1000
+      ? payload.exp * 1000 : 0;
+  } catch { return 0; }
 }
 
-function logout() {
-  sessionStorage.removeItem("artisa_token");
-  sessionStorage.removeItem("artisa_user");
-  landing.hidden = false;
+function token() {
+  if (activeToken && !tokenExpiration(activeToken)) logout(EXPIRED_MESSAGE);
+  return activeToken;
+}
+
+function clearSessionWork() {
+  clearTimeout(expiryTimer);
+  sessionVersion++;
+  for (const controller of pendingRequests) controller.abort();
+  pendingRequests.clear();
+  refreshing = false;
+  $("refresh").disabled = false;
+  journeyRequest++;
+}
+
+function clearPassword() {
+  $("login-password").value = "";
+  $("login-password").type = "password";
+  $("toggle-password").textContent = "Mostrar";
+  $("toggle-password").setAttribute("aria-pressed", "false");
+}
+
+function logout(message = "") {
+  clearSessionWork();
+  activeToken = null;
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* Almacenamiento no disponible. */ }
+  clearPassword();
+  $("login-user").value = "";
   appShell.hidden = true;
+  landing.hidden = false;
+  history.replaceState(null, "", location.pathname + location.search);
+  $("login-error").textContent = message;
+  $("login-error").hidden = !message;
+}
+
+function scheduleExpiration() {
+  clearTimeout(expiryTimer);
+  const remaining = tokenExpiration(activeToken) - Date.now();
+  if (remaining <= 0) return logout(EXPIRED_MESSAGE);
+  expiryTimer = setTimeout(scheduleExpiration, Math.min(remaining, 2147483647));
+}
+
+function restoreSession() {
+  let saved;
+  try { saved = localStorage.getItem(TOKEN_KEY); } catch { saved = null; }
+  if (!tokenExpiration(saved)) {
+    logout(saved || activeToken ? EXPIRED_MESSAGE : $("login-error").textContent);
+    return;
+  }
+  const changed = activeToken !== saved;
+  if (changed) clearSessionWork();
+  activeToken = saved;
+  $("login-error").textContent = "";
+  $("login-error").hidden = true;
+  if (!location.hash) history.replaceState(null, "", "#dashboard");
+  syncDatasetView();
+  if (appShell.hidden) showApp();
+  scheduleExpiration();
+  if (changed) refresh();
 }
 
 loginForm.addEventListener("submit", async (event) => {
@@ -47,15 +122,17 @@ loginForm.addEventListener("submit", async (event) => {
       cache: "no-store",
       body: JSON.stringify({username, password})
     });
+    if (response.status === 401) throw new Error("Usuario o contraseña incorrectos");
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "No se pudo iniciar sesión.");
-    sessionStorage.setItem("artisa_token", payload.token);
-    sessionStorage.setItem("artisa_user", username);
-    passwordInput.value = "";
-    showApp();
-    refresh();
+    if (!tokenExpiration(payload.token)) throw new Error("El servidor devolvió una sesión no válida.");
+    try { localStorage.setItem(TOKEN_KEY, payload.token); }
+    catch { throw new Error("Permite el almacenamiento local para mantener tu sesión."); }
+    clearPassword();
+    history.replaceState(null, "", "#dashboard");
+    restoreSession();
   } catch (loginError) {
-    passwordInput.value = "";
+    clearPassword();
     error.textContent = loginError.message;
     error.hidden = false;
   } finally {
@@ -72,23 +149,33 @@ $("toggle-password").addEventListener("click", () => {
   passwordInput.focus();
 });
 
-if (token() && sessionStorage.getItem("artisa_user") && window.location.hash) {
-  showApp();
-} else if (token() || sessionStorage.getItem("artisa_user")) {
-  logout();
-}
+$("logout").addEventListener("click", () => logout());
 
 async function api(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  headers.set("Authorization", `Bearer ${token()}`);
-  const response = await fetch(path, {...options, headers, signal: AbortSignal.timeout(20000)});
-  const payload = await response.json();
-  if (response.status === 401) {
-    logout();
-    throw new Error("La sesión expiró. Ingresa nuevamente.");
+  const currentToken = token();
+  if (!currentToken) throw new Error(EXPIRED_MESSAGE);
+  const version = sessionVersion;
+  const controller = new AbortController();
+  pendingRequests.add(controller);
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", `Bearer ${currentToken}`);
+    const response = await fetch(path, {...options, headers, signal: controller.signal});
+    if (version !== sessionVersion) throw new Error("Petición de una sesión anterior cancelada.");
+    // Nginx puede devolver HTML en un 401: comprobarlo antes de leer JSON.
+    if (response.status === 401) {
+      logout(EXPIRED_MESSAGE);
+      throw new Error(EXPIRED_MESSAGE);
+    }
+    const payload = await response.json();
+    if (version !== sessionVersion || !token()) throw new Error(EXPIRED_MESSAGE);
+    if (!response.ok) throw new Error(payload.error || "El servicio está temporalmente ocupado.");
+    return payload;
+  } finally {
+    clearTimeout(timeout);
+    pendingRequests.delete(controller);
   }
-  if (!response.ok) throw new Error(payload.error || "El servicio está temporalmente ocupado.");
-  return payload;
 }
 
 function syncDatasetView() {
@@ -265,26 +352,18 @@ function vehicleDriver(vehicle) {
   const structured = [vehicle.driver_name, vehicle.driver_last_name]
     .map((part) => String(part || "").trim()).filter(Boolean).join(" ");
   if (structured) return structured;
-  // Algunos nombres incluyen una referencia al conductor, pero no es un dato verificado.
-  const match = String(vehicle.vehicle_name || "").match(
-    /^\d+-Camioneta-([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)([A-ZÁÉÍÓÚÑ][a-záéíóúñ]*)$/u
-  );
-  if (match) {
-    const surname = match[2].length === 1 ? match[2] + "." : match[2];
-    return `${match[1]} ${surname} (según nombre del vehículo)`;
-  }
   return "No informado";
 }
 
 function vehiclePlate(vehicle) {
   const explicit = String(vehicle.patente || vehicle.plate || vehicle.license_plate || "").trim();
   if (explicit) return explicit;
-  const id = String(vehicle.vehicle_id || "").trim().toUpperCase();
-  return /^(?:[A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/.test(id) ? id : null;
+  return null;
 }
 
 function vehicleStatus(vehicle) {
-  const timestamp = new Date(vehicle.timestamp).getTime();
+  const timestamp = vehicle.timestamp ? new Date(vehicle.timestamp).getTime() : NaN;
+  if (!Number.isFinite(timestamp)) return {label: "Estado no disponible", className: "off"};
   const stale = Number.isFinite(timestamp) && Date.now() - timestamp > 30 * 60 * 1000;
   if (stale) return {label: "Sin señal reciente", className: "off"};
   const speed = Number(vehicle.speed_kmh || 0);
@@ -427,10 +506,13 @@ function fitPendingMap(force = false) {
 
 function truckIcon(vehicle) {
   const status = vehicleStatus(vehicle);
-  const heading = Number.isFinite(Number(vehicle.heading)) ? Number(vehicle.heading) : 0;
+  const hasHeading = vehicle.heading !== null && vehicle.heading !== undefined &&
+    vehicle.heading !== "" && Number.isFinite(Number(vehicle.heading));
+  const arrow = hasHeading
+    ? "<span class='truck-heading' style='transform:rotate(" + Number(vehicle.heading) + "deg)'>▲</span>"
+    : "";
   const html = "<span class='truck-marker " + status.className +
-    "'><span class='truck-heading' style='transform:rotate(" + heading +
-    "deg)'>▲</span><span class='truck-glyph'>🚚</span></span>";
+    "'>" + arrow + "<span class='truck-glyph'>🚚</span></span>";
   return L.divIcon({
     className: "truck-div-icon",
     html,
@@ -545,6 +627,11 @@ function hideJourney() {
 }
 
 async function showVehicleJourney(vehicle) {
+  if (!currentMapData || machinePending(currentMapData)) {
+    $("journey-detail").hidden = false;
+    $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
+    return;
+  }
   if (!journeyLayer) return;
   const request = ++journeyRequest;
   activeJourneyVehicleId = vehicle.vehicle_id;
@@ -739,7 +826,52 @@ function renderFleetMap(data) {
   if ($("heatmap-map").offsetParent !== null) requestAnimationFrame(() => fitPendingMap(false));
 }
 
+function machinePending(data) {
+  return data.status === "pending" || data.sourceMode === "PENDING_MACHINE" || data.metadata?.status === "pending";
+}
+
+function pendingText(ids, message = "Pendiente de procesamiento") {
+  for (const id of ids) $(id).textContent = message;
+}
+
 function renderHeatmap(data) {
+  const pending = machinePending(data);
+  for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer], [data-monitor-tab], #monitor-search, #reset-map-view")) {
+    control.disabled = pending;
+  }
+  if (pending) {
+    currentMapData = data;
+    journeyRequest++;
+    activeJourneyVehicleId = null;
+    selectedVehicleId = null;
+    selectedRouteId = null;
+    if (fleetMap) { fleetMap.remove(); fleetMap = null; }
+    journeyLayer = null;
+    truckLayer = null;
+    truckMarkers.clear();
+    routeMapLayers.clear();
+    pendingMapBounds = null;
+    mapHasFitted = false;
+    pendingText(["heatmap-trips", "heatmap-vehicles", "heatmap-routes",
+      "most-route", "least-route", "geo-model-zones", "heatmap-source-status"]);
+    pendingText(["heatmap-intro", "heatmap-zones", "map-last-update", "most-route-usage",
+      "least-route-usage", "geo-model-detail", "heatmap-method", "map-selection-detail"],
+      "Disponible cuando Machine genere resultados");
+    pendingText(["monitor-route-count", "vehicle-live-count"], "—");
+    for (const counter of document.querySelectorAll("[data-route-count]")) counter.textContent = "—";
+    for (const id of ["route-monitor-list", "vehicle-live-list"]) {
+      const item = document.createElement("li");
+      item.textContent = "Pendiente de procesamiento Machine.";
+      $(id).replaceChildren(item);
+    }
+    const message = document.createElement("span");
+    message.className = "map-loading";
+    message.textContent = "Disponible cuando Machine genere resultados";
+    $("heatmap-map").replaceChildren(message);
+    $("journey-detail").hidden = true;
+    $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
+    return;
+  }
   const summary = data.summary;
   $("heatmap-trips").textContent = format(summary.trip_count || 0);
   $("heatmap-vehicles").textContent = format(summary.vehicle_count || 0);
@@ -902,6 +1034,20 @@ function renderDashboardDonut(containerId, items, centerLabel) {
 }
 
 function renderDashboard(data, metrics = {}) {
+  if (metrics.status === "pending" || machinePending(data)) {
+    pendingText(["dashboard-reports", "dashboard-trips", "dashboard-routes",
+      "dashboard-snapshot", "dashboard-most-route-zone"]);
+    pendingText(["dashboard-most-route-zone-detail", "dashboard-method"],
+      "Disponible cuando Machine genere resultados");
+    for (const id of ["dashboard-route-zones", "dashboard-route-levels",
+      "dashboard-fleet-status", "dashboard-top-routes"]) {
+      const message = document.createElement("span");
+      message.className = "chart-empty";
+      message.textContent = "Pendiente de procesamiento Machine.";
+      $(id).replaceChildren(message);
+    }
+    return;
+  }
   const summary = data.summary || {};
   const operation = metrics.operacion || {};
   const quality = metrics.calidad || {};
@@ -979,11 +1125,26 @@ function renderDashboard(data, metrics = {}) {
     "Cada ruta conserva una sola clasificación y se cuenta en la zona de su centro geométrico. Actualización automática con el mismo bloque del mapa.";
 }
 function renderTelemetry(summary, dataset, state) {
+  const pending = dataset.status === "pending" && dataset.source === "company_api";
+  $("telemetry-pending").hidden = !pending;
+  $("telemetry-content").hidden = pending;
+  if (pending) {
+    $("telemetry-status").textContent = "Pendiente de API empresa";
+    $("telemetry-status").className = "status neutral";
+    $("telemetry-rows").replaceChildren();
+    $("telemetry-count").textContent = "—";
+    $("vehicle-count").textContent = "—";
+    $("telemetry-range").textContent = "";
+    $("telemetry-quality").textContent = "";
+    return;
+  }
   const reports = dataset.reportes || [];
-  const telemetryState = state.telemetria || {};
-  $("telemetry-count").textContent = format(summary.reportes);
-  $("vehicle-count").textContent = format(summary.vehiculos);
-  $("telemetry-range").textContent = summary.reportes
+  const telemetryState = state.telemetria || state.etl || {};
+  $("telemetry-count").textContent = summary.status === "pending" ? "Pendiente de procesamiento" : format(summary.reportes);
+  $("vehicle-count").textContent = summary.status === "pending" ? "Pendiente de procesamiento" : format(summary.vehiculos);
+  $("telemetry-range").textContent = summary.status === "pending"
+    ? "Resumen pendiente de procesamiento; la tabla muestra reportes GPS reales."
+    : summary.reportes
     ? `Desde ${formatUtc(summary.desde)} hasta ${formatUtc(summary.hasta)}`
     : "Todavía no hay reportes importados.";
 
@@ -1048,14 +1209,17 @@ function renderTelemetry(summary, dataset, state) {
 
 function renderState(state) {
   const components = state.componentes || {};
-  const count = Object.values(components).filter((status) => status === "ok").length;
-  $("system-status").textContent = format(count) + " de 5 servicios disponibles";
-  $("system-status").className = "status " + (count === 5 ? "" : "warning");
-  for (const node of document.querySelectorAll("[data-service]")) {
+  const required = ["etl", "mariadb", "endpoints", "front"];
+  const nodes = [...document.querySelectorAll("[data-service]")];
+  const count = nodes.filter((node) => components[node.dataset.service] === "ok").length;
+  $("system-status").textContent = format(count) + " de " + format(nodes.length) + " servicios disponibles";
+  $("system-status").className = "status " + (required.every((name) => components[name] === "ok") ? "" : "warning");
+  for (const node of nodes) {
     const okay = components[node.dataset.service] === "ok";
     const label = node.querySelector(".node-status");
-    label.textContent = okay ? "En funcionamiento" : "Sin respuesta reciente";
-    label.className = "node-status " + (okay ? "ok" : "bad");
+    const pending = node.dataset.service === "machine" && !okay;
+    label.textContent = okay ? "En funcionamiento" : pending ? "Pendiente de integración" : "Sin respuesta reciente";
+    label.className = "node-status " + (okay ? "ok" : pending ? "neutral" : "bad");
   }
   const etl = state.etl;
   if (etl) {
@@ -1068,6 +1232,7 @@ function renderState(state) {
 async function refresh() {
   if (!token()) return;
   if (refreshing) return;
+  const version = sessionVersion;
   refreshing = true; $("refresh").disabled = true;
   try {
     const [state, telemetrySummary, telemetryDataset, mapPayload, dashboard] = await Promise.all([
@@ -1077,6 +1242,7 @@ async function refresh() {
       api("/api/mapa"),
       api("/api/dashboard")
     ]);
+    if (version !== sessionVersion || !token()) return;
     if (!window.ArtisaMapData) throw new Error("No se cargó el adaptador del mapa.");
     const mapData = window.ArtisaMapData.adaptMapPayload(mapPayload);
     renderState(state);
@@ -1086,6 +1252,7 @@ async function refresh() {
     $("notice").hidden = state.status === "ok";
     $("notice").textContent = "Una etapa no ha respondido recientemente o está preparando datos nuevos. Los datos mostrados corresponden a la última carga disponible.";
   } catch (error) {
+    if (version !== sessionVersion || !token()) return;
     $("notice").hidden = false;
     $("notice").textContent = "No se pudo actualizar el sistema. Los datos que ya ves pueden estar desactualizados. " + error.message;
     $("system-status").textContent = "Sin conexión con el sistema";
@@ -1093,7 +1260,9 @@ async function refresh() {
     for (const label of document.querySelectorAll(".node-status")) {
       label.textContent = "Estado sin verificar"; label.className = "node-status bad";
     }
-  } finally { refreshing = false; $("refresh").disabled = false; }
+  } finally {
+    if (version === sessionVersion) { refreshing = false; $("refresh").disabled = false; }
+  }
 }
 
 $("refresh").addEventListener("click", refresh);
@@ -1120,7 +1289,20 @@ $("monitor-search").addEventListener("input", () => {
   else renderLiveFleet(currentMapData ? currentMapData.vehicles : []);
 });
 $("reset-map-view").addEventListener("click", resetMapSelection);
-window.addEventListener("hashchange", syncDatasetView);
-syncDatasetView();
-if (token()) refresh();
+// Retirar el almacenamiento de la implementación anterior sin persistir el usuario.
+try {
+  sessionStorage.removeItem("artisa_token");
+  sessionStorage.removeItem("artisa_user");
+} catch { /* Puede estar deshabilitado. */ }
+window.addEventListener("hashchange", restoreSession);
+window.addEventListener("popstate", restoreSession);
+window.addEventListener("pageshow", restoreSession);
+window.addEventListener("pagehide", () => { appShell.hidden = true; landing.hidden = true; });
+window.addEventListener("storage", (event) => {
+  if (event.key === TOKEN_KEY || event.key === null) restoreSession();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) restoreSession();
+});
+restoreSession();
 setInterval(refresh, 300000);

@@ -47,6 +47,7 @@
     };
 
     return Object.freeze({
+      status: payload.status || payload.metadata?.status,
       schemaVersion: payload.schema_version,
       sourceMode: payload.source_mode,
       snapshotDate: payload.snapshot_date,
