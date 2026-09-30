@@ -1,8 +1,5 @@
 *
-!app.py
-!Dockerfile
 !requirements.txt
-!schema.sql
 !common/
 !common/**
 !DB/
@@ -19,8 +16,6 @@
 !auth/**
 !nginx/
 !nginx/**
-!simulacion/
-!simulacion/**
 **/__pycache__/
 **/*.pyc
 **/.env

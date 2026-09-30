@@ -1,4 +1,4 @@
-"""Servidor HTTP para la demostración local."""
+"""Utilidades HTTP compartidas por los servicios Artisa."""
 
 from datetime import date, datetime
 from decimal import Decimal

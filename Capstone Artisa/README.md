@@ -1,102 +1,146 @@
-# Artisa: cinco contenedores, un proyecto
+# Artisa Transportes
 
-Demostración local de la arquitectura del proyecto de transporte. Todo se inicia
-con Docker Compose y se abre en [http://localhost:8080](http://localhost:8080).
+Sistema de telemetría con datos reales. La entrada web es
+[http://localhost:8080](http://localhost:8080), publicada por Nginx.
 
 ```mermaid
 flowchart LR
-    O[Origen: CSV y API SQL] --> E[1. ETL]
-    E --> D[(2. MariaDB)]
-    D --> M[3. Machine Learning]
-    M --> D
-    D --> A[4. Endpoints]
-    A --> F[5. Frontend]
+    MongoDB --> ETL --> MariaDB --> Endpoints --> Front --> Nginx --> Browser
+    Nginx --> Auth
+    MariaDB -. Integración pendiente .-> Machine
 ```
 
-El proyecto conserva el CSV de demostración y añade un primer ETL real que consume
-la API SQL de telemetría por lotes.
-Los cinco servicios son `etl`, `mariadb`, `machine`, `endpoints` y `front`.
-Machine Learning y endpoints tienen contenedores distintos. El modelo lee la base
-y guarda allí sus resultados; la API consulta esos resultados para el frontend.
+## Arranque actual
 
-## Iniciar desde Visual Studio Code
-
-1. Abre esta carpeta en VS Code.
-2. Presiona **Ctrl + Shift + B** o usa **Terminal > Ejecutar tarea > Docker: levantar proyecto completo**.
-3. Abre [http://localhost:8080](http://localhost:8080).
-4. Para comprobar el recorrido ejecuta **Docker: comprobar servicio**.
-
-La tarea genera `.env` si falta, construye las imágenes e inicia los cinco
-contenedores en orden, esperando sus comprobaciones de salud.
-Las tareas antiguas para levantar API y MariaDB también inician ahora el proyecto completo.
-
-Desde **PowerShell**, en la carpeta del proyecto, basta este comando:
-
-```powershell
-wsl -d Ubuntu --exec python3 scripts/start.py
-```
-
-Desde una terminal **Ubuntu/WSL**:
+Desde la carpeta del proyecto:
 
 ```bash
 python3 scripts/start.py
 ```
 
-Con `.env` ya preparado también se puede ejecutar directamente:
+El comando prepara `.env` sin reemplazar una autenticación ya configurada y
+levanta `mongodb`, `mariadb`, `etl`, `endpoints`, `front`, `auth` y `nginx`.
+Espera sus comprobaciones de salud. Machine permanece definido en Compose,
+pero no se inicia con este comando. No se importan históricos automáticamente.
+
+Consulta [Configurar el entorno](docs/CONFIGURAR_ENTORNO.md) para instalación,
+acceso privado del administrador, sesiones de 12 horas y cambio de contraseña.
+No guardes contraseñas, hashes reales ni secretos JWT en Git.
+
+## Componentes actuales
+
+- `ETLs/`: lee MongoDB y escribe `raw_gps` y su estado en MariaDB.
+- `DB/schema.sql`: esquema que inicializa el ETL.
+- `endpoints/` y `common/`: API independiente y utilidades HTTP/MariaDB.
+- `front/`: interfaz y proxy interno hacia endpoints.
+- `auth/` y `nginx/`: autenticación JWT y entrada pública protegida.
+- `machine_learning/`: trabajador DBSCAN pendiente de integración; sus zonas no
+  equivalen a rutas, viajes ni clasificaciones de uso. También guarda los
+  entregables del modelo (`generar_mapa.py`, `mapa_operativo.html`,
+  `pipeline_machine_learning.html`); el Docker solo usa los `.py`.
+- `guias_ml/`: notebook de experimentación (`telemetria_colab.ipynb`) y
+  `mapas_telemetria.html`, que lleva sus mapas al navegador con `/api/gps`.
+  No forma parte del sistema en producción.
+- `scripts/`: arranque, configuración y comprobaciones; recuperación histórica
+  explícita y separada del inicio normal.
+
+## Rutas vigentes
+
+Nginx protege `/api/*`. `/` sirve la interfaz; la raíz interna de endpoints
+lista sus rutas. `/health` es compacto y público; Machine pendiente no degrada
+por sí solo la salud del sistema base.
+
+| Método | Ruta | Estado actual |
+| --- | --- | --- |
+| POST | `/auth/login` | Autenticación real |
+| GET | `/auth/health` | Salud de Auth |
+| GET | `/health` | Salud operativa compacta |
+| GET | `/api/estado` | Diagnóstico ETL y Machine |
+| GET | `/api/faenas` | Catálogo existente |
+| GET | `/api/modelo/telemetria` | Estado y zonas DBSCAN existentes |
+| GET | `/api/telemetria?limite=30` | `pending`, fuente `company_api`, sin consulta a históricos |
+| GET | `/api/telemetria/resumen` | `pending`, fuente `company_api`, totales `null` |
+| GET | `/api/mapa` | `PENDING_MACHINE`, sin rutas ni viajes inventados |
+| GET | `/api/dashboard` | `pending`, sin métricas calculadas |
+
+El recorrido por vehículo no está implementado y su acción permanece desactivada
+mientras Machine está pendiente. El frontend muestra pendientes, no ceros ficticios.
+La telemetría actual depende de la futura API de la empresa. No se muestran
+los históricos de `raw_gps` como datos actuales. Mientras está pendiente,
+`limite` se acepta sin efecto y no se consulta MariaDB para estas dos rutas.
+
+## Comprobar y detener
+
+En Ubuntu/WSL, desde esta carpeta:
 
 ```bash
-docker compose up --detach --build --wait --wait-timeout 180
+python3 -m unittest discover -s tests -v
+python3 scripts/check.py
+docker compose ps
+docker compose logs --tail 30
+docker compose stop
 ```
 
-Docker Engine, Compose y Buildx están instalados en Ubuntu en este equipo. La
-primera construcción descarga las dependencias de Machine Learning.
+En PowerShell antepone `wsl -d Ubuntu --exec` a cada comando.
+`scripts/check.py` realiza únicamente GET: comprueba `/`, `/health` y,
+si se proporciona `ARTISA_TEST_TOKEN` con un JWT vigente, `/api/estado`.
+Sin token informa que la comprobación protegida fue omitida; no valida
+completamente el acceso autenticado. No imprime ni guarda el token.
+No exige Machine, no modifica datos y no recrea contenedores.
 
-## Organización
+Para proporcionar el token sin escribirlo en el historial de Bash:
 
-```text
-Capstone Artisa/
-├── compose.yaml             # Orquesta los cinco contenedores
-├── front/                   # Pantalla HTML/CSS/JS y proxy a endpoints
-│   ├── Dockerfile
-│   ├── server.py
-│   └── static/
-├── endpoints/               # API; consulta y registra solicitudes en MariaDB
-│   ├── Dockerfile
-│   └── api.py
-├── machine_learning/        # Entrena, predice y escribe los resultados; entregables
-│   │                        # reales del modelo (el Docker solo usa los .py)
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   ├── telemetry.py         # Clustering DBSCAN de posiciones reales
-│   ├── worker.py
-│   ├── generar_mapa.py      # Genera mapa_operativo.html desde las faenas en MariaDB
-│   ├── mapa_operativo.html
-│   └── pipeline_machine_learning.html   # Guia compartida con frontend
-├── guias_ml/                # Notebook de experimentacion libre; no forma parte
-│   │                        # del proyecto en produccion
-│   └── telemetria_colab.ipynb
-├── DB/
-│   └── schema.sql           # Tablas del flujo; imagen oficial MariaDB
-├── ETLs/
-│   ├── Dockerfile
-│   ├── telemetry.py         # API SQL -> validación -> MariaDB
-│   ├── worker.py
-│   └── transform.py
-├── origen/
-│   └── viajes.csv           # Origen sintético reemplazable
-├── common/                  # Conexión, HTTP y validación compartidos
-├── scripts/                 # Arranque, credenciales y comprobaciones
-├── tests/                   # Validación del ETL
-├── .vscode/tasks.json       # Una tarea para levantar todo
-├── .env.example             # Nombres de variables, sin contraseñas
-└── .env                     # Solo local; nunca subir a GitHub
+```bash
+read -r -s -p "JWT vigente: " ARTISA_TEST_TOKEN
+printf '\n'
+ARTISA_TEST_TOKEN="$ARTISA_TEST_TOKEN" python3 scripts/check.py
+unset ARTISA_TEST_TOKEN
 ```
 
-`app.py`, `schema.sql` y el `Dockerfile` de la raíz conservan la API inicial de
-mensajes como compatibilidad. Compose utiliza los Dockerfiles de las carpetas;
-los nuevos endpoints heredan las rutas de mensajes de `app.py`.
+`tests/check_auth_http.py` usa `ARTISA_TEST_PASSWORD` para pruebas de login.
+El comprobador de lectura no utiliza contraseñas ni ejecuta POST de autenticación.
+`scripts/check_pipeline.py` queda como referencia provisional del contrato antiguo;
+no se ejecuta desde `check.py` y todavía no valida el sistema actual.
 
-## Qué hace la demostración
+
+Detener o reconstruir los contenedores conserva los datos. No utilices
+`docker compose down --volumes` salvo que quieras eliminar la base.
+
+## Configuración local
+
+Nginx es la entrada web en `127.0.0.1:8080` y protege las rutas `/api/`
+mediante Auth. El frontend permanece en la red interna de Compose.
+Consulta `docs/CONFIGURAR_ENTORNO.md` para el arranque y acceso actuales.
+
+`scripts/prepare_env.py` crea contraseñas aleatorias una sola vez y conserva `.env`
+si ya existe. No cambies estas contraseñas mientras uses el volumen actual sin
+actualizar también las cuentas de MariaDB. `.env` no entra en Git ni en las imágenes.
+La tabla de mensajes y el volumen de la prueba anterior se conservan.
+
+## Pendiente de integración Machine
+
+El trabajador requiere los catálogos `vehiculos` y `tipos_vehiculo`, ausentes
+del esquema versionado. Existen en la base persistente actual, pero su
+provisión reproducible queda pendiente junto con Machine. Ninguna ruta actual
+del frontend depende de ellos.
+`common/telemetry_map.py` se conserva como referencia legacy utilizada por sus
+pruebas; no está conectado a los endpoints activos.
+
+## Salud del ETL
+
+Endpoints recibe el mismo `TELEMETRY_INTERVAL_SECONDS` que el worker y aplica
+su margen de salud: `max(60, intervalo × 3)`. Con 30 segundos, el umbral es 90;
+con 300, sería 900. No se confunde con el refresco visual de cinco minutos.
+
+## Archivo histórico del prototipo
+
+Todo lo que sigue se conserva únicamente como documentación histórica.
+Las rutas, archivos, variables y procedimientos descritos aquí pueden no existir
+en la versión actual. No ejecutar estas instrucciones para operar el sistema.
+
+### Referencia histórica: demostración inicial
+
+Esta sección describe el prototipo anterior; no es el contrato operativo actual.
 
 1. **Origen:** `origen/viajes.csv` contiene 124 filas sintéticas: 120 viajes válidos,
    un duplicado y tres filas inválidas para comprobar la limpieza. Las distancias
@@ -120,7 +164,7 @@ El modelo es demostrativo y no está validado para estimar operaciones reales.
 El MAE mostrado corresponde a las filas reservadas para evaluación, no al ajuste
 sobre todas las filas ni a viajes reales.
 
-## Primer ETL de telemetría real
+### Primer ETL de telemetría real
 
 El mismo contenedor `etl` consulta la API SQL mediante `POST`, lee la lista `rows`,
 normaliza las fechas a UTC, valida identificadores y coordenadas y guarda los datos
@@ -132,7 +176,7 @@ y los conteos se guardan en `telemetria_etl_estado`, dentro de la misma transacc
 que la página procesada. La configuración inicial limita la prueba a 5.000 filas de
 un solo día para no solicitar accidentalmente los 28,8 millones de registros.
 
-## Entrenamiento geoespacial y mapa operativo
+### Entrenamiento geoespacial y mapa operativo
 
 Machine entrena automáticamente un modelo no supervisado DBSCAN sobre hasta 20.000
 posiciones válidas de `telemetria_raw`. El modelo agrupa puntos a menos de 0,8 km,
@@ -148,7 +192,6 @@ mismo flujo sin cambiar la interfaz. La cartografía base requiere conexión a I
 Configura estas variables únicamente en `.env`:
 
 ```dotenv
-TELEMETRY_ENABLED=1
 SOURCE_API_URL=http://HOST_ORIGEN:3003/sql
 SOURCE_API_TIMEOUT_SECONDS=90
 TELEMETRY_START=2026-03-31T00:00:00
@@ -173,7 +216,7 @@ al alcanzar el origen, el ETL espera 5 minutos antes de buscar novedades.
 Si la red del origen se interrumpe, reintenta despues de
 TELEMETRY_RETRY_INTERVAL_SECONDS sin perder el cursor ni duplicar reportes.
 
-## Cambiar el origen
+### Cambiar el origen
 
 Edita `origen/viajes.csv` y guarda el archivo. No hace falta reconstruir las imágenes;
 el ETL lo relee automáticamente. Conserva estas columnas:
@@ -196,7 +239,7 @@ permanece almacenada. La API muestra solo viajes de la versión activa.
 El CSV sigue disponible para probar el modelo sintético. La API real se configura
 por separado mediante las variables del primer ETL de telemetría.
 
-## Endpoints
+### Endpoints
 
 Todos se pueden consultar a través del frontend en `http://localhost:8080`.
 
@@ -214,53 +257,9 @@ Todos se pueden consultar a través del frontend en `http://localhost:8080`.
 | GET | `/api/modelo/telemetria` | Métricas y zonas del modelo DBSCAN entrenado con GPS real |
 | POST | `/api/predicciones` | Crea una solicitud; responde 202 con ID y URL de consulta |
 | GET | `/api/predicciones/{id}` | Estado y resultado persistido de una solicitud |
-| GET/POST | `/mensajes` | Demostración anterior de lectura y escritura |
-| GET/DELETE | `/mensajes/{id}` | Consulta o elimina un mensaje concreto |
 
 Cuerpo para solicitar una predicción:
 
 ```json
 {"distancia_km":180,"carga_kg":8000,"paradas":2}
 ```
-
-## Comprobar y detener
-
-En Ubuntu/WSL, desde esta carpeta:
-
-```bash
-python3 -m unittest discover -s tests -v
-python3 scripts/check.py
-docker compose ps
-docker compose logs --tail 30
-docker compose stop
-```
-
-En PowerShell antepone `wsl -d Ubuntu --exec` a cada comando.
-`check.py` comprueba el frontend, la carga ETL, el modelo y dos solicitudes reales
-procesadas por Machine y almacenadas en MariaDB. También mantiene la prueba de
-mensajes, que crea y elimina únicamente su propio mensaje temporal. Las dos
-solicitudes de predicción quedan como registros de demostración.
-
-`python3 scripts/check.py --persistence` opcionalmente recrea MariaDB y comprueba
-que un mensaje temporal sobreviva. Produce una interrupción breve mientras arranca
-la base; no es necesario para iniciar el proyecto.
-
-Detener o reconstruir los contenedores conserva los datos. No utilices
-`docker compose down --volumes` salvo que quieras eliminar la base.
-
-## Configuración local
-
-Solo el frontend publica un puerto: `127.0.0.1:8080`. MariaDB, ETL, Machine y endpoints
-se comunican por la red interna de Compose. La página es una demo local sin
-usuarios ni autenticación; no se publica en Internet.
-
-`scripts/prepare_env.py` crea contraseñas aleatorias una sola vez y conserva `.env`
-si ya existe. No cambies estas contraseñas mientras uses el volumen actual sin
-actualizar también las cuentas de MariaDB. `.env` no entra en Git ni en las imágenes.
-La tabla de mensajes y el volumen de la prueba anterior se conservan.
-
-## Referencias
-
-- [Docker Compose: dependencias y comprobaciones de salud](https://docs.docker.com/compose/how-tos/startup-order/)
-- [scikit-learn: regresión lineal](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LinearRegression.html)
-- [scikit-learn 1.7.2](https://pypi.org/project/scikit-learn/1.7.2/)

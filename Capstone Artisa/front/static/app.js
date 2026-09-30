@@ -11,8 +11,6 @@ const formatUtc = (value) => value ? new Intl.DateTimeFormat("es-CL", {
 const formatDataDay = (value) => value ? new Intl.DateTimeFormat("es-CL", {
   dateStyle: "long", timeZone: "UTC"
 }).format(new Date(value + "T12:00:00Z")) : "Sin fecha";
-let trips = [];
-let expanded = false;
 let refreshing = false;
 
 function showApp() {
@@ -21,37 +19,120 @@ function showApp() {
   window.scrollTo(0, 0);
 }
 
-function token() {
-  return sessionStorage.getItem("artisa_token");
+const TOKEN_KEY = "artisa_token";
+const EXPIRED_MESSAGE = "Tu sesión expiró. Ingresa nuevamente.";
+let activeToken = null;
+let sessionVersion = 0;
+let expiryTimer;
+const pendingRequests = new Set();
+
+// Esta comprobación es solo para la interfaz; Nginx/Auth verifican la firma.
+function tokenExpiration(value) {
+  try {
+    if (typeof value !== "string" || value.length > 4096) return 0;
+    const parts = value.split(".");
+    if (parts.length !== 3 || parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return 0;
+    const decode = (part) => {
+      const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
+      return atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="));
+    };
+    const header = JSON.parse(decode(parts[0]));
+    const payload = JSON.parse(decode(parts[1]));
+    if (header?.alg !== "HS256" || header?.typ !== "JWT" || decode(parts[2]).length !== 32) return 0;
+    return Number.isSafeInteger(payload?.exp) && payload.exp > Date.now() / 1000
+      ? payload.exp * 1000 : 0;
+  } catch { return 0; }
 }
 
-function logout() {
-  sessionStorage.removeItem("artisa_token");
-  landing.hidden = false;
+function token() {
+  if (activeToken && !tokenExpiration(activeToken)) logout(EXPIRED_MESSAGE);
+  return activeToken;
+}
+
+function clearSessionWork() {
+  clearTimeout(expiryTimer);
+  sessionVersion++;
+  for (const controller of pendingRequests) controller.abort();
+  pendingRequests.clear();
+  refreshing = false;
+  $("refresh").disabled = false;
+  journeyRequest++;
+}
+
+function clearPassword() {
+  $("login-password").value = "";
+  $("login-password").type = "password";
+  $("toggle-password").textContent = "Mostrar";
+  $("toggle-password").setAttribute("aria-pressed", "false");
+}
+
+function logout(message = "") {
+  clearSessionWork();
+  activeToken = null;
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* Almacenamiento no disponible. */ }
+  clearPassword();
+  $("login-user").value = "";
   appShell.hidden = true;
+  landing.hidden = false;
+  history.replaceState(null, "", location.pathname + location.search);
+  $("login-error").textContent = message;
+  $("login-error").hidden = !message;
+}
+
+function scheduleExpiration() {
+  clearTimeout(expiryTimer);
+  const remaining = tokenExpiration(activeToken) - Date.now();
+  if (remaining <= 0) return logout(EXPIRED_MESSAGE);
+  expiryTimer = setTimeout(scheduleExpiration, Math.min(remaining, 2147483647));
+}
+
+function restoreSession() {
+  let saved;
+  try { saved = localStorage.getItem(TOKEN_KEY); } catch { saved = null; }
+  if (!tokenExpiration(saved)) {
+    logout(saved || activeToken ? EXPIRED_MESSAGE : $("login-error").textContent);
+    return;
+  }
+  const changed = activeToken !== saved;
+  if (changed) clearSessionWork();
+  activeToken = saved;
+  $("login-error").textContent = "";
+  $("login-error").hidden = true;
+  if (!location.hash) history.replaceState(null, "", "#dashboard");
+  syncDatasetView();
+  if (appShell.hidden) showApp();
+  scheduleExpiration();
+  if (changed) refresh();
 }
 
 loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const button = loginForm.querySelector("button");
+  const button = loginForm.querySelector(".landing-button");
   const error = $("login-error");
+  const usernameInput = $("login-user");
+  const passwordInput = $("login-password");
   button.disabled = true;
   error.hidden = true;
   try {
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
     const response = await fetch("/auth/login", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        username: $("login-user").value,
-        password: $("login-password").value
-      })
+      cache: "no-store",
+      body: JSON.stringify({username, password})
     });
+    if (response.status === 401) throw new Error("Usuario o contraseña incorrectos");
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "No se pudo iniciar sesión.");
-    sessionStorage.setItem("artisa_token", payload.token);
-    showApp();
-    refresh();
+    if (!tokenExpiration(payload.token)) throw new Error("El servidor devolvió una sesión no válida.");
+    try { localStorage.setItem(TOKEN_KEY, payload.token); }
+    catch { throw new Error("Permite el almacenamiento local para mantener tu sesión."); }
+    clearPassword();
+    history.replaceState(null, "", "#dashboard");
+    restoreSession();
   } catch (loginError) {
+    clearPassword();
     error.textContent = loginError.message;
     error.hidden = false;
   } finally {
@@ -59,26 +140,50 @@ loginForm.addEventListener("submit", async (event) => {
   }
 });
 
-if (token() && window.location.hash) showApp();
+$("toggle-password").addEventListener("click", () => {
+  const passwordInput = $("login-password");
+  const showing = passwordInput.type === "text";
+  passwordInput.type = showing ? "password" : "text";
+  $("toggle-password").textContent = showing ? "Mostrar" : "Ocultar";
+  $("toggle-password").setAttribute("aria-pressed", String(!showing));
+  passwordInput.focus();
+});
+
+$("logout").addEventListener("click", () => logout());
 
 async function api(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  headers.set("Authorization", `Bearer ${token()}`);
-  const response = await fetch(path, {...options, headers, signal: AbortSignal.timeout(20000)});
-  const payload = await response.json();
-  if (response.status === 401) {
-    logout();
-    throw new Error("La sesión expiró. Ingresa nuevamente.");
+  const currentToken = token();
+  if (!currentToken) throw new Error(EXPIRED_MESSAGE);
+  const version = sessionVersion;
+  const controller = new AbortController();
+  pendingRequests.add(controller);
+  const timeout = setTimeout(() => controller.abort(), 20000);
+  try {
+    const headers = new Headers(options.headers || {});
+    headers.set("Authorization", `Bearer ${currentToken}`);
+    const response = await fetch(path, {...options, headers, signal: controller.signal});
+    if (version !== sessionVersion) throw new Error("Petición de una sesión anterior cancelada.");
+    // Nginx puede devolver HTML en un 401: comprobarlo antes de leer JSON.
+    if (response.status === 401) {
+      logout(EXPIRED_MESSAGE);
+      throw new Error(EXPIRED_MESSAGE);
+    }
+    const payload = await response.json();
+    if (version !== sessionVersion || !token()) throw new Error(EXPIRED_MESSAGE);
+    if (!response.ok) throw new Error(payload.error || "El servicio está temporalmente ocupado.");
+    return payload;
+  } finally {
+    clearTimeout(timeout);
+    pendingRequests.delete(controller);
   }
-  if (!response.ok) throw new Error(payload.error || "El servicio está temporalmente ocupado.");
-  return payload;
 }
 
 function syncDatasetView() {
-  const simulatedHashes = new Set(["#datos-simulados", "#viajes", "#simulador"]);
+  if (["#datos-simulados", "#viajes", "#simulador"].includes(window.location.hash)) {
+    history.replaceState(null, "", "#datos-reales");
+  }
   let view = "real";
-  if (simulatedHashes.has(window.location.hash)) view = "simulated";
-  else if (window.location.hash === "#mapa-calor") view = "heatmap";
+  if (window.location.hash === "#mapa-calor") view = "heatmap";
   else if (window.location.hash === "#dashboard") view = "dashboard";
   for (const space of document.querySelectorAll("[data-dataset-view]")) {
     space.hidden = space.dataset.datasetView !== view;
@@ -115,14 +220,15 @@ function routeUsageSummary(route) {
 }
 
 const ROUTE_DRAW_ORDER = ["LOW", "MEDIUM", "HIGH"];
-const mapLayerVisibility = {routes: true, vehicles: true, stops: true, readings: false};
+const mapLayerVisibility = {routes: true, vehicles: true};
 let activeRouteFilter = "ALL";
 let activeMonitorTab = "routes";
 let fleetMap = null;
-let readingLayer = null;
 const routeLayers = {LOW: null, MEDIUM: null, HIGH: null};
-let stopLayer = null;
 let truckLayer = null;
+let journeyLayer = null;
+let journeyRequest = 0;
+let activeJourneyVehicleId = null;
 let pendingMapBounds = null;
 let mapHasFitted = false;
 let currentMapData = null;
@@ -168,8 +274,14 @@ function setSelectionDetail(kind, title, description, metadata) {
 function refreshSelectionStyles() {
   for (const [routeId, record] of routeMapLayers) {
     const selected = routeId === selectedRouteId;
-    record.halo.setStyle({weight: selected ? 13 : 9, opacity: selected ? 1 : 0.9});
-    record.line.setStyle({weight: selected ? 8 : 6, opacity: selected ? 1 : 0.92});
+    record.halo.setStyle({
+      weight: selected ? record.haloWeight + 3 : record.haloWeight,
+      opacity: selected ? 1 : record.haloOpacity
+    });
+    record.line.setStyle({
+      weight: selected ? record.baseWeight + 3 : record.baseWeight,
+      opacity: selected ? 1 : record.baseOpacity
+    });
   }
   for (const [vehicleId, marker] of truckMarkers) {
     const element = marker.getElement();
@@ -198,7 +310,7 @@ function renderRouteMonitor(routes) {
       `${properties.route_id} ${properties.label}`.toLocaleLowerCase("es").includes(query);
   });
   list.replaceChildren();
-  for (const route of visible) {
+  for (const route of visible.slice(0, 150)) {
     const properties = routeProperties(route);
     const item = document.createElement("li");
     const button = document.createElement("button");
@@ -220,6 +332,13 @@ function renderRouteMonitor(routes) {
     item.append(button);
     list.append(item);
   }
+  if (visible.length > 150) {
+    const item = document.createElement("li");
+    item.className = "monitor-empty";
+    item.textContent = "Mostrando 150 de " + format(visible.length) +
+      " rutas. Usa la búsqueda para encontrar otra; todas permanecen en el mapa.";
+    list.append(item);
+  }
   if (!visible.length) {
     const item = document.createElement("li");
     item.className = "monitor-empty";
@@ -230,11 +349,21 @@ function renderRouteMonitor(routes) {
 }
 
 function vehicleDriver(vehicle) {
-  return [vehicle.driver_name, vehicle.driver_last_name].filter(Boolean).join(" ") || "Conductor sin informar";
+  const structured = [vehicle.driver_name, vehicle.driver_last_name]
+    .map((part) => String(part || "").trim()).filter(Boolean).join(" ");
+  if (structured) return structured;
+  return "No informado";
+}
+
+function vehiclePlate(vehicle) {
+  const explicit = String(vehicle.patente || vehicle.plate || vehicle.license_plate || "").trim();
+  if (explicit) return explicit;
+  return null;
 }
 
 function vehicleStatus(vehicle) {
-  const timestamp = new Date(vehicle.timestamp).getTime();
+  const timestamp = vehicle.timestamp ? new Date(vehicle.timestamp).getTime() : NaN;
+  if (!Number.isFinite(timestamp)) return {label: "Estado no disponible", className: "off"};
   const stale = Number.isFinite(timestamp) && Date.now() - timestamp > 30 * 60 * 1000;
   if (stale) return {label: "Sin señal reciente", className: "off"};
   const speed = Number(vehicle.speed_kmh || 0);
@@ -242,7 +371,7 @@ function vehicleStatus(vehicle) {
   if (vehicle.ignition !== null && vehicle.ignition !== undefined && Number(vehicle.ignition) === 0) {
     return {label: "Apagado", className: "off"};
   }
-  return {label: "Detenido", className: "stopped"};
+  return {label: "Con señal reciente", className: "moving"};
 }
 
 function renderLiveFleet(vehicles) {
@@ -313,7 +442,7 @@ function setMonitorTab(tab) {
 function applyRouteFilter() {
   if (!fleetMap) return;
   for (const level of ROUTE_DRAW_ORDER) {
-    const visible = mapLayerVisibility.routes &&
+    const visible = mapLayerVisibility.routes && !activeJourneyVehicleId &&
       (activeRouteFilter === "ALL" || activeRouteFilter === level);
     setLayerVisibility(routeLayers[level], visible);
   }
@@ -321,16 +450,19 @@ function applyRouteFilter() {
     const selected = button.dataset.routeFilter === activeRouteFilter;
     button.classList.toggle("is-active", selected);
     button.setAttribute("aria-pressed", selected ? "true" : "false");
-    button.disabled = !mapLayerVisibility.routes;
+    button.disabled = !mapLayerVisibility.routes || !!activeJourneyVehicleId;
   }
   if (currentMapData) renderRouteMonitor(currentMapData.routes);
 }
 
 function applyMapLayerVisibility() {
   if (!fleetMap) return;
-  setLayerVisibility(readingLayer, mapLayerVisibility.readings);
-  setLayerVisibility(stopLayer, mapLayerVisibility.stops);
-  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles);
+  for (const [vehicleId, marker] of truckMarkers) {
+    const visible = !activeJourneyVehicleId || vehicleId === activeJourneyVehicleId;
+    if (visible && !truckLayer.hasLayer(marker)) truckLayer.addLayer(marker);
+    if (!visible && truckLayer.hasLayer(marker)) truckLayer.removeLayer(marker);
+  }
+  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles || !!activeJourneyVehicleId);
   applyRouteFilter();
 }
 
@@ -350,16 +482,16 @@ function initializeFleetMap() {
   }).addTo(fleetMap);
 
   for (const [paneName, zIndex] of [
-    ["readingPane", 350], ["routeLowPane", 410], ["routeMediumPane", 420],
-    ["routeHighPane", 430], ["stopPane", 600], ["truckPane", 650]
+    ["routeLowPane", 410], ["routeMediumPane", 420],
+    ["routeHighPane", 430], ["journeyPane", 625], ["truckPane", 650]
   ]) {
     fleetMap.createPane(paneName).style.zIndex = String(zIndex);
   }
 
-  readingLayer = L.layerGroup();
   for (const level of ROUTE_DRAW_ORDER) routeLayers[level] = L.layerGroup();
-  stopLayer = L.layerGroup();
   truckLayer = L.layerGroup();
+  journeyLayer = L.featureGroup().addTo(fleetMap);
+  $("journey-hide").addEventListener("click", resetMapSelection);
   applyMapLayerVisibility();
 }
 
@@ -374,10 +506,13 @@ function fitPendingMap(force = false) {
 
 function truckIcon(vehicle) {
   const status = vehicleStatus(vehicle);
-  const heading = Number.isFinite(Number(vehicle.heading)) ? Number(vehicle.heading) : 0;
+  const hasHeading = vehicle.heading !== null && vehicle.heading !== undefined &&
+    vehicle.heading !== "" && Number.isFinite(Number(vehicle.heading));
+  const arrow = hasHeading
+    ? "<span class='truck-heading' style='transform:rotate(" + Number(vehicle.heading) + "deg)'>▲</span>"
+    : "";
   const html = "<span class='truck-marker " + status.className +
-    "'><span class='truck-heading' style='transform:rotate(" + heading +
-    "deg)'>▲</span><span class='truck-glyph'>🚚</span></span>";
+    "'>" + arrow + "<span class='truck-glyph'>🚚</span></span>";
   return L.divIcon({
     className: "truck-div-icon",
     html,
@@ -406,14 +541,26 @@ function truckPopup(vehicle) {
   const driver = document.createElement("small");
   driver.textContent = "Conductor: " + vehicleDriver(vehicle);
   const route = document.createElement("small");
-  route.textContent = "Ruta agrupada: " + (vehicle.route_id || "sin asignar");
+  const matched = currentMapData && currentMapData.routes.find(
+    (item) => routeProperties(item).route_id === vehicle.route_id);
+  route.textContent = "Ruta histórica: " + (matched
+    ? routeProperties(matched).usage_label + " · " + vehicle.route_id
+    : "sin clasificar");
   const date = document.createElement("small");
   date.textContent = "Última posición: " + formatUtc(vehicle.timestamp);
-  wrapper.append(title, identifier, state, details, driver, route, date);
+  const plate = document.createElement("small");
+  plate.textContent = "Patente: " + (vehiclePlate(vehicle) || "No informada");
+  const viewJourney = document.createElement("button");
+  viewJourney.type = "button";
+  viewJourney.className = "popup-journey-button";
+  viewJourney.textContent = "Ver recorrido completo";
+  viewJourney.addEventListener("click", () => showVehicleJourney(vehicle));
+  wrapper.append(title, identifier, state, details, plate, driver, route, date, viewJourney);
   return wrapper;
 }
 
 function selectRoute(route, focus = true) {
+  hideJourney();
   const properties = routeProperties(route);
   const record = routeMapLayers.get(properties.route_id);
   if (!record || !fleetMap) return;
@@ -442,6 +589,8 @@ function selectRoute(route, focus = true) {
 function selectVehicle(vehicle, focus = true) {
   const marker = truckMarkers.get(vehicle.vehicle_id);
   if (!marker || !fleetMap) return;
+  if (selectedVehicleId && selectedVehicleId !== vehicle.vehicle_id &&
+      (activeJourneyVehicleId || !$("journey-detail").hidden)) hideJourney();
   selectedVehicleId = vehicle.vehicle_id;
   selectedRouteId = null;
   for (const record of routeMapLayers.values()) record.line.closeTooltip();
@@ -468,7 +617,79 @@ function selectVehicle(vehicle, focus = true) {
   }
 }
 
+function hideJourney() {
+  journeyRequest += 1;
+  if (journeyLayer) journeyLayer.clearLayers();
+  activeJourneyVehicleId = null;
+  applyMapLayerVisibility();
+  const detail = $("journey-detail");
+  if (detail) detail.hidden = true;
+}
+
+async function showVehicleJourney(vehicle) {
+  if (!currentMapData || machinePending(currentMapData)) {
+    $("journey-detail").hidden = false;
+    $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
+    return;
+  }
+  if (!journeyLayer) return;
+  const request = ++journeyRequest;
+  activeJourneyVehicleId = vehicle.vehicle_id;
+  applyMapLayerVisibility();
+  journeyLayer.clearLayers();
+  const panel = $("journey-detail");
+  panel.hidden = false;
+  $("journey-note").textContent = "Cargando recorrido desde MariaDB…";
+  try {
+    const journey = await api("/api/vehiculos/" +
+      encodeURIComponent(vehicle.vehicle_id) + "/recorrido");
+    if (request !== journeyRequest) return;
+    const paths = journey.geometry && journey.geometry.coordinates || [];
+    for (const path of paths) {
+      if (path.length < 2) continue;
+      L.polyline(path.map((point) => [point[1], point[0]]), {
+        pane: "journeyPane", color: "#1964b5", weight: 7, opacity: 1,
+        lineCap: "round", lineJoin: "round"
+      }).addTo(journeyLayer);
+    }
+    const route = currentMapData && currentMapData.routes.find(
+      (item) => routeProperties(item).route_id === vehicle.route_id);
+    const category = route
+      ? routeProperties(route).usage_label + " · " + vehicle.route_id
+      : "Sin clasificar";
+    const driver = [journey.driver_name, journey.driver_last_name].filter(Boolean).join(" ");
+    $("journey-plate").textContent = journey.patente || vehiclePlate(vehicle) || "No informada";
+    $("journey-driver").textContent = driver || vehicleDriver(vehicle);
+    $("journey-start").textContent = journey.inicio.replace("T", " ");
+    $("journey-end").textContent = journey.termino_observado.replace("T", " ");
+    $("journey-distance").textContent = format(journey.distancia_km, 1) + " km";
+    $("journey-moving").textContent = format(journey.tiempo_movimiento_minutos || 0, 1) + " min estimados";
+    $("journey-chains").textContent = "No determinados";
+    $("journey-route").textContent = category;
+    $("journey-note").textContent = journey.nota +
+      (journey.completo ? "" : " Hay más registros ese día; se muestran los últimos 20.000.");
+    setSelectionDetail(
+      "RECORRIDO OBSERVADO · " + journey.fecha, journey.asset_name,
+      format(journey.lecturas) + " posiciones · " +
+        format(journey.distancia_km, 1) + " km",
+      "Última posición: " + journey.termino_observado.replace("T", " ") +
+        " · " + category
+    );
+    fleetMap.closePopup();
+    if (journeyLayer.getLayers().length && journeyLayer.getBounds().isValid()) {
+      fleetMap.fitBounds(journeyLayer.getBounds(), {padding: [45, 45], maxZoom: 13});
+    }
+  } catch (error) {
+    if (request === journeyRequest) {
+      activeJourneyVehicleId = null;
+      applyMapLayerVisibility();
+      $("journey-note").textContent = "No se pudo consultar el recorrido: " + error.message;
+    }
+  }
+}
+
 function resetMapSelection() {
+  hideJourney();
   if (fleetMap) fleetMap.closePopup();
   for (const record of routeMapLayers.values()) record.line.closeTooltip();
   selectedRouteId = null;
@@ -492,23 +713,10 @@ function renderFleetMap(data) {
   initializeFleetMap();
   if (!fleetMap) return;
   currentMapData = data;
-  readingLayer.clearLayers();
   for (const level of ROUTE_DRAW_ORDER) routeLayers[level].clearLayers();
-  stopLayer.clearLayers();
   truckLayer.clearLayers();
   truckMarkers.clear();
   routeMapLayers.clear();
-
-  for (const reading of data.readings) {
-    const radius = 4 + Math.min(4, Math.sqrt(Number(reading.reading_count || 0)) / 4);
-    L.circleMarker([reading.latitude, reading.longitude], {
-      pane: "readingPane", radius, color: "#1d4ed8", weight: 1, opacity: 0.8,
-      fillColor: "#60a5fa", fillOpacity: 0.32
-    }).bindTooltip(textTooltip(
-      reading.reading_id + " · " + format(reading.reading_count) +
-      " lecturas técnicas · " + format(reading.vehicle_count) + " vehículos"
-    )).addTo(readingLayer);
-  }
 
   const routes = [...data.routes].sort((first, second) => {
     const firstLevel = ROUTE_DRAW_ORDER.indexOf(routeProperties(first).usage_level);
@@ -524,36 +732,33 @@ function renderFleetMap(data) {
     if (!layer || !route.geometry || route.geometry.type !== "LineString") continue;
     const pane = level === "HIGH" ? "routeHighPane" : (level === "MEDIUM" ? "routeMediumPane" : "routeLowPane");
     const feature = {type: "Feature", properties, geometry: route.geometry};
+    const baseWeight = level === "HIGH" ? 5.2 : (level === "MEDIUM" ? 4.2 : 2.2);
+    const baseOpacity = level === "HIGH" ? 0.95 : (level === "MEDIUM" ? 0.84 : 0.38);
+    const haloWeight = baseWeight + 1.5;
+    const haloOpacity = level === "LOW" ? 0.16 : 0.65;
     const halo = L.geoJSON(feature, {
-      style: {pane, color: "#ffffff", weight: 9, opacity: 0.9, lineCap: "round", lineJoin: "round", interactive: false}
+      pane, interactive: false,
+      style: {color: "#ffffff", weight: haloWeight, opacity: haloOpacity,
+        lineCap: "round", lineJoin: "round"}
     }).addTo(layer);
     const line = L.geoJSON(feature, {
-      style: {pane, color: properties.color, weight: 6, opacity: 0.92, lineCap: "round", lineJoin: "round"}
+      pane,
+      style: {color: properties.color, weight: baseWeight, opacity: baseOpacity,
+        lineCap: "round", lineJoin: "round"}
     }).bindTooltip(textTooltip(
       (properties.usage_label || level) + " · " + (properties.route_id || "Ruta") +
       " · " + format(properties.usage_count || 0) + " recorridos · " +
       format(properties.unique_vehicle_count || 0) + " vehículos"
     )).addTo(layer);
     line.on("click", () => selectRoute(route));
-    line.on("mouseover", () => line.setStyle({weight: properties.route_id === selectedRouteId ? 8 : 7, opacity: 1}));
+    line.on("mouseover", () => line.setStyle({weight: baseWeight + 2, opacity: 1}));
     line.on("mouseout", refreshSelectionStyles);
-    routeMapLayers.set(properties.route_id, {route, halo, line, bounds: line.getBounds()});
+    routeMapLayers.set(properties.route_id, {
+      route, halo, line, bounds: line.getBounds(), baseWeight, baseOpacity,
+      haloWeight, haloOpacity
+    });
   }
   updateRouteFilterCounts(routes);
-
-  for (const stop of data.stops) {
-    const radius = 7 + Math.min(7, Math.sqrt(Number(stop.vehicle_count || 0)) * 2);
-    const duration = stop.duration_minutes === null || stop.duration_minutes === undefined
-      ? "duración pendiente de consolidar"
-      : format(stop.duration_minutes, 0) + " min";
-    L.circleMarker([stop.latitude, stop.longitude], {
-      pane: "stopPane", radius, color: "#6f42a6", weight: 3,
-      fillColor: "#ffffff", fillOpacity: 0.9
-    }).bindTooltip(textTooltip(
-      stop.label + " · " + format(stop.stop_event_count || 0) + " detenciones · " +
-      format(stop.vehicle_count) + " vehículos · " + duration
-    )).addTo(stopLayer);
-  }
 
   for (const vehicle of data.vehicles) {
     const marker = L.marker([vehicle.latitude, vehicle.longitude], {
@@ -566,41 +771,118 @@ function renderFleetMap(data) {
   renderMonitorLists();
   applyMapLayerVisibility();
 
-  const sourceLabel = data.sourceMode === "TELEMETRY_PROCESSED_SIMULATION"
-    ? "Telemetría procesada"
-    : (data.sourceMode === "SIMULATION_PROCESSED" ? "Simulación aislada" : "Datos procesados");
+  const sourceLabel = data.sourceMode === "HISTORICAL_GPS_CATALOG"
+    ? "Rutas históricas completas"
+    : data.sourceMode === "HISTORICAL_GPS_PILOT"
+      ? "Ensayo histórico parcial"
+      : data.sourceMode === "SIMULATION_PROCESSED"
+        ? "Simulación aislada"
+        : "Muestra GPS reciente";
   const minutes = Math.max(1, Math.round(Number(data.metadata.refresh_seconds || 300) / 60));
-  $("map-last-update").textContent = sourceLabel + " · corte " +
-    formatDataDay(data.snapshotDate) + " · actualización cada " + minutes + " min";
+  const isHistorical = data.sourceMode === "HISTORICAL_GPS_CATALOG" ||
+    data.sourceMode === "HISTORICAL_GPS_PILOT";
+  $("map-last-update").textContent = sourceLabel +
+    (isHistorical ? " · catálogo " : " · muestra ") +
+    formatDataDay(data.snapshotDate) +
+    " · posiciones cada " + minutes + " min";
+  $("heatmap-source-status").textContent = sourceLabel;
+  $("heatmap-intro").textContent =
+    (isHistorical
+      ? " Verde, naranja y rojo representan recorridos históricos agrupados. El camión muestra su última lectura disponible."
+      : " Los colores pertenecen a las rutas de esta vista; el camión muestra su última lectura disponible.");
 
-  if (data.bounds) {
-    pendingMapBounds = L.latLngBounds(
-      [data.bounds.latitude_min, data.bounds.longitude_min],
-      [data.bounds.latitude_max, data.bounds.longitude_max]
-    );
+  const visibleBounds = L.latLngBounds([]);
+  for (const route of data.routes) {
+    if (!route.geometry || route.geometry.type !== "LineString") continue;
+    for (const point of route.geometry.coordinates) {
+      const longitude = Number(point[0]);
+      const latitude = Number(point[1]);
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        visibleBounds.extend([latitude, longitude]);
+      }
+    }
   }
+  if (data.sourceMode !== "HISTORICAL_GPS_PILOT" || !visibleBounds.isValid()) {
+    for (const vehicle of data.vehicles) {
+      const latitude = Number(vehicle.latitude);
+      const longitude = Number(vehicle.longitude);
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        visibleBounds.extend([latitude, longitude]);
+      }
+    }
+  }
+  pendingMapBounds = visibleBounds.isValid() ? visibleBounds : null;
   if (selectedRouteId) {
     const route = data.routes.find((value) => routeProperties(value).route_id === selectedRouteId);
     if (route) selectRoute(route, false); else resetMapSelection();
   } else if (selectedVehicleId) {
     const vehicle = data.vehicles.find((value) => value.vehicle_id === selectedVehicleId);
-    if (vehicle) selectVehicle(vehicle, false); else resetMapSelection();
+    if (vehicle) {
+      selectVehicle(vehicle, false);
+    } else resetMapSelection();
   } else {
     refreshSelectionStyles();
   }
   if ($("heatmap-map").offsetParent !== null) requestAnimationFrame(() => fitPendingMap(false));
 }
 
+function machinePending(data) {
+  return data.status === "pending" || data.sourceMode === "PENDING_MACHINE" || data.metadata?.status === "pending";
+}
+
+function pendingText(ids, message = "Pendiente de procesamiento") {
+  for (const id of ids) $(id).textContent = message;
+}
+
 function renderHeatmap(data) {
+  const pending = machinePending(data);
+  for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer], [data-monitor-tab], #monitor-search, #reset-map-view")) {
+    control.disabled = pending;
+  }
+  if (pending) {
+    currentMapData = data;
+    journeyRequest++;
+    activeJourneyVehicleId = null;
+    selectedVehicleId = null;
+    selectedRouteId = null;
+    if (fleetMap) { fleetMap.remove(); fleetMap = null; }
+    journeyLayer = null;
+    truckLayer = null;
+    truckMarkers.clear();
+    routeMapLayers.clear();
+    pendingMapBounds = null;
+    mapHasFitted = false;
+    pendingText(["heatmap-trips", "heatmap-vehicles", "heatmap-routes",
+      "most-route", "least-route", "geo-model-zones", "heatmap-source-status"]);
+    pendingText(["heatmap-intro", "heatmap-zones", "map-last-update", "most-route-usage",
+      "least-route-usage", "geo-model-detail", "heatmap-method", "map-selection-detail"],
+      "Disponible cuando Machine genere resultados");
+    pendingText(["monitor-route-count", "vehicle-live-count"], "—");
+    for (const counter of document.querySelectorAll("[data-route-count]")) counter.textContent = "—";
+    for (const id of ["route-monitor-list", "vehicle-live-list"]) {
+      const item = document.createElement("li");
+      item.textContent = "Pendiente de procesamiento Machine.";
+      $(id).replaceChildren(item);
+    }
+    const message = document.createElement("span");
+    message.className = "map-loading";
+    message.textContent = "Disponible cuando Machine genere resultados";
+    $("heatmap-map").replaceChildren(message);
+    $("journey-detail").hidden = true;
+    $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
+    return;
+  }
   const summary = data.summary;
   $("heatmap-trips").textContent = format(summary.trip_count || 0);
   $("heatmap-vehicles").textContent = format(summary.vehicle_count || 0);
-  $("heatmap-stops").textContent = format(summary.stop_count || 0);
   $("heatmap-routes").textContent = format(summary.route_count || 0);
-  $("heatmap-zones").textContent =
-    `${format(summary.window_report_count || 0)} registros recientes · ` +
-    `${format(summary.reading_count || 0)} posiciones únicas · ` +
-    `${format(summary.available_report_count || 0)} reportes conservados`;
+  $("heatmap-zones").textContent = data.metadata.processed_report_count
+    ? format(data.metadata.processed_report_count) + " de " +
+      format(data.metadata.source_report_count) + " reportes históricos procesados · " +
+      format(summary.vehicle_count || 0) + " vehículos con posición en la ventana"
+    : format(summary.window_report_count || 0) + " registros recientes · " +
+      format(summary.reading_count || 0) + " posiciones únicas · " +
+      format(summary.available_report_count || 0) + " reportes conservados";
 
   const most = data.ranking.mostUsed;
   const least = data.ranking.leastUsed;
@@ -615,27 +897,9 @@ function renderHeatmap(data) {
     metadata.data_retention
   ].filter(Boolean).join(" ");
 
-  const ranking = $("stop-ranking");
-  ranking.replaceChildren();
-  for (const stop of [...data.stops]
-    .sort((first, second) => Number(second.stop_event_count || 0) - Number(first.stop_event_count || 0))
-    .slice(0, 8)) {
-    const item = document.createElement("li");
-    const name = document.createElement("span");
-    name.textContent = stop.label || stop.stop_id;
-    const count = document.createElement("strong");
-    count.textContent = format(stop.stop_event_count || 0) + " det.";
-    item.append(name, count);
-    ranking.append(item);
-  }
-  if (!ranking.children.length) {
-    const item = document.createElement("li");
-    item.textContent = "No hay paradas en la ventana procesada.";
-    ranking.append(item);
-  }
-
   $("geo-model-zones").textContent = "Contrato procesado v" + (data.schemaVersion || "1");
-  $("geo-model-detail").textContent = data.description + " " + (metadata.road_matching || "");
+  $("geo-model-detail").textContent = metadata.road_matching ||
+    "Rutas calculadas con la telemetría disponible.";
   renderFleetMap(data);
 }
 const DASHBOARD_ZONES = ["Zona Norte", "Zona Centro", "Zona Sur", "Zona Oeste", "Zona Este"];
@@ -657,31 +921,26 @@ function routeCenter(route) {
 }
 
 function dashboardBounds(data) {
-  const supplied = data.bounds || {};
-  const bounds = {
-    latitudeMin: Number(supplied.latitude_min),
-    latitudeMax: Number(supplied.latitude_max),
-    longitudeMin: Number(supplied.longitude_min),
-    longitudeMax: Number(supplied.longitude_max)
-  };
-  if (Object.values(bounds).every(Number.isFinite)) return bounds;
   const points = [];
   for (const route of data.routes) {
     const point = routeCenter(route);
     if (point) points.push(point);
   }
-  for (const stop of data.stops) {
-    const latitude = Number(stop.latitude);
-    const longitude = Number(stop.longitude);
+  for (const vehicle of data.vehicles) {
+    const latitude = Number(vehicle.latitude);
+    const longitude = Number(vehicle.longitude);
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) points.push({latitude, longitude});
+  }
+  if (!points.length) {
+    return {latitudeMin: -34, latitudeMax: -33, longitudeMin: -71, longitudeMax: -70};
   }
   const latitudes = points.map((point) => point.latitude);
   const longitudes = points.map((point) => point.longitude);
   return {
-    latitudeMin: Math.min(...latitudes, -34),
-    latitudeMax: Math.max(...latitudes, -33),
-    longitudeMin: Math.min(...longitudes, -71),
-    longitudeMax: Math.max(...longitudes, -70)
+    latitudeMin: Math.min(...latitudes),
+    latitudeMax: Math.max(...latitudes),
+    longitudeMin: Math.min(...longitudes),
+    longitudeMax: Math.max(...longitudes)
   };
 }
 
@@ -775,6 +1034,20 @@ function renderDashboardDonut(containerId, items, centerLabel) {
 }
 
 function renderDashboard(data, metrics = {}) {
+  if (metrics.status === "pending" || machinePending(data)) {
+    pendingText(["dashboard-reports", "dashboard-trips", "dashboard-routes",
+      "dashboard-snapshot", "dashboard-most-route-zone"]);
+    pendingText(["dashboard-most-route-zone-detail", "dashboard-method"],
+      "Disponible cuando Machine genere resultados");
+    for (const id of ["dashboard-route-zones", "dashboard-route-levels",
+      "dashboard-fleet-status", "dashboard-top-routes"]) {
+      const message = document.createElement("span");
+      message.className = "chart-empty";
+      message.textContent = "Pendiente de procesamiento Machine.";
+      $(id).replaceChildren(message);
+    }
+    return;
+  }
   const summary = data.summary || {};
   const operation = metrics.operacion || {};
   const quality = metrics.calidad || {};
@@ -785,9 +1058,8 @@ function renderDashboard(data, metrics = {}) {
     Number(routeMetrics.HIGH || 0) + Number(routeMetrics.MEDIUM || 0) + Number(routeMetrics.LOW || 0)
     || data.routes.length
   );
-  $("dashboard-stop-events").textContent = format(operation.paradas || summary.stop_event_count || 0);
   $("dashboard-snapshot").textContent = "Corte " + formatDataDay(data.snapshotDate);
-  $("dashboard-snapshot").className = "status simulation";
+  $("dashboard-snapshot").className = "status info";
 
   const bounds = dashboardBounds(data);
   const routeZones = zoneAccumulator();
@@ -804,21 +1076,6 @@ function renderDashboard(data, metrics = {}) {
     .map((zone) => ({...zone, detail: `${format(zone.count)} rutas · ${format(zone.vehicles)} participaciones de vehículos`}))
     .sort((first, second) => second.value - first.value);
   renderDashboardBars("dashboard-route-zones", routeZoneItems, "#246c55");
-
-  const stopZones = zoneAccumulator();
-  for (const stop of data.stops) {
-    const latitude = Number(stop.latitude);
-    const longitude = Number(stop.longitude);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
-    const zone = stopZones.get(dashboardZone(latitude, longitude, bounds));
-    zone.value += Number(stop.stop_event_count || 0);
-    zone.count += 1;
-    zone.vehicles += Number(stop.vehicle_count || 0);
-  }
-  const stopZoneItems = [...stopZones.values()]
-    .map((zone) => ({...zone, detail: `${format(zone.count)} zonas de parada · ${format(zone.vehicles)} participaciones de vehículos`}))
-    .sort((first, second) => second.value - first.value);
-  renderDashboardBars("dashboard-stop-zones", stopZoneItems, "#6f42a6");
 
   const routeLevels = {
     HIGH: Number(routeMetrics.HIGH || 0),
@@ -837,19 +1094,11 @@ function renderDashboard(data, metrics = {}) {
     {label: "Poco usadas", value: routeLevels.LOW, color: "#dc2626"}
   ], "rutas");
 
-  const fleetMetrics = metrics.flota || {};
-  const fleet = {
-    moving: Number(fleetMetrics.en_movimiento || 0),
-    stopped: Number(fleetMetrics.detenidos || 0),
-    off: Number(fleetMetrics.sin_senal || 0)
-  };
-  if (fleet.moving + fleet.stopped + fleet.off === 0) {
-    for (const vehicle of data.vehicles) fleet[vehicleStatus(vehicle).className] += 1;
-  }
+  const fleet = {moving: 0, off: 0};
+  for (const vehicle of data.vehicles) fleet[vehicleStatus(vehicle).className] += 1;
   renderDashboardDonut("dashboard-fleet-status", [
-    {label: "En movimiento", value: fleet.moving, color: "#58a566"},
-    {label: "Detenidos", value: fleet.stopped, color: "#e88836"},
-    {label: "Sin señal", value: fleet.off, color: "#708083"}
+    {label: "Con señal", value: fleet.moving, color: "#58a566"},
+    {label: "Sin señal o apagados", value: fleet.off, color: "#708083"}
   ], "vehículos");
 
   const topRoutes = [...data.routes]
@@ -871,55 +1120,31 @@ function renderDashboard(data, metrics = {}) {
   $("dashboard-most-route-zone-detail").textContent = mostRouteZone
     ? `${format(mostRouteZone.value)} recorridos en ${format(mostRouteZone.count)} rutas`
     : "No hay rutas suficientes en el bloque.";
-  const mostStopZone = stopZoneItems[0];
-  $("dashboard-most-stop-zone").textContent = mostStopZone ? mostStopZone.label : "Sin datos";
-  $("dashboard-most-stop-zone-detail").textContent = mostStopZone
-    ? `${format(mostStopZone.value)} detenciones en ${format(mostStopZone.count)} zonas detectadas`
-    : "No hay paradas suficientes en el bloque.";
   $("dashboard-method").textContent =
     "Las coordenadas se dividen en cinco zonas relativas al centro del área observada: norte, centro, sur, oeste y este. " +
     "Cada ruta conserva una sola clasificación y se cuenta en la zona de su centro geométrico. Actualización automática con el mismo bloque del mapa.";
 }
-function renderTrips() {
-  const query = $("search").value.trim().toLocaleLowerCase("es");
-  const filtered = trips.filter((row) => `${row.id} ${row.origen} ${row.destino}`.toLocaleLowerCase("es").includes(query));
-  const visible = expanded ? filtered : filtered.slice(0, 10);
-  const body = $("trip-rows");
-  body.replaceChildren();
-  for (const row of visible) {
-    const tr = document.createElement("tr");
-    const route = document.createElement("td");
-    route.textContent = `${row.origen} → ${row.destino}`;
-    const id = document.createElement("small");
-    id.textContent = row.id;
-    route.append(id);
-    tr.append(route);
-    for (const text of [`${format(row.distancia_km, 1)} km`, `${format(row.duracion_horas, 2)} h`]) {
-      const td = document.createElement("td"); td.textContent = text; tr.append(td);
-    }
-    const prediction = document.createElement("td");
-    const label = document.createElement("span"); label.className = "estimate";
-    label.textContent = row.duracion_estimada === null ? "Pendiente" : `${format(row.duracion_estimada, 2)} h`;
-    prediction.append(label); tr.append(prediction); body.append(tr);
-  }
-  if (!visible.length) {
-    const row = document.createElement("tr"); const cell = document.createElement("td");
-    cell.colSpan = 4; cell.className = "empty"; cell.textContent = "No se encontraron viajes.";
-    row.append(cell); body.append(row);
-  }
-  $("table-count").textContent = `${visible.length} de ${filtered.length} viajes`;
-  $("show-all").hidden = filtered.length <= 10;
-  $("show-all").textContent = expanded ? "Ver menos" : "Ver todos";
-}
-
 function renderTelemetry(summary, dataset, state) {
+  const pending = dataset.status === "pending" && dataset.source === "company_api";
+  $("telemetry-pending").hidden = !pending;
+  $("telemetry-content").hidden = pending;
+  if (pending) {
+    $("telemetry-status").textContent = "Pendiente de API empresa";
+    $("telemetry-status").className = "status neutral";
+    $("telemetry-rows").replaceChildren();
+    $("telemetry-count").textContent = "—";
+    $("vehicle-count").textContent = "—";
+    $("telemetry-range").textContent = "";
+    $("telemetry-quality").textContent = "";
+    return;
+  }
   const reports = dataset.reportes || [];
-  const telemetryState = state.telemetria || {};
-  $("telemetry-count").textContent = format(summary.reportes);
-  $("vehicle-count").textContent = format(summary.vehiculos);
-  $("average-speed").textContent = `${format(summary.velocidad_promedio, 1)} km/h`;
-  $("maximum-speed").textContent = `${format(summary.velocidad_maxima, 1)} km/h`;
-  $("telemetry-range").textContent = summary.reportes
+  const telemetryState = state.telemetria || state.etl || {};
+  $("telemetry-count").textContent = summary.status === "pending" ? "Pendiente de procesamiento" : format(summary.reportes);
+  $("vehicle-count").textContent = summary.status === "pending" ? "Pendiente de procesamiento" : format(summary.vehiculos);
+  $("telemetry-range").textContent = summary.status === "pending"
+    ? "Resumen pendiente de procesamiento; la tabla muestra reportes GPS reales."
+    : summary.reportes
     ? `Desde ${formatUtc(summary.desde)} hasta ${formatUtc(summary.hasta)}`
     : "Todavía no hay reportes importados.";
 
@@ -958,11 +1183,6 @@ function renderTelemetry(summary, dataset, state) {
     event.textContent = report.event_name || "Sin evento";
     tr.append(event);
 
-    const speed = document.createElement("td");
-    const speedValue = report.gps_speed ?? report.speed;
-    speed.textContent = speedValue === null || speedValue === undefined ? "Sin dato" : `${format(speedValue, 1)} km/h`;
-    tr.append(speed);
-
     const coordinates = document.createElement("td");
     coordinates.textContent = report.latitude === null || report.longitude === null
       ? "Sin coordenadas"
@@ -979,7 +1199,7 @@ function renderTelemetry(summary, dataset, state) {
   if (!reports.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 6;
+    cell.colSpan = 5;
     cell.className = "empty";
     cell.textContent = "No hay telemetría disponible para mostrar.";
     row.append(cell);
@@ -989,62 +1209,50 @@ function renderTelemetry(summary, dataset, state) {
 
 function renderState(state) {
   const components = state.componentes || {};
-  const count = Object.values(components).filter((status) => status === "ok").length;
-  $("system-status").textContent = `${count} de 5 servicios disponibles`;
-  $("system-status").className = `status ${count === 5 ? "" : "warning"}`;
-  for (const node of document.querySelectorAll("[data-service]")) {
+  const required = ["etl", "mariadb", "endpoints", "front"];
+  const nodes = [...document.querySelectorAll("[data-service]")];
+  const count = nodes.filter((node) => components[node.dataset.service] === "ok").length;
+  $("system-status").textContent = format(count) + " de " + format(nodes.length) + " servicios disponibles";
+  $("system-status").className = "status " + (required.every((name) => components[name] === "ok") ? "" : "warning");
+  for (const node of nodes) {
     const okay = components[node.dataset.service] === "ok";
     const label = node.querySelector(".node-status");
-    label.textContent = okay ? "En funcionamiento" : "Sin respuesta reciente";
-    label.className = `node-status ${okay ? "ok" : "bad"}`;
+    const pending = node.dataset.service === "machine" && !okay;
+    label.textContent = okay ? "En funcionamiento" : pending ? "Pendiente de integración" : "Sin respuesta reciente";
+    label.className = "node-status " + (okay ? "ok" : pending ? "neutral" : "bad");
   }
-  if (state.etl) {
-    const etl = state.etl;
-    $("last-sync").textContent = `Última carga: ${new Date(etl.ultima_carga).toLocaleString("es-CL")}`;
-    $("source-count").textContent = `${format(etl.leidos)} filas leídas · ${etl.rechazados} descartadas`;
-    $("etl-summary").textContent = `Origen: ${etl.origen}. Se normalizan ciudades y números, se validan rangos y se descartan IDs duplicados. ${etl.validos} filas válidas de ${etl.leidos}. Versión: ${etl.dataset_version.slice(0, 12)}.`;
-    $("rejections").replaceChildren();
-    for (const rejected of etl.rechazos) {
-      const item = document.createElement("li"); item.textContent = `Fila ${rejected.fila}: ${rejected.motivo}`;
-      $("rejections").append(item);
-    }
+  const etl = state.etl;
+  if (etl) {
+    $("last-sync").textContent = etl.ultima_carga
+      ? "Última carga: " + formatUtc(etl.ultima_carga)
+      : "ETL aún sin primera carga";
   }
-  if (state.modelo) {
-    const metrics = state.modelo.metricas;
-    $("model-error").textContent = `${format(metrics.mae_horas * 60, 1)} min`;
-    $("model-name").textContent = "Regresión lineal · scikit-learn";
-    $("model-training").textContent = `${metrics.filas_entrenamiento} viajes para entrenar · ${metrics.filas_evaluacion} para evaluar. Modelo final: ${metrics.filas_modelo_final} viajes.`;
-  }
-
 }
 
 async function refresh() {
   if (!token()) return;
   if (refreshing) return;
+  const version = sessionVersion;
   refreshing = true; $("refresh").disabled = true;
   try {
-    const [state, summary, dataset, telemetrySummary, telemetryDataset, mapPayload, dashboard] = await Promise.all([
+    const [state, telemetrySummary, telemetryDataset, mapPayload, dashboard] = await Promise.all([
       api("/api/estado"),
-      api("/api/resumen"),
-      api("/api/viajes?limite=500"),
       api("/api/telemetria/resumen"),
       api("/api/telemetria?limite=30"),
       api("/api/mapa"),
       api("/api/dashboard")
     ]);
+    if (version !== sessionVersion || !token()) return;
     if (!window.ArtisaMapData) throw new Error("No se cargó el adaptador del mapa.");
     const mapData = window.ArtisaMapData.adaptMapPayload(mapPayload);
     renderState(state);
     renderTelemetry(telemetrySummary, telemetryDataset, state);
     renderHeatmap(mapData);
     renderDashboard(mapData, dashboard);
-    $("trip-count").textContent = format(summary.viajes);
-    $("prediction-count").textContent = format(summary.predicciones);
-    $("destination-count").textContent = format(summary.destinos);
-    trips = dataset.viajes; renderTrips();
     $("notice").hidden = state.status === "ok";
     $("notice").textContent = "Una etapa no ha respondido recientemente o está preparando datos nuevos. Los datos mostrados corresponden a la última carga disponible.";
   } catch (error) {
+    if (version !== sessionVersion || !token()) return;
     $("notice").hidden = false;
     $("notice").textContent = "No se pudo actualizar el sistema. Los datos que ya ves pueden estar desactualizados. " + error.message;
     $("system-status").textContent = "Sin conexión con el sistema";
@@ -1052,43 +1260,12 @@ async function refresh() {
     for (const label of document.querySelectorAll(".node-status")) {
       label.textContent = "Estado sin verificar"; label.className = "node-status bad";
     }
-  } finally { refreshing = false; $("refresh").disabled = false; }
+  } finally {
+    if (version === sessionVersion) { refreshing = false; $("refresh").disabled = false; }
+  }
 }
 
-function predictionMessage(title, text, value = null, error = false) {
-  const result = $("prediction-result"); result.replaceChildren();
-  result.className = `prediction-result${error ? " error" : ""}`;
-  const label = document.createElement("span"); label.textContent = title; result.append(label);
-  if (value !== null) {const number = document.createElement("strong"); number.textContent = `${format(value, 2)} horas`; result.append(number);}
-  const paragraph = document.createElement("p"); paragraph.textContent = text; result.append(paragraph);
-}
-
-$("prediction-form").addEventListener("submit", async (event) => {
-  event.preventDefault(); $("predict").disabled = true;
-  predictionMessage("PROCESANDO", "Enviando la solicitud al modelo…");
-  let pendingPath = null;
-  try {
-    const input = {distancia_km: Number($("distance").value), carga_kg: Number($("load").value), paradas: Number($("stops").value)};
-    const request = await api("/api/predicciones", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(input)});
-    pendingPath = request.consulta;
-    const deadline = Date.now() + 25000;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      const result = await api(pendingPath);
-      if (result.estado === "completada") {
-        predictionMessage("DURACIÓN ESTIMADA", `Resultado guardado en MariaDB. Modelo ${result.dataset_version.slice(0, 8)}.`, result.duracion_estimada);
-        return;
-      }
-    }
-    throw new Error("La solicitud sigue pendiente. Puedes consultar su estado en el enlace inferior.");
-  } catch (error) {
-    predictionMessage("NO SE PUDO COMPLETAR", error.message, null, true);
-    if (pendingPath) {const link = document.createElement("a"); link.href = pendingPath; link.textContent = "Consultar solicitud ↗"; link.target = "_blank"; link.rel = "noopener"; $("prediction-result").append(link);}
-  } finally { $("predict").disabled = false; }
-});
 $("refresh").addEventListener("click", refresh);
-$("search").addEventListener("input", renderTrips);
-$("show-all").addEventListener("click", () => {expanded = !expanded; renderTrips();});
 for (const button of document.querySelectorAll("[data-route-filter]")) {
   button.addEventListener("click", () => {
     activeRouteFilter = button.dataset.routeFilter || "ALL";
@@ -1112,7 +1289,20 @@ $("monitor-search").addEventListener("input", () => {
   else renderLiveFleet(currentMapData ? currentMapData.vehicles : []);
 });
 $("reset-map-view").addEventListener("click", resetMapSelection);
-window.addEventListener("hashchange", syncDatasetView);
-syncDatasetView();
-if (token()) refresh();
+// Retirar el almacenamiento de la implementación anterior sin persistir el usuario.
+try {
+  sessionStorage.removeItem("artisa_token");
+  sessionStorage.removeItem("artisa_user");
+} catch { /* Puede estar deshabilitado. */ }
+window.addEventListener("hashchange", restoreSession);
+window.addEventListener("popstate", restoreSession);
+window.addEventListener("pageshow", restoreSession);
+window.addEventListener("pagehide", () => { appShell.hidden = true; landing.hidden = true; });
+window.addEventListener("storage", (event) => {
+  if (event.key === TOKEN_KEY || event.key === null) restoreSession();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) restoreSession();
+});
+restoreSession();
 setInterval(refresh, 300000);

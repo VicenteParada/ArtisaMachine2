@@ -14,6 +14,21 @@ x-python-health: &python-health
   retries: 12
 
 services:
+  mongodb:
+    image: mongo:8.0
+    container_name: artisa-mongodb
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      start_period: 20s
+      retries: 12
+    restart: unless-stopped
+
   mariadb:
     image: mariadb:11.8
     container_name: artisa-mariadb
@@ -41,7 +56,7 @@ services:
     container_name: artisa-etl
     environment:
       <<: *db-environment
-      MONGO_URI: ${MONGO_URI:-mongodb://host.docker.internal:27017}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
       MONGO_DATABASE: ${MONGO_DATABASE:-gps_data}
       MONGO_COLLECTION: ${MONGO_COLLECTION:-raw_gps}
       MONGO_TIMEOUT_SECONDS: ${MONGO_TIMEOUT_SECONDS:-10}
@@ -79,11 +94,18 @@ services:
       context: .
       dockerfile: endpoints/Dockerfile
     container_name: artisa-endpoints
-    environment: *db-environment
+    environment:
+      <<: *db-environment
+      TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
     depends_on:
       mariadb:
         condition: service_healthy
-    healthcheck: *python-health
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
     restart: unless-stopped
     init: true
 
@@ -94,26 +116,29 @@ services:
     container_name: artisa-front
     environment:
       API_URL: http://endpoints:8000
-    ports:
-      - "127.0.0.1:8080:8000"
     depends_on:
       endpoints:
         condition: service_healthy
-    healthcheck: *python-health
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/front-health', timeout=3).read()"]
+      interval: 5s
+      timeout: 5s
+      start_period: 15s
+      retries: 12
     restart: unless-stopped
     init: true
 
-  # auth y nginx: agregados por angelo-dev, todavia no forman parte del
-  # camino en vivo (front sigue siendo la entrada real en 8080). Quedan
-  # disponibles para levantar y probar aparte hasta que se decida integrarlos.
+  # Nginx es la entrada web en localhost:8080: /auth/* va a auth y el resto a front.
   auth:
     build:
       context: .
       dockerfile: auth/Dockerfile
     container_name: artisa-auth
     environment:
-      JWT_SECRET: ${JWT_SECRET:-dev-only-change-this-secret}
-      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
+      JWT_SECRET: ${JWT_SECRET:?Ejecuta python3 scripts/prepare_env.py}
+      AUTH_USERNAME: ${AUTH_USERNAME:?Ejecuta python3 scripts/prepare_env.py}
+      AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:?Ejecuta python3 scripts/prepare_env.py}
+      JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-43200}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3).read()"]
       interval: 5s
@@ -129,7 +154,7 @@ services:
       dockerfile: nginx/Dockerfile
     container_name: artisa-nginx
     ports:
-      - "127.0.0.1:8081:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       auth:
         condition: service_healthy
@@ -146,3 +171,4 @@ services:
 
 volumes:
   mariadb_data:
+  mongodb_data:
