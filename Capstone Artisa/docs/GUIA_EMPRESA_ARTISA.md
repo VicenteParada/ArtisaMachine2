@@ -531,10 +531,10 @@ se conserva como referencia de un contrato anterior y no representa la validaci�
 | Servicio | Acceso |
 |---|---|
 | Plataforma web | `http://localhost:8080` |
-| MongoDB local | `127.0.0.1:27017` |
+| MongoDB interno | `mongodb:27017` dentro de la red Docker |
 | MariaDB local | `127.0.0.1:3306` |
 
-Los demás servicios trabajan dentro de la red Docker y no necesitan exponerse directamente al usuario.
+MongoDB no publica un puerto en el equipo para evitar conflictos con otras instalaciones locales. Los demás servicios trabajan dentro de la red Docker y no necesitan exponerse directamente al usuario.
 
 ---
 
