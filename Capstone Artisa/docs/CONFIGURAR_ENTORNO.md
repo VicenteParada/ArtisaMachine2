@@ -121,7 +121,7 @@ La nueva duración se aplica a los próximos inicios de sesión; los tokens
 ya emitidos conservan su fecha de expiración. Ejecuta `prepare_env.py` o el
 arranque habitual con `scripts/start.py` para añadir el valor predeterminado
 si falta en una instalación existente. Compose conserva su respaldo de
-1 hora si se inicia directamente sin esa variable en la configuración.
+12 horas si se inicia directamente sin esa variable en la configuración.
 
 ## Cambiar contraseña del administrador
 
@@ -178,51 +178,27 @@ cada uno desde sus propios archivos JSON (ver siguiente paso).
 
 ---
 
-## 5. Importar los archivos JSON propios a Mongo
+## 5. Recuperación histórica opcional
 
-Cada compañero ya tiene sus archivos JSON de telemetría en su equipo. Hay que
-cargarlos a la colección `gps_data.raw_gps` del Mongo que acabas de levantar,
-con `mongoimport` (viene incluido en la imagen `mongo:8.0`).
-
-Primero identifica el formato del archivo, abriéndolo con un editor de texto:
-
-- **Si el archivo es un array grande** (empieza con `[` y termina con `]`,
-  con todos los documentos separados por comas adentro):
-
-  ```bash
-  docker cp /ruta/en/tu/pc/datos.json artisa-mongodb:/tmp/datos.json
-  docker exec artisa-mongodb mongoimport \
-    --db gps_data --collection raw_gps \
-    --file /tmp/datos.json --jsonArray
-  ```
-
-- **Si el archivo tiene un documento JSON por línea** (JSON Lines / NDJSON,
-  sin corchetes envolviendo todo):
-
-  ```bash
-  docker cp /ruta/en/tu/pc/datos.json artisa-mongodb:/tmp/datos.json
-  docker exec artisa-mongodb mongoimport \
-    --db gps_data --collection raw_gps \
-    --file /tmp/datos.json
-  ```
-
-Si son varios archivos (por ejemplo uno por día o por vehículo), se repite el
-mismo `mongoimport` para cada uno — `mongoimport` solo agrega documentos, no
-borra los que ya están.
-
-Cada documento debe tener, como mínimo, estos campos para que el ETL lo
-acepte (son los que valida `ETLs/telemetry.py`): `report_id`, `asset_id`,
-`report_date`, `latitude`, `longitude`. Los demás (`asset_name`, `location`,
-`speed`, `cartography_limit_speed`, `event_name`, `driver_name`,
-`driver_last_name`, `driver_document_number`) son opcionales. Si a un
-compañero el ETL le rechaza filas, lo primero es comparar sus nombres de
-campo contra esta lista.
-
-Para confirmar que la carga funcionó:
+El arranque no importa históricos. Para una recuperación autorizada se utiliza
+`scripts/recovery.py`, indicando la carpeta con los 23 archivos
+`reportes_semana_*.json` en formato array JSON:
 
 ```bash
-docker exec artisa-mongodb mongosh --quiet --eval "db.getSiblingDB('gps_data').raw_gps.countDocuments()"
+python3 scripts/recovery.py "/ruta/al/disco/con históricos"
 ```
+
+El script solicita confirmación, comprueba el índice único `report_id` y usa
+upsert para evitar duplicados entre semanas. Guarda el avance en
+`gps_data.recovery_history_state` para reanudar una semana interrumpida.
+Bloquea una carga nueva si ya existen datos sin estado de recuperación.
+No debe ejecutarse durante una simple comprobación del sistema.
+
+El ETL lee `gps_data.raw_gps` de MongoDB y escribe `raw_gps` en MariaDB.
+Sus campos obligatorios incluyen `report_id`, `asset_id`, `report_date`,
+`latitude` y `longitude`; también filtra los vehículos según su nombre.
+Los contadores del ETL reflejan procesamiento, no un conteo de documentos únicos.
+No es necesario realizar un conteo completo para comprobar disponibilidad.
 
 ---
 
@@ -251,20 +227,14 @@ docker compose ps
 
 ---
 
-## 7. Cargar los datos de catálogo en MariaDB
+## 7. Catálogos e integración futura de Machine
 
-El schema (`DB/schema.sql`) se aplica solo al iniciar `etl`. Pero los datos
-de referencia (tipos de vehículo, vehículos clasificados, faenas) están en
-archivos aparte y hay que cargarlos una vez:
-
-```bash
-docker exec -i artisa-mariadb mariadb -u artisa_app -p"$(grep MARIADB_PASSWORD .env | cut -d= -f2)" artisa < DB/datos_vehiculos.sql
-docker exec -i artisa-mariadb mariadb -u artisa_app -p"$(grep MARIADB_PASSWORD .env | cut -d= -f2)" artisa < DB/faenas_data.sql
-```
-
-Ambos son seguros de repetir si algo falla a mitad de camino (aunque
-`faenas_data.sql` está pensado para correr una sola vez sobre una tabla
-vacía — si ves un error de clave duplicada al repetirlo, es esperable).
+El ETL inicializa las tablas definidas en `DB/schema.sql`. El trabajador Machine
+actual consulta también `vehiculos` y `tipos_vehiculo`, que no están definidos en
+ese esquema. Existen en la base persistente actual; su provisión reproducible
+y contrato quedan pendientes de integración Machine. No se
+incluyen comandos de carga para archivos de catálogo ausentes del repositorio.
+No es necesario iniciar Machine para usar el sistema base.
 
 ---
 
@@ -309,11 +279,23 @@ docker compose start mongodb  # volver a iniciar (conserva los datos del volumen
 
 ---
 
-## Nota sobre el README del proyecto
+## Documentación del proyecto
 
-El `README.md` de la raíz describe una versión anterior del proyecto
-(orígen por CSV/API SQL, tablas `telemetria_raw`, modelo de regresión de
-viajes) que ya no coincide con el código actual — hoy el origen real es
-Mongo → `raw_gps`, y el modelo es DBSCAN sobre posiciones geográficas. Esta
-guía documenta el estado actual; conviene actualizar el README más adelante
-para que no confunda a quien se sume al equipo.
+El README describe el arranque y las rutas actuales. Su sección histórica
+conserva referencias del prototipo anterior y no debe usarse como guía operativa.
+
+## Disponibilidad de datos y salud
+
+La telemetría en tiempo real está pendiente de conectar la API de la empresa.
+`/api/telemetria` y su resumen responden `pending` con `source: company_api`,
+sin consultar MariaDB ni mostrar históricos como datos actuales.
+Mapa y dashboard permanecen pendientes del procesamiento Machine.
+
+El sistema base arranca sin Machine ni sus catálogos. `vehiculos` y
+`tipos_vehiculo` siguen como **PENDIENTE DE INTEGRACIÓN MACHINE**; no forman
+parte del esquema versionado y no son dependencias de las rutas del frontend.
+
+La revisión del ETL utiliza `TELEMETRY_INTERVAL_SECONDS` (30 segundos por
+defecto). Endpoints comparte ese valor y calcula un umbral de salud de
+`max(60, intervalo × 3)`: actualmente 90 segundos. La actualización visual
+cada cinco minutos es independiente. La configuración local existente se conserva.

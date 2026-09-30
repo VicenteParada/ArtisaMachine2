@@ -32,7 +32,6 @@ else:
             f"MARIADB_PASSWORD={secrets.token_hex(24)}\n"
             f"MARIADB_ROOT_PASSWORD={secrets.token_hex(24)}\n"
             "JWT_TTL_SECONDS=43200\n"
-            "TELEMETRY_ENABLED=0\n"
             "MONGO_URI=mongodb://mongodb:27017\n"
             "MONGO_DATABASE=gps_data\n"
             "MONGO_COLLECTION=raw_gps\n"

@@ -94,7 +94,9 @@ services:
       context: .
       dockerfile: endpoints/Dockerfile
     container_name: artisa-endpoints
-    environment: *db-environment
+    environment:
+      <<: *db-environment
+      TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
     depends_on:
       mariadb:
         condition: service_healthy

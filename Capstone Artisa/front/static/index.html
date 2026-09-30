@@ -75,13 +75,13 @@
       </div>
     </header>
     <section class="heading">
-      <div><div class="eyebrow">INTELIGENCIA PARA EL TRANSPORTE</div><h1>De los datos a la decisión.</h1><p>Telemetría real desde la API de origen, procesada por el ETL y almacenada en MariaDB.</p></div>
+      <div><div class="eyebrow">INTELIGENCIA PARA EL TRANSPORTE</div><h1>De los datos a la decisión.</h1><p>Sistema base operativo, telemetría pendiente de API empresa y análisis Machine pendiente de integración.</p></div>
       <button class="button secondary" id="refresh" type="button">↻ Actualizar</button>
     </section>
     <div id="notice" class="notice" role="status" hidden></div>
     <section id="flujo" class="panel pipeline">
       <div class="section-top"><div><span class="eyebrow">01 / ARQUITECTURA</span><h2>Todo conectado.</h2></div><span id="system-status" class="status neutral">Consultando servicios…</span></div>
-      <div class="origin"><span>ORIGEN EXTERNO</span><strong>API SQL de telemetría</strong><span>→</span><small>Lotes controlados e idempotentes</small></div>
+      <div class="origin"><span>ORIGEN GPS</span><strong>MongoDB · raw_gps</strong><span>→</span><small>Lotes controlados e idempotentes</small></div>
       <div class="flow">
         <article class="node etl" data-service="etl"><span class="node-number">01</span><h3>ETL</h3><p>Extrae, limpia y carga</p><span class="node-status">Consultando…</span></article>
         <div class="flow-arrow arrow-a" aria-hidden="true">→</div>
@@ -94,11 +94,11 @@
         <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Identifica zonas GPS</p><span class="node-status">Consultando…</span></article>
         <div class="flow-explanation"><strong>Servicios conectados.</strong><p>El ETL carga la telemetría en MariaDB. El modelo analiza zonas GPS y los endpoints entregan los resultados a esta pantalla.</p></div>
       </div>
-      <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada 15 s</span></div>
+      <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada 5 min</span></div>
     </section>
     <nav class="dataset-tabs" aria-label="Espacios de análisis">
       <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores y gráficos operativos</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="real" href="#datos-reales"><span class="dataset-icon">⌖</span><span><strong>Datos reales</strong><small>API de origen → ETL → MariaDB</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="real" href="#datos-reales"><span class="dataset-icon">⌖</span><span><strong>Datos reales</strong><small>Pendiente de API empresa</small></span></a>
       <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de rutas</strong><small>Rutas históricas y camiones</small></span></a>
     </nav>
     <div id="dashboard" class="dataset-space" data-dataset-view="dashboard" hidden>
@@ -161,27 +161,32 @@
       </section>
     </div>    <div id="datos-reales" class="dataset-space" data-dataset-view="real">
       <section id="telemetria" class="panel telemetry-panel">
-        <div class="section-top"><div><span class="eyebrow">02 / DATOS REALES</span><h2>Telemetría importada</h2></div><span id="telemetry-status" class="status neutral">Consultando ETL…</span></div>
-        <p class="telemetry-intro">Muestra de los reportes extraídos desde la API de origen y guardados en MariaDB. Los nombres y documentos de conductores no se publican en esta vista.</p>
+        <div class="section-top"><div><span class="eyebrow">02 / DATOS REALES</span><h2>Telemetría de la empresa</h2></div><span id="telemetry-status" class="status neutral">Pendiente de API empresa</span></div>
+        <div id="telemetry-pending" role="status">
+          <h3>Telemetría pendiente de integración</h3>
+          <p class="telemetry-intro">Esta sección quedará disponible cuando se conecte la API de telemetría de la empresa.</p>
+        </div>
+        <div id="telemetry-content" hidden>
         <div class="real-metrics" aria-label="Resumen de telemetría real">
-          <article><span>Reportes guardados</span><strong id="telemetry-count">—</strong><small>Límite inicial: 5.000 lecturas</small></article>
+          <article><span>Reportes guardados</span><strong id="telemetry-count">—</strong><small>Muestra: últimos 30 reportes</small></article>
           <article><span>Vehículos observados</span><strong id="vehicle-count">—</strong><small>Identificados por asset_id</small></article>
         </div>
         <div class="telemetry-range"><span id="telemetry-range">Esperando rango temporal…</span><span id="telemetry-quality">Esperando control de calidad…</span></div>
         <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha UTC</th><th>Evento</th><th>Coordenadas</th><th>Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
+        </div>
       </section>
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
       <section class="panel heatmap-panel">
-        <div class="section-top"><div><span class="eyebrow">03 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas históricas</h2></div><span id="heatmap-source-status" class="status info">Muestra reciente</span></div>
+        <div class="section-top"><div><span class="eyebrow">03 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas históricas</h2></div><span id="heatmap-source-status" class="status info">Pendiente de procesamiento Machine</span></div>
         <p id="heatmap-intro" class="telemetry-intro">Consultando la fuente del mapa y su cobertura histórica…</p>
         <div class="route-filter-panel">
           <span>Mostrar rutas</span>
           <div class="route-filter-actions" role="group" aria-label="Filtrar rutas por nivel de uso">
-            <button type="button" class="route-filter is-active" data-route-filter="ALL" aria-pressed="true">Todas <b data-route-count="ALL">0</b></button>
-            <button type="button" class="route-filter" data-route-filter="HIGH" aria-pressed="false">Más usadas <b data-route-count="HIGH">0</b></button>
-            <button type="button" class="route-filter" data-route-filter="MEDIUM" aria-pressed="false">Uso medio <b data-route-count="MEDIUM">0</b></button>
-            <button type="button" class="route-filter" data-route-filter="LOW" aria-pressed="false">Poco usadas <b data-route-count="LOW">0</b></button>
+            <button type="button" class="route-filter is-active" data-route-filter="ALL" aria-pressed="true">Todas <b data-route-count="ALL">—</b></button>
+            <button type="button" class="route-filter" data-route-filter="HIGH" aria-pressed="false">Más usadas <b data-route-count="HIGH">—</b></button>
+            <button type="button" class="route-filter" data-route-filter="MEDIUM" aria-pressed="false">Uso medio <b data-route-count="MEDIUM">—</b></button>
+            <button type="button" class="route-filter" data-route-filter="LOW" aria-pressed="false">Poco usadas <b data-route-count="LOW">—</b></button>
           </div>
         </div>
         <div class="map-layer-panel">
@@ -205,8 +210,8 @@
           <aside class="route-insights" aria-label="Explorador de rutas y vehículos">
             <article class="monitor-panel">
               <div class="monitor-tabs" role="tablist" aria-label="Elementos del mapa">
-                <button type="button" class="monitor-tab is-active" data-monitor-tab="routes" role="tab" aria-selected="true">Rutas <b id="monitor-route-count">0</b></button>
-                <button type="button" class="monitor-tab" data-monitor-tab="vehicles" role="tab" aria-selected="false">Vehículos <b id="vehicle-live-count">0</b></button>
+                <button type="button" class="monitor-tab is-active" data-monitor-tab="routes" role="tab" aria-selected="true">Rutas <b id="monitor-route-count">—</b></button>
+                <button type="button" class="monitor-tab" data-monitor-tab="vehicles" role="tab" aria-selected="false">Vehículos <b id="vehicle-live-count">—</b></button>
               </div>
               <label class="monitor-search"><span>⌕</span><input id="monitor-search" type="search" placeholder="Buscar ruta…" aria-label="Buscar rutas o vehículos"></label>
               <ul id="route-monitor-list" class="monitor-list" data-monitor-list="routes"><li>Esperando rutas…</li></ul>

@@ -1,6 +1,7 @@
 """Endpoints leen MariaDB; Machine procesa las solicitudes por separado."""
 
 import json
+import os
 import socket
 import time
 from urllib.parse import urlsplit
@@ -12,6 +13,36 @@ from common.http import JsonHandler, serve
 
 
 STARTED_AT = time.monotonic()
+ETL_STALE_SECONDS = max(60, int(os.getenv("TELEMETRY_INTERVAL_SECONDS", "30")) * 3)
+
+
+PENDING_RESPONSES = {
+    "/api/telemetria": {"status": "pending", "source": "company_api", "reportes": []},
+    "/api/mapa": {
+        "schema_version": 1, "source_mode": "PENDING_MACHINE", "snapshot_date": None,
+        "routes": [], "trips": [], "vehicles": [], "readings": [],
+        "summary": {key: None for key in (
+            "trip_count", "vehicle_count", "route_count", "window_report_count",
+            "reading_count", "available_report_count")},
+        "ranking": {"most_used": None, "least_used": None},
+        "metadata": {
+            "status": "pending",
+            "classification": "Pendiente de procesamiento Machine.",
+            "geometry": "Pendiente de procesamiento Machine.",
+            "road_matching": "Pendiente de procesamiento Machine.",
+            "data_retention": "Sin resultados Machine disponibles.",
+        },
+    },
+    "/api/dashboard": {
+        "status": "pending", "calidad": {"validos": None},
+        "operacion": {"viajes": None},
+        "rutas": {"HIGH": None, "MEDIUM": None, "LOW": None},
+    },
+    "/api/telemetria/resumen": {
+        "status": "pending", "source": "company_api", "reportes": None, "vehiculos": None,
+        "desde": None, "hasta": None,
+    },
+}
 
 
 def pipeline_state(cursor, detailed=True):
@@ -33,7 +64,7 @@ def pipeline_state(cursor, detailed=True):
             raise
         model = None
     etl_ready = bool(etl and etl["estado"] != "error"
-                     and etl["hace_segundos"] is not None and 0 <= etl["hace_segundos"] < 90)
+                     and etl["hace_segundos"] is not None and 0 <= etl["hace_segundos"] < ETL_STALE_SECONDS)
     model_ready = bool(model and model["hace_segundos"] is not None
                        and 0 <= model["hace_segundos"] < 90)
     state = {
@@ -80,7 +111,10 @@ class Handler(JsonHandler):
         if path == "/":
             self.respond(200, {"servicio": "artisa-api", "contenedor": socket.gethostname(),
                                "mensaje": "Endpoints Artisa",
-                               "rutas": ["/health", "/api/estado", "/api/faenas", "/api/modelo/telemetria"]})
+                               "rutas": ["/health", "/api/estado", "/api/faenas", "/api/modelo/telemetria", *PENDING_RESPONSES]})
+            return
+        if path in PENDING_RESPONSES:
+            self.respond(200, PENDING_RESPONSES[path])
             return
         if path not in ("/health", "/api/estado", "/api/faenas", "/api/modelo/telemetria"):
             self.respond(404, {"error": "Ruta no encontrada"})

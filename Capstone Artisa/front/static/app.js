@@ -352,26 +352,18 @@ function vehicleDriver(vehicle) {
   const structured = [vehicle.driver_name, vehicle.driver_last_name]
     .map((part) => String(part || "").trim()).filter(Boolean).join(" ");
   if (structured) return structured;
-  // Algunos nombres incluyen una referencia al conductor, pero no es un dato verificado.
-  const match = String(vehicle.vehicle_name || "").match(
-    /^\d+-Camioneta-([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)([A-ZÁÉÍÓÚÑ][a-záéíóúñ]*)$/u
-  );
-  if (match) {
-    const surname = match[2].length === 1 ? match[2] + "." : match[2];
-    return `${match[1]} ${surname} (según nombre del vehículo)`;
-  }
   return "No informado";
 }
 
 function vehiclePlate(vehicle) {
   const explicit = String(vehicle.patente || vehicle.plate || vehicle.license_plate || "").trim();
   if (explicit) return explicit;
-  const id = String(vehicle.vehicle_id || "").trim().toUpperCase();
-  return /^(?:[A-Z]{4}\d{2}|[A-Z]{2}\d{4})$/.test(id) ? id : null;
+  return null;
 }
 
 function vehicleStatus(vehicle) {
-  const timestamp = new Date(vehicle.timestamp).getTime();
+  const timestamp = vehicle.timestamp ? new Date(vehicle.timestamp).getTime() : NaN;
+  if (!Number.isFinite(timestamp)) return {label: "Estado no disponible", className: "off"};
   const stale = Number.isFinite(timestamp) && Date.now() - timestamp > 30 * 60 * 1000;
   if (stale) return {label: "Sin señal reciente", className: "off"};
   const speed = Number(vehicle.speed_kmh || 0);
@@ -514,10 +506,13 @@ function fitPendingMap(force = false) {
 
 function truckIcon(vehicle) {
   const status = vehicleStatus(vehicle);
-  const heading = Number.isFinite(Number(vehicle.heading)) ? Number(vehicle.heading) : 0;
+  const hasHeading = vehicle.heading !== null && vehicle.heading !== undefined &&
+    vehicle.heading !== "" && Number.isFinite(Number(vehicle.heading));
+  const arrow = hasHeading
+    ? "<span class='truck-heading' style='transform:rotate(" + Number(vehicle.heading) + "deg)'>▲</span>"
+    : "";
   const html = "<span class='truck-marker " + status.className +
-    "'><span class='truck-heading' style='transform:rotate(" + heading +
-    "deg)'>▲</span><span class='truck-glyph'>🚚</span></span>";
+    "'>" + arrow + "<span class='truck-glyph'>🚚</span></span>";
   return L.divIcon({
     className: "truck-div-icon",
     html,
@@ -632,6 +627,11 @@ function hideJourney() {
 }
 
 async function showVehicleJourney(vehicle) {
+  if (!currentMapData || machinePending(currentMapData)) {
+    $("journey-detail").hidden = false;
+    $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
+    return;
+  }
   if (!journeyLayer) return;
   const request = ++journeyRequest;
   activeJourneyVehicleId = vehicle.vehicle_id;
@@ -826,7 +826,52 @@ function renderFleetMap(data) {
   if ($("heatmap-map").offsetParent !== null) requestAnimationFrame(() => fitPendingMap(false));
 }
 
+function machinePending(data) {
+  return data.status === "pending" || data.sourceMode === "PENDING_MACHINE" || data.metadata?.status === "pending";
+}
+
+function pendingText(ids, message = "Pendiente de procesamiento") {
+  for (const id of ids) $(id).textContent = message;
+}
+
 function renderHeatmap(data) {
+  const pending = machinePending(data);
+  for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer], [data-monitor-tab], #monitor-search, #reset-map-view")) {
+    control.disabled = pending;
+  }
+  if (pending) {
+    currentMapData = data;
+    journeyRequest++;
+    activeJourneyVehicleId = null;
+    selectedVehicleId = null;
+    selectedRouteId = null;
+    if (fleetMap) { fleetMap.remove(); fleetMap = null; }
+    journeyLayer = null;
+    truckLayer = null;
+    truckMarkers.clear();
+    routeMapLayers.clear();
+    pendingMapBounds = null;
+    mapHasFitted = false;
+    pendingText(["heatmap-trips", "heatmap-vehicles", "heatmap-routes",
+      "most-route", "least-route", "geo-model-zones", "heatmap-source-status"]);
+    pendingText(["heatmap-intro", "heatmap-zones", "map-last-update", "most-route-usage",
+      "least-route-usage", "geo-model-detail", "heatmap-method", "map-selection-detail"],
+      "Disponible cuando Machine genere resultados");
+    pendingText(["monitor-route-count", "vehicle-live-count"], "—");
+    for (const counter of document.querySelectorAll("[data-route-count]")) counter.textContent = "—";
+    for (const id of ["route-monitor-list", "vehicle-live-list"]) {
+      const item = document.createElement("li");
+      item.textContent = "Pendiente de procesamiento Machine.";
+      $(id).replaceChildren(item);
+    }
+    const message = document.createElement("span");
+    message.className = "map-loading";
+    message.textContent = "Disponible cuando Machine genere resultados";
+    $("heatmap-map").replaceChildren(message);
+    $("journey-detail").hidden = true;
+    $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
+    return;
+  }
   const summary = data.summary;
   $("heatmap-trips").textContent = format(summary.trip_count || 0);
   $("heatmap-vehicles").textContent = format(summary.vehicle_count || 0);
@@ -989,6 +1034,20 @@ function renderDashboardDonut(containerId, items, centerLabel) {
 }
 
 function renderDashboard(data, metrics = {}) {
+  if (metrics.status === "pending" || machinePending(data)) {
+    pendingText(["dashboard-reports", "dashboard-trips", "dashboard-routes",
+      "dashboard-snapshot", "dashboard-most-route-zone"]);
+    pendingText(["dashboard-most-route-zone-detail", "dashboard-method"],
+      "Disponible cuando Machine genere resultados");
+    for (const id of ["dashboard-route-zones", "dashboard-route-levels",
+      "dashboard-fleet-status", "dashboard-top-routes"]) {
+      const message = document.createElement("span");
+      message.className = "chart-empty";
+      message.textContent = "Pendiente de procesamiento Machine.";
+      $(id).replaceChildren(message);
+    }
+    return;
+  }
   const summary = data.summary || {};
   const operation = metrics.operacion || {};
   const quality = metrics.calidad || {};
@@ -1066,11 +1125,26 @@ function renderDashboard(data, metrics = {}) {
     "Cada ruta conserva una sola clasificación y se cuenta en la zona de su centro geométrico. Actualización automática con el mismo bloque del mapa.";
 }
 function renderTelemetry(summary, dataset, state) {
+  const pending = dataset.status === "pending" && dataset.source === "company_api";
+  $("telemetry-pending").hidden = !pending;
+  $("telemetry-content").hidden = pending;
+  if (pending) {
+    $("telemetry-status").textContent = "Pendiente de API empresa";
+    $("telemetry-status").className = "status neutral";
+    $("telemetry-rows").replaceChildren();
+    $("telemetry-count").textContent = "—";
+    $("vehicle-count").textContent = "—";
+    $("telemetry-range").textContent = "";
+    $("telemetry-quality").textContent = "";
+    return;
+  }
   const reports = dataset.reportes || [];
-  const telemetryState = state.telemetria || {};
-  $("telemetry-count").textContent = format(summary.reportes);
-  $("vehicle-count").textContent = format(summary.vehiculos);
-  $("telemetry-range").textContent = summary.reportes
+  const telemetryState = state.telemetria || state.etl || {};
+  $("telemetry-count").textContent = summary.status === "pending" ? "Pendiente de procesamiento" : format(summary.reportes);
+  $("vehicle-count").textContent = summary.status === "pending" ? "Pendiente de procesamiento" : format(summary.vehiculos);
+  $("telemetry-range").textContent = summary.status === "pending"
+    ? "Resumen pendiente de procesamiento; la tabla muestra reportes GPS reales."
+    : summary.reportes
     ? `Desde ${formatUtc(summary.desde)} hasta ${formatUtc(summary.hasta)}`
     : "Todavía no hay reportes importados.";
 
@@ -1136,10 +1210,11 @@ function renderTelemetry(summary, dataset, state) {
 function renderState(state) {
   const components = state.componentes || {};
   const required = ["etl", "mariadb", "endpoints", "front"];
-  const count = required.filter((name) => components[name] === "ok").length;
-  $("system-status").textContent = format(count) + " de 4 servicios base disponibles";
-  $("system-status").className = "status " + (count === required.length ? "" : "warning");
-  for (const node of document.querySelectorAll("[data-service]")) {
+  const nodes = [...document.querySelectorAll("[data-service]")];
+  const count = nodes.filter((node) => components[node.dataset.service] === "ok").length;
+  $("system-status").textContent = format(count) + " de " + format(nodes.length) + " servicios disponibles";
+  $("system-status").className = "status " + (required.every((name) => components[name] === "ok") ? "" : "warning");
+  for (const node of nodes) {
     const okay = components[node.dataset.service] === "ok";
     const label = node.querySelector(".node-status");
     const pending = node.dataset.service === "machine" && !okay;
