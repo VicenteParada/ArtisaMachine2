@@ -4,7 +4,8 @@ import json
 import os
 import socket
 import time
-from urllib.parse import urlsplit
+from datetime import date, datetime, timedelta
+from urllib.parse import parse_qs, urlsplit
 
 import pymysql
 
@@ -78,6 +79,47 @@ def pipeline_state(cursor, detailed=True):
     return state
 
 
+GPS_MAX_DIAS = 14
+
+
+def gps_range(query):
+    """Lee desde/hasta (YYYY-MM-DD, ambos incluidos). Devuelve (desde, hasta, None) o (None, None, error)."""
+    params = parse_qs(query)
+    try:
+        desde = date.fromisoformat(params["desde"][0])
+        hasta = date.fromisoformat(params["hasta"][0])
+    except (KeyError, ValueError):
+        return None, None, "Usa ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD"
+    dias = (hasta - desde).days + 1
+    if dias < 1:
+        return None, None, "hasta tiene que ser igual o posterior a desde"
+    if dias > GPS_MAX_DIAS:
+        return None, None, f"El rango es de {dias} dias; el maximo es {GPS_MAX_DIAS}"
+    return desde, hasta, None
+
+
+def gps_points(cursor, desde, hasta):
+    """Todos los reportes GPS del rango, en columnas compactas para el mapa del navegador.
+    t = segundos desde 'desde' 00:00 (hora tal cual viene en report_date); lat/lon x 1e5."""
+    # DISTINCT quita las filas que la ETL repite, igual que en telemetria_colab.ipynb
+    cursor.execute(
+        """SELECT DISTINCT asset_id, report_date, latitude, longitude
+           FROM raw_gps
+           WHERE report_date >= %s AND report_date < %s
+           ORDER BY asset_id, report_date""",
+        (desde, hasta + timedelta(days=1)),
+    )
+    inicio = datetime(desde.year, desde.month, desde.day)
+    indices, cam, t, lat, lon = {}, [], [], [], []
+    for row in cursor.fetchall():
+        cam.append(indices.setdefault(row["asset_id"], len(indices)))
+        t.append(round((row["report_date"] - inicio).total_seconds()))
+        lat.append(round(row["latitude"] * 1e5))
+        lon.append(round(row["longitude"] * 1e5))
+    return {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "camiones": list(indices),
+            "cam": cam, "t": t, "lat": lat, "lon": lon}
+
+
 class Handler(JsonHandler):
     def database_error(self, error):
         self.log_error("Error de MariaDB: %s", type(error).__name__)
@@ -97,14 +139,20 @@ class Handler(JsonHandler):
         if path == "/":
             self.respond(200, {"servicio": "artisa-api", "contenedor": socket.gethostname(),
                                "mensaje": "Endpoints Artisa",
-                               "rutas": ["/health", "/api/estado", "/api/faenas", *PENDING_RESPONSES]})
+                               "rutas": ["/health", "/api/estado", "/api/faenas",
+                                         "/api/gps?desde=YYYY-MM-DD&hasta=YYYY-MM-DD", *PENDING_RESPONSES]})
             return
         if path in PENDING_RESPONSES:
             self.respond(200, PENDING_RESPONSES[path])
             return
-        if path not in ("/health", "/api/estado", "/api/faenas"):
+        if path not in ("/health", "/api/estado", "/api/faenas", "/api/gps"):
             self.respond(404, {"error": "Ruta no encontrada"})
             return
+        if path == "/api/gps":
+            desde, hasta, error = gps_range(parsed.query)
+            if error:
+                self.respond(400, {"error": error})
+                return
         try:
             with connect_db(autocommit=False) as connection, connection.cursor() as cursor:
                 if path in ("/health", "/api/estado"):
@@ -122,6 +170,8 @@ class Handler(JsonHandler):
                         for row in cursor.fetchall()
                     ]
                     self.respond(200, {"faenas": faenas})
+                elif path == "/api/gps":
+                    self.respond(200, gps_points(cursor, desde, hasta))
         except pymysql.MySQLError as error:
             if path == "/health":
                 self.log_error("Error de MariaDB: %s", type(error).__name__)

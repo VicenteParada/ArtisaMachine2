@@ -34,8 +34,13 @@ No guardes contraseñas, hashes reales ni secretos JWT en Git.
 - `endpoints/` y `common/`: API independiente y utilidades HTTP/MariaDB.
 - `front/`: interfaz y proxy interno hacia endpoints.
 - `auth/` y `nginx/`: autenticación JWT y entrada pública protegida.
-- `modelo_machine/`: trabajador DBSCAN pendiente de integración; sus zonas no
-  equivalen a rutas, viajes ni clasificaciones de uso.
+- `machine_learning/`: trabajador DBSCAN pendiente de integración; sus zonas no
+  equivalen a rutas, viajes ni clasificaciones de uso. También guarda los
+  entregables del modelo (`generar_mapa.py`, `mapa_operativo.html`,
+  `pipeline_machine_learning.html`); el Docker solo usa los `.py`.
+- `guias_ml/`: notebook de experimentación (`telemetria_colab.ipynb`) y
+  `mapas_telemetria.html`, que lleva sus mapas al navegador con `/api/gps`.
+  No forma parte del sistema en producción.
 - `scripts/`: arranque, configuración y comprobaciones; recuperación histórica
   explícita y separada del inicio normal.
 

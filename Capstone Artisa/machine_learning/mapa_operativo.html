@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css"/>
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css"/>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css"/>
+    
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #map_f6b8c922ef502ac00b03fbf22b7a8f39 {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            </style>
+
+            <style>html, body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            </style>
+
+            <style>#map {
+                position:absolute;
+                top:0;
+                bottom:0;
+                right:0;
+                left:0;
+                }
+            </style>
+
+            <script>
+                L_NO_TOUCH = false;
+                L_DISABLE_3D = false;
+            </script>
+
+        
+</head>
+<body>
+    
+    
+            <div class="folium-map" id="map_f6b8c922ef502ac00b03fbf22b7a8f39" ></div>
+        
+</body>
+<script>
+    
+    
+            var map_f6b8c922ef502ac00b03fbf22b7a8f39 = L.map(
+                "map_f6b8c922ef502ac00b03fbf22b7a8f39",
+                {
+                    center: [-30.273684865438657, -70.23909978223305],
+                    crs: L.CRS.EPSG3857,
+                    ...{
+  "zoom": 9,
+  "zoomControl": true,
+  "preferCanvas": false,
+}
+
+                }
+            );
+
+            
+
+        
+    
+            var tile_layer_19cd531b46201f034165c606e43dbf05 = L.tileLayer(
+                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+                {
+  "minZoom": 0,
+  "maxZoom": 18,
+  "maxNativeZoom": 18,
+  "noWrap": false,
+  "attribution": "Esri",
+  "subdomains": "abc",
+  "detectRetina": false,
+  "tms": false,
+  "opacity": 1,
+}
+
+            );
+        
+    
+            tile_layer_19cd531b46201f034165c606e43dbf05.addTo(map_f6b8c922ef502ac00b03fbf22b7a8f39);
+        
+    
+            var polygon_e44ee1fb356fcbf440606406e2c098ab = L.polygon(
+                [[-22.441954770306968, -68.89474846962923], [-22.441766975638192, -68.89383395379893], [-22.441737841956552, -68.89365436323872], [-22.442739386854523, -68.89380042618596], [-22.442764177478175, -68.89335310911063], [-22.444380516574352, -68.89352806452683], [-22.44421194221099, -68.89471604823248], [-22.441954770306968, -68.89474846962923]],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 1.0, "smoothFactor": 1.0, "stroke": true, "weight": 2}
+            ).addTo(map_f6b8c922ef502ac00b03fbf22b7a8f39);
+        
+    
+        var popup_fa49ec263f829d84280ec2787f676f67 = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_6b8225b625d3c9ed085098dd0284ebab = $(`<div id="html_6b8225b625d3c9ed085098dd0284ebab" style="width: 100.0%; height: 100.0%;">Faena Calama<br>area: 68363 m2</div>`)[0];
+                popup_fa49ec263f829d84280ec2787f676f67.setContent(html_6b8225b625d3c9ed085098dd0284ebab);
+            
+        
+
+        polygon_e44ee1fb356fcbf440606406e2c098ab.bindPopup(popup_fa49ec263f829d84280ec2787f676f67)
+        ;
+
+        
+    
+    
+            var marker_9806fef8d8c4afa6590c50bba7a9f6ec = L.marker(
+                [-22.44268879766584, -68.89404786304401],
+                {
+}
+            ).addTo(map_f6b8c922ef502ac00b03fbf22b7a8f39);
+        
+    
+            var icon_409265be4017829b4baf82d65d3e7c79 = L.AwesomeMarkers.icon(
+                {
+  "markerColor": "green",
+  "iconColor": "white",
+  "icon": "industry",
+  "prefix": "fa",
+  "extraClasses": "fa-rotate-0",
+}
+            );
+        
+    
+        var popup_60f23bc9ddff291e1ea98fbc22f5089a = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_ea0819ddea5f10e3d56561e5bf6de6b5 = $(`<div id="html_ea0819ddea5f10e3d56561e5bf6de6b5" style="width: 100.0%; height: 100.0%;">Faena Calama<br>area: 68363 m2</div>`)[0];
+                popup_60f23bc9ddff291e1ea98fbc22f5089a.setContent(html_ea0819ddea5f10e3d56561e5bf6de6b5);
+            
+        
+
+        marker_9806fef8d8c4afa6590c50bba7a9f6ec.bindPopup(popup_60f23bc9ddff291e1ea98fbc22f5089a)
+        ;
+
+        
+    
+    
+            marker_9806fef8d8c4afa6590c50bba7a9f6ec.bindTooltip(
+                `<div>
+                     Faena Calama
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+                marker_9806fef8d8c4afa6590c50bba7a9f6ec.setIcon(icon_409265be4017829b4baf82d65d3e7c79);
+            
+    
+            var polygon_4ccc85fd1c63558927bb888db5bae75a = L.polygon(
+                [[-33.2541615855302, -70.75476590673749], [-33.25348420069678, -70.75316731016427], [-33.25297070847654, -70.75167263314592], [-33.25318295379828, -70.751540869628], [-33.25348043283335, -70.751387648438], [-33.25406192992624, -70.75110802814808], [-33.25492940200316, -70.75071709618402], [-33.258028567701444, -70.74937129781063], [-33.25829547098577, -70.74926400945048], [-33.25847377986878, -70.74918086097118], [-33.25866778849158, -70.7490628437745], [-33.259096175947484, -70.74889922902399], [-33.25917019032127, -70.7491164879544], [-33.259277847480185, -70.74951881930643], [-33.259374290239165, -70.7498594598517], [-33.25949540425091, -70.75027252003994], [-33.25960754670468, -70.75059706733073], [-33.260827489913986, -70.75469080488429], [-33.25954010386472, -70.7553077129578], [-33.2550632618296, -70.75724426786714], [-33.2541615855302, -70.75476590673749]],
+                {"bubblingMouseEvents": true, "color": "green", "dashArray": null, "dashOffset": null, "fill": true, "fillColor": "green", "fillOpacity": 0.2, "fillRule": "evenodd", "lineCap": "round", "lineJoin": "round", "noClip": false, "opacity": 1.0, "smoothFactor": 1.0, "stroke": true, "weight": 2}
+            ).addTo(map_f6b8c922ef502ac00b03fbf22b7a8f39);
+        
+    
+        var popup_f8e9b08d1009fce2815a2900dea07978 = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_9b8495a9380aaca32bae2ecc54694f4a = $(`<div id="html_9b8495a9380aaca32bae2ecc54694f4a" style="width: 100.0%; height: 100.0%;">Faena Lampa Artisa<br>area: 11107 m2</div>`)[0];
+                popup_f8e9b08d1009fce2815a2900dea07978.setContent(html_9b8495a9380aaca32bae2ecc54694f4a);
+            
+        
+
+        polygon_4ccc85fd1c63558927bb888db5bae75a.bindPopup(popup_f8e9b08d1009fce2815a2900dea07978)
+        ;
+
+        
+    
+    
+            var marker_3634d0c5327b5b2c2d3a8593cbb460c4 = L.marker(
+                [-33.25692146268544, -70.7515005133527],
+                {
+}
+            ).addTo(map_f6b8c922ef502ac00b03fbf22b7a8f39);
+        
+    
+            var icon_d72a629c85825b6e5869ed152476b17c = L.AwesomeMarkers.icon(
+                {
+  "markerColor": "green",
+  "iconColor": "white",
+  "icon": "industry",
+  "prefix": "fa",
+  "extraClasses": "fa-rotate-0",
+}
+            );
+        
+    
+        var popup_fd7220db22d7a9d2aff16a47bc576632 = L.popup({
+  "maxWidth": "100%",
+});
+
+        
+            
+                var html_b0747568e9d01e0c0f7a80f28508e88e = $(`<div id="html_b0747568e9d01e0c0f7a80f28508e88e" style="width: 100.0%; height: 100.0%;">Faena Lampa Artisa<br>area: 11107 m2</div>`)[0];
+                popup_fd7220db22d7a9d2aff16a47bc576632.setContent(html_b0747568e9d01e0c0f7a80f28508e88e);
+            
+        
+
+        marker_3634d0c5327b5b2c2d3a8593cbb460c4.bindPopup(popup_fd7220db22d7a9d2aff16a47bc576632)
+        ;
+
+        
+    
+    
+            marker_3634d0c5327b5b2c2d3a8593cbb460c4.bindTooltip(
+                `<div>
+                     Faena Lampa Artisa
+                 </div>`,
+                {
+  "sticky": true,
+}
+            );
+        
+    
+                marker_3634d0c5327b5b2c2d3a8593cbb460c4.setIcon(icon_d72a629c85825b6e5869ed152476b17c);
+            
+</script>
+</html>

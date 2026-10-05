@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 try:
-    from modelo_machine.telemetry import cycle, train_hotspots
+    from machine_learning.telemetry import cycle, train_hotspots
 except ModuleNotFoundError as error:
     if error.name not in {"numpy", "sklearn"}:
         raise
@@ -20,8 +20,8 @@ class TelemetryModelTests(unittest.TestCase):
         cursor.fetchall.return_value = rows
         metrics = {"zonas_detectadas": 1, "reportes_entrenamiento": 1, "cobertura_pct": 100}
 
-        with patch("modelo_machine.telemetry.connect_db", return_value=connection), patch(
-            "modelo_machine.telemetry.train_hotspots", return_value=(metrics, [])
+        with patch("machine_learning.telemetry.connect_db", return_value=connection), patch(
+            "machine_learning.telemetry.train_hotspots", return_value=(metrics, [])
         ) as train, patch("builtins.print"):
             version = cycle("old-version", radius_km=0.5, min_samples=3, max_rows=42)
 
