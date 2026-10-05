@@ -101,17 +101,25 @@ def gps_range(query):
 def gps_points(cursor, desde, hasta):
     """Todos los reportes GPS del rango, en columnas compactas para el mapa del navegador.
     t = segundos desde 'desde' 00:00 (hora tal cual viene en report_date); lat/lon x 1e5."""
-    # DISTINCT quita las filas que la ETL repite, igual que en telemetria_colab.ipynb
+    # Leer por el índice de fecha evita ordenar millones de filas en MariaDB.
+    # La misma deduplicación y el orden por camión/hora se completan en memoria.
     cursor.execute(
-        """SELECT DISTINCT asset_id, report_date, latitude, longitude
+        """SELECT asset_id, report_date, latitude, longitude
            FROM raw_gps
            WHERE report_date >= %s AND report_date < %s
-           ORDER BY asset_id, report_date""",
+           ORDER BY report_date""",
         (desde, hasta + timedelta(days=1)),
     )
     inicio = datetime(desde.year, desde.month, desde.day)
     indices, cam, t, lat, lon = {}, [], [], [], []
-    for row in cursor.fetchall():
+    rows = cursor.fetchall()
+    rows.sort(key=lambda row: (row["asset_id"], row["report_date"]))
+    seen = set()
+    for row in rows:
+        key = (row["asset_id"], row["report_date"], row["latitude"], row["longitude"])
+        if key in seen:
+            continue
+        seen.add(key)
         cam.append(indices.setdefault(row["asset_id"], len(indices)))
         t.append(round((row["report_date"] - inicio).total_seconds()))
         lat.append(round(row["latitude"] * 1e5))

@@ -68,6 +68,14 @@ function clearPassword() {
 
 function logout(message = "") {
   clearSessionWork();
+  for (const wrapper of document.querySelectorAll(".explorer-frame-wrap")) {
+    wrapper.hidden = true;
+    const frame = wrapper.querySelector("iframe");
+    if (frame) frame.removeAttribute("src");
+  }
+  const dashboardPreview = $("dashboard-route-heatmap");
+  if (dashboardPreview) dashboardPreview.hidden = false;
+  for (const button of document.querySelectorAll("[data-explorer-open]")) button.hidden = false;
   activeToken = null;
   try { localStorage.removeItem(TOKEN_KEY); } catch { /* Almacenamiento no disponible. */ }
   clearPassword();
@@ -151,6 +159,23 @@ $("toggle-password").addEventListener("click", () => {
 
 $("logout").addEventListener("click", () => logout());
 
+function openExplorer(which) {
+  if (!token()) return;
+  const button = document.querySelector(`[data-explorer-open="${which}"]`);
+  const wrapper = button && $(button.getAttribute("aria-controls"));
+  const frame = wrapper?.querySelector("iframe[data-explorer-frame]");
+  if (!frame) return;
+  if (!frame.hasAttribute("src")) frame.src = frame.dataset.explorerFrame;
+  wrapper.hidden = false;
+  button.hidden = true;
+  if (which === "dashboard") $("dashboard-route-heatmap").hidden = true;
+  frame.contentWindow?.postMessage("artisa:show-map", location.origin);
+}
+
+document.querySelectorAll("[data-explorer-open]").forEach((button) => {
+  button.addEventListener("click", () => openExplorer(button.dataset.explorerOpen));
+});
+
 async function api(path, options = {}) {
   const currentToken = token();
   if (!currentToken) throw new Error(EXPIRED_MESSAGE);
@@ -197,6 +222,9 @@ function syncDatasetView() {
   $("overview-link").classList.toggle("active", overview);
   for (const link of document.querySelectorAll(".sidebar [data-dataset-link]")) {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
+  }
+  if (view === "dashboard" || view === "heatmap") {
+    window.setTimeout(() => openExplorer(view === "dashboard" ? "dashboard" : "routes"), 50);
   }
   if (view === "heatmap" && fleetMap) window.setTimeout(fitPendingMap, 0);
 }
@@ -1156,6 +1184,7 @@ function renderTelemetry(summary, dataset, state) {
     ejecutando: "Extrayendo datos",
     completo: "Ventana completa",
     limite_alcanzado: "Carga controlada completa",
+    esperando: "Sincronizado · esperando nuevos datos",
     esperando_nuevos_datos: "Sincronizado · próxima revisión en 15 min",
     deshabilitado: "ETL real deshabilitado",
     error: "Error en la última carga"
@@ -1211,8 +1240,8 @@ function renderState(state) {
   const components = state.componentes || {};
   const required = ["etl", "mariadb", "endpoints", "front"];
   const nodes = [...document.querySelectorAll("[data-service]")];
-  const count = nodes.filter((node) => components[node.dataset.service] === "ok").length;
-  $("system-status").textContent = format(count) + " de " + format(nodes.length) + " servicios disponibles";
+  const count = required.filter((name) => components[name] === "ok").length;
+  $("system-status").textContent = format(count) + " de " + format(required.length) + " servicios operativos";
   $("system-status").className = "status " + (required.every((name) => components[name] === "ok") ? "" : "warning");
   for (const node of nodes) {
     const okay = components[node.dataset.service] === "ok";

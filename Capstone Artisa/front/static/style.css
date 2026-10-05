@@ -411,3 +411,17 @@
 .session-user button:hover{background:#edf5ee}
 .session-user button:focus-visible{outline:2px solid var(--green);outline-offset:3px}
 @media(max-width:690px){.topbar{flex-wrap:wrap;padding:12px 0}.topbar-actions{width:100%;justify-content:space-between;gap:10px}.session-user{padding-left:10px;gap:8px}}
+
+/* Vista previa manual de los mapas históricos de guias_ml. */
+.gps-explorer-panel{margin-top:18px}
+.gps-explorer-panel .telemetry-intro{max-width:900px;line-height:1.6}
+.explorer-launch{display:inline-flex;align-items:center;justify-content:center;margin:5px 0 12px;padding:10px 15px;border:1px solid #216447;border-radius:7px;background:#216447;color:#fff;font-size:11px;font-weight:700}
+.explorer-launch:hover{background:#174b35}
+.explorer-launch[hidden]{display:none}
+.explorer-launch:focus-visible{outline:3px solid #f97316;outline-offset:3px}
+.dashboard-heatmap-empty .explorer-launch{margin:15px 0 0}
+.explorer-frame-wrap[hidden]{display:none}
+.dashboard-heatmap-stage[hidden]{display:none}
+.explorer-frame-wrap{overflow:hidden;border:1px solid #d5e0d9;border-radius:9px;background:#f4f8f5}
+.explorer-frame-wrap iframe{display:block;width:100%;height:680px;border:0}
+@media(max-width:690px){.explorer-frame-wrap iframe{height:580px}}

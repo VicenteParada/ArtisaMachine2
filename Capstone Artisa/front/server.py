@@ -1,10 +1,13 @@
 """Frontend estático y proxy a endpoints: único puerto público."""
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import base64
+import hashlib
 import json
 import os
 from pathlib import Path
 import signal
+import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -15,6 +18,7 @@ ROOT = Path(__file__).with_name("static")
 FILES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/app.js": ("app.js", "text/javascript; charset=utf-8"),
          "/map-data.js": ("map-data.js", "text/javascript; charset=utf-8"),
+         "/exploracion-gps": ("gps-maps.html", "text/html; charset=utf-8"),
          "/style.css": ("style.css", "text/css; charset=utf-8"),
          "/artisa-logo.png": ("artisa-logo.png", "image/png"),
          "/artisa-fleet-cover.jpg": ("artisa-fleet-cover.jpg", "image/jpeg")}
@@ -25,13 +29,13 @@ class Handler(BaseHTTPRequestHandler):
         super().setup()
         self.connection.settimeout(5)
 
-    def reply(self, status, body, content_type="application/json; charset=utf-8"):
+    def reply(self, status, body, content_type="application/json; charset=utf-8", csp=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://unpkg.com https://*.tile.openstreetmap.org; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", csp or "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://unpkg.com https://*.tile.openstreetmap.org; frame-src 'self'; frame-ancestors 'none'")
         self.end_headers()
         self.wfile.write(body)
 
@@ -54,7 +58,9 @@ class Handler(BaseHTTPRequestHandler):
             if body is not None:
                 request.add_header("Content-Type", self.headers.get("Content-Type", "application/octet-stream"))
             try:
-                upstream = urlopen(request, timeout=20)
+                # Un día GPS puede tardar más que las respuestas pequeñas del panel.
+                timeout = 120 if urlsplit(self.path).path == "/api/gps" else 20
+                upstream = urlopen(request, timeout=timeout)
             except HTTPError as error:
                 upstream = error
             with upstream:
@@ -75,7 +81,24 @@ class Handler(BaseHTTPRequestHandler):
             self.proxy()
         elif self.command == "GET" and path in FILES:
             filename, content_type = FILES[path]
-            self.reply(200, (ROOT / filename).read_bytes(), content_type)
+            content = (ROOT / filename).read_bytes()
+            if path == "/exploracion-gps":
+                # La guía trae un script inline: autorizamos solo su hash exacto.
+                inline = re.search(rb"<script>(.*?)</script>", content, re.DOTALL)
+                if not inline:
+                    self.reply(503, b'{"error":"Explorador GPS no disponible"}')
+                    return
+                # El parser HTML del navegador normaliza CRLF a LF antes de verificar CSP.
+                script = inline.group(1).replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                script_hash = base64.b64encode(hashlib.sha256(script).digest()).decode("ascii")
+                csp = ("default-src 'self'; script-src 'self' https://unpkg.com "
+                       f"'sha256-{script_hash}'; style-src 'self' https://unpkg.com 'unsafe-inline'; "
+                       "connect-src 'self'; img-src 'self' data: https://unpkg.com "
+                       "https://server.arcgisonline.com https://*.basemaps.cartocdn.com; "
+                       "frame-ancestors 'self'")
+                self.reply(200, content, content_type, csp=csp)
+            else:
+                self.reply(200, content, content_type)
         else:
             self.reply(404, b'{"error":"Ruta no encontrada"}')
 

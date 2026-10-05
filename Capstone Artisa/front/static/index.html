@@ -157,27 +157,34 @@
         </div>
         <section class="dashboard-card dashboard-heatmap-card" aria-labelledby="dashboard-heatmap-title">
           <div class="dashboard-card-heading">
-            <div><span class="eyebrow">ANÁLISIS ESPACIAL</span><h3 id="dashboard-heatmap-title">Mapa de calor de uso de rutas</h3></div>
-            <span class="chart-unit">Pendiente</span>
+            <div><span class="eyebrow">ANÁLISIS ESPACIAL</span><h3 id="dashboard-heatmap-title">Mapa de calor GPS</h3></div>
+            <span class="chart-unit">Datos históricos</span>
           </div>
-          <p>Este espacio mostrará la concentración geográfica de recorridos históricos según el nivel de uso de cada ruta.</p>
-          <div id="dashboard-route-heatmap" class="dashboard-heatmap-stage" role="img" aria-label="Espacio reservado para el mapa de calor; todavía no muestra datos">
+          <p>Explora la densidad de reportes GPS de un día histórico. Este calor muestra dónde hubo más reportes; aún no representa el nivel definitivo de uso de rutas.</p>
+          <div id="dashboard-route-heatmap" class="dashboard-heatmap-stage">
             <div class="dashboard-heatmap-empty">
               <span class="dashboard-heatmap-symbol" aria-hidden="true">⌖</span>
-              <strong>Mapa de calor en preparación</strong>
-              <span>Las rutas y su intensidad aún no se muestran en este apartado.</span>
+              <strong>Explora la actividad GPS</strong>
+              <span>La consulta se inicia solo cuando abras este mapa.</span>
+              <button type="button" class="explorer-launch" data-explorer-open="dashboard" aria-controls="explorer-dashboard">Abrir mapa de calor</button>
             </div>
           </div>
-          <div class="dashboard-heatmap-legend" aria-label="Colores previstos para el nivel de uso de las rutas">
-            <span><i class="low" aria-hidden="true"></i>Poco uso</span>
-            <span><i class="medium" aria-hidden="true"></i>Uso medio</span>
-            <span><i class="high" aria-hidden="true"></i>Alto uso</span>
+          <div id="explorer-dashboard" class="explorer-frame-wrap" hidden>
+            <iframe title="Mapa de calor GPS histórico" data-explorer-frame="/exploracion-gps?vista=calor" referrerpolicy="no-referrer"></iframe>
           </div>
         </section>
         <div class="dashboard-method"><strong>Cómo se definen las zonas</strong><span id="dashboard-method">Se calculan automáticamente desde las coordenadas del bloque procesado.</span></div>
       </section>
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
+      <section class="panel gps-explorer-panel" aria-labelledby="gps-explorer-title">
+        <div class="section-top"><div><span class="eyebrow">DATOS HISTÓRICOS</span><h2 id="gps-explorer-title">Mapas de telemetría histórica</h2></div><span class="status info">GPS de MariaDB</span></div>
+        <p class="telemetry-intro">Prueba los mapas de calor, recorridos por camión, uso de tramos y puntos GPS del análisis de tu compañero. El color del uso de tramos cuenta camiones próximos; todavía no clasifica rutas completas ni ajusta los trazos a los caminos.</p>
+        <button type="button" class="explorer-launch" data-explorer-open="routes" aria-controls="explorer-routes">Abrir mapas de telemetría</button>
+        <div id="explorer-routes" class="explorer-frame-wrap" hidden>
+          <iframe title="Mapas de telemetría histórica" data-explorer-frame="/exploracion-gps" referrerpolicy="no-referrer"></iframe>
+        </div>
+      </section>
       <section class="panel heatmap-panel">
         <div class="section-top"><div><span class="eyebrow">04 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas históricas</h2></div><span id="heatmap-source-status" class="status info">Pendiente de procesamiento Machine</span></div>
         <p id="heatmap-intro" class="telemetry-intro">Consultando la fuente del mapa y su cobertura histórica…</p>
