@@ -6,7 +6,7 @@ import time
 from urllib.parse import urlsplit
 
 from common.http import JsonHandler, serve
-from modelo_machine.telemetry import ModelConfig, cycle, last_trained_version
+from machine_learning.telemetry import ModelConfig, cycle, last_trained_version
 
 
 INTERVAL = int(os.environ.get("TELEMETRY_MODEL_INTERVAL_SECONDS", "30"))
