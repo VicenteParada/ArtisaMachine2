@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS telemetria_api (
     event_name VARCHAR(128) NULL,
     recibido_en DATETIME(6) NOT NULL,
     PRIMARY KEY (report_id),
-    INDEX idx_telemetria_api_fecha (report_date),
+    INDEX idx_telemetria_api_fecha_recibido (report_date, recibido_en),
     INDEX idx_telemetria_api_asset_fecha (asset_id, report_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -119,4 +119,40 @@ CREATE TABLE IF NOT EXISTS telemetria_api_estado (
     advertencia VARCHAR(255) NULL,
     ultima_revision DATETIME(6) NOT NULL,
     PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Cierre diario (machine_learning/diario.py): resumen por camión de cada día de
+-- 00:00 a 00:00 hora Chile, con las mismas reglas del cuaderno de telemetría.
+-- Son datos derivados: se recalculan desde telemetria_api y raw_gps cuando hace falta.
+CREATE TABLE IF NOT EXISTS reporte_diario (
+    fecha DATE NOT NULL,
+    asset_id VARCHAR(16) NOT NULL,
+    asset_name VARCHAR(128) NULL,
+    reportes INT UNSIGNED NOT NULL,
+    primer_reporte DATETIME(6) NOT NULL,
+    ultimo_reporte DATETIME(6) NOT NULL,
+    km_observados DOUBLE NOT NULL,
+    viajes INT UNSIGNED NOT NULL,
+    tramos_unidos INT UNSIGNED NOT NULL,
+    PRIMARY KEY (fecha, asset_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- estado: en_curso (hoy), esperando_datos (pasó la medianoche pero la API aún no
+-- confirma el final del día) o cerrado. ultimo_recibido permite detectar reportes
+-- que llegan tarde y recalcular el día.
+CREATE TABLE IF NOT EXISTS reporte_diario_estado (
+    fecha DATE NOT NULL,
+    zona VARCHAR(64) NOT NULL,
+    inicio_utc DATETIME(6) NOT NULL,
+    fin_utc DATETIME(6) NOT NULL,
+    estado VARCHAR(32) NOT NULL,
+    reportes INT UNSIGNED NOT NULL,
+    camiones INT UNSIGNED NOT NULL,
+    km_observados DOUBLE NOT NULL,
+    descartados INT UNSIGNED NOT NULL,
+    ultimo_recibido DATETIME(6) NULL,
+    calculado_en DATETIME(6) NOT NULL,
+    cerrado_en DATETIME(6) NULL,
+    recalculos INT UNSIGNED NOT NULL DEFAULT 0,
+    PRIMARY KEY (fecha)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

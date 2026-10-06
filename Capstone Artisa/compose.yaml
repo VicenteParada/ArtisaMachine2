@@ -103,6 +103,27 @@ services:
     restart: unless-stopped
     init: true
 
+  # Cierre diario (parte de Machine): resume cada día de 00:00 a 00:00 hora Chile con
+  # las reglas del cuaderno de telemetría, sobre los datos en vivo y el histórico.
+  machine-diario:
+    build:
+      context: .
+      dockerfile: machine_learning/Dockerfile
+    container_name: artisa-machine-diario
+    command: ["python", "-m", "machine_learning.diario_worker"]
+    environment:
+      <<: *db-environment
+      ARTISA_TIMEZONE: ${ARTISA_TIMEZONE:-America/Santiago}
+      DIARIO_GRACIA_MINUTOS: ${DIARIO_GRACIA_MINUTOS:-15}
+      DIARIO_REVISAR_DIAS: ${DIARIO_REVISAR_DIAS:-7}
+      DIARIO_DESDE: ${DIARIO_DESDE:-}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck: *python-health
+    restart: unless-stopped
+    init: true
+
   machine:
     build:
       context: .
@@ -130,6 +151,7 @@ services:
       <<: *db-environment
       TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
       COMPANY_API_INTERVAL_SECONDS: ${COMPANY_API_INTERVAL_SECONDS:-30}
+      ARTISA_TIMEZONE: ${ARTISA_TIMEZONE:-America/Santiago}
     depends_on:
       mariadb:
         condition: service_healthy

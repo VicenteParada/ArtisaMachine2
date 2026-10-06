@@ -115,7 +115,35 @@
           <article><span>Camiones activos</span><strong id="vehicle-count">—</strong><small id="vehicle-count-note">Camiones con reportes en las últimas 24 h</small></article>
         </div>
         <div class="telemetry-range"><span id="telemetry-range">Esperando rango temporal…</span><span id="telemetry-quality">Esperando control de calidad…</span></div>
-        <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha UTC</th><th>Evento</th><th>Coordenadas</th><th>Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
+        <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha (hora Chile)</th><th>Evento</th><th>Coordenadas</th><th>Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
+        </div>
+      </section>
+      <section id="historial" class="panel telemetry-panel history-panel">
+        <div class="section-top"><div><span class="eyebrow">REPORTES DIARIOS</span><h2>Historial por día</h2></div><span id="history-status" class="status neutral">Cargando…</span></div>
+        <p class="telemetry-intro">Cada día va de 00:00 a 00:00, hora de Chile. Al pasar la medianoche el día se cierra y queda disponible para consulta. Si después llegan reportes atrasados de ese día (por ejemplo, tras un corte de red), el día se recalcula solo. Los kilómetros solo suman tramos entre reportes seguidos (máximo 5 min de pausa); no se inventa recorrido.</p>
+        <div class="history-controls">
+          <button type="button" class="button secondary" id="history-prev" aria-label="Día anterior al seleccionado">◀</button>
+          <input type="date" id="history-date" aria-label="Día a consultar">
+          <button type="button" class="button secondary" id="history-next" aria-label="Día siguiente al seleccionado">▶</button>
+          <button type="button" class="button secondary" id="history-yesterday">Ayer</button>
+          <button type="button" class="button secondary" id="history-today">Hoy</button>
+          <span id="history-note" class="history-note"></span>
+        </div>
+        <div class="real-metrics history-metrics" aria-label="Resumen del día">
+          <article><span>Camiones</span><strong id="history-trucks">—</strong><small>Con al menos un reporte en el día</small></article>
+          <article><span>Reportes</span><strong id="history-reports">—</strong><small id="history-discarded">Reportes GPS válidos</small></article>
+          <article><span>Km observados</span><strong id="history-km">—</strong><small>Suma de tramos unidos</small></article>
+          <article><span>Último cálculo</span><strong id="history-calculated">—</strong><small id="history-calculated-note">Hora de Chile</small></article>
+        </div>
+        <div class="table-scroll telemetry-table"><table><thead><tr><th>Camión</th><th>Reportes</th><th>Primer reporte</th><th>Último reporte</th><th>Km observados</th><th>Viajes</th></tr></thead><tbody id="history-rows"><tr><td colspan="6" class="empty">Selecciona un día.</td></tr></tbody></table></div>
+        <div id="history-detail" class="history-detail" hidden>
+          <div class="section-top"><h3 id="history-detail-title">Reportes del camión</h3><button type="button" class="text-button" id="history-detail-close">Cerrar</button></div>
+          <div class="table-scroll telemetry-table"><table><thead><tr><th>Hora (Chile)</th><th>Evento</th><th>Coordenadas</th><th>Encendido</th></tr></thead><tbody id="history-detail-rows"></tbody></table></div>
+          <button type="button" class="button secondary" id="history-detail-more" hidden>Cargar más reportes</button>
+        </div>
+        <div class="history-month">
+          <div class="section-top"><h3>Resumen del mes</h3><input type="month" id="history-month" aria-label="Mes a consultar"></div>
+          <div class="table-scroll telemetry-table"><table><thead><tr><th>Día</th><th>Estado</th><th>Camiones</th><th>Reportes</th><th>Km observados</th></tr></thead><tbody id="history-month-rows"></tbody></table></div>
         </div>
       </section>
     </div>

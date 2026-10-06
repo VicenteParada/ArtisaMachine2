@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import socket
 import time
 from datetime import date, datetime, timedelta
@@ -9,6 +10,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pymysql
 
+from common import dias
 from common.db import connect_db
 from common.http import JsonHandler, serve
 from common.vehiculos import sql_es_camion
@@ -219,16 +221,22 @@ def gps_points(cursor, desde, hasta):
     t = segundos desde 'desde' 00:00 (hora tal cual viene en report_date); lat/lon x 1e5."""
     # Leer por el índice de fecha evita ordenar millones de filas en MariaDB.
     # La misma deduplicación y el orden por camión/hora se completan en memoria.
-    cursor.execute(
-        f"""SELECT asset_id, report_date, latitude, longitude
-           FROM raw_gps
-           WHERE report_date >= %s AND report_date < %s AND {sql_es_camion("asset_id")}
-           ORDER BY report_date""",
-        (desde, hasta + timedelta(days=1)),
-    )
+    # Histórico (raw_gps) + telemetría en vivo (telemetria_api): los mapas del cuaderno
+    # se calculan igual sobre ambos. Un reporte presente en las dos tablas se cuenta una vez.
+    rows = []
+    for table in ("raw_gps", "telemetria_api"):
+        try:
+            cursor.execute(
+                f"""SELECT asset_id, report_date, latitude, longitude
+                   FROM {table}
+                   WHERE report_date >= %s AND report_date < %s AND {sql_es_camion("asset_id")}""",
+                (desde, hasta + timedelta(days=1)),
+            )
+        except pymysql.err.ProgrammingError:
+            continue  # telemetria_api aún no creada
+        rows.extend(cursor.fetchall())
     inicio = datetime(desde.year, desde.month, desde.day)
     indices, cam, t, lat, lon = {}, [], [], [], []
-    rows = cursor.fetchall()
     rows.sort(key=lambda row: (row["asset_id"], row["report_date"]))
     seen = set()
     for row in rows:
@@ -242,6 +250,122 @@ def gps_points(cursor, desde, hasta):
         lon.append(round(row["longitude"] * 1e5))
     return {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "camiones": list(indices),
             "cam": cam, "t": t, "lat": lat, "lon": lon}
+
+
+# --- Historial diario (cierre de 00:00 a 00:00 hora Chile, machine_learning/diario.py) ---
+
+ASSET_RE = re.compile(r"[A-Za-z0-9_-]{1,16}")
+DETALLE_MAX = 1000
+
+
+def _param(query, name):
+    values = parse_qs(query).get(name)
+    return values[0] if values else None
+
+
+def daily_report(cursor, dia):
+    try:
+        cursor.execute("SELECT * FROM reporte_diario_estado WHERE fecha=%s", (dia,))
+    except pymysql.err.ProgrammingError:
+        return {"fecha": dia, "zona": dias.ZONA, "estado": None, "camiones": []}
+    estado = cursor.fetchone()
+    cursor.execute(
+        """SELECT asset_id, asset_name, reportes, primer_reporte, ultimo_reporte, km_observados,
+                  viajes, tramos_unidos
+           FROM reporte_diario WHERE fecha=%s ORDER BY reportes DESC, asset_id""",
+        (dia,),
+    )
+    return {"fecha": dia, "zona": dias.ZONA, "hoy": dias.hoy(), "estado": estado,
+            "camiones": cursor.fetchall()}
+
+
+def monthly_report(cursor, year, month):
+    first = date(year, month, 1)
+    following = date(year + (month == 12), month % 12 + 1, 1)
+    try:
+        cursor.execute(
+            """SELECT fecha, estado, reportes, camiones, km_observados, calculado_en, cerrado_en, recalculos
+               FROM reporte_diario_estado WHERE fecha >= %s AND fecha < %s ORDER BY fecha""",
+            (first, following),
+        )
+    except pymysql.err.ProgrammingError:
+        return {"mes": f"{year:04d}-{month:02d}", "zona": dias.ZONA, "dias": []}
+    return {"mes": f"{year:04d}-{month:02d}", "zona": dias.ZONA, "hoy": dias.hoy(), "dias": cursor.fetchall()}
+
+
+def truck_day(cursor, asset_id, dia, limit, after):
+    """Reportes de un camión en un día local, paginados por (report_date, report_id)."""
+    inicio, fin = dias.limites_utc(dia)
+    rows = []
+    for table in ("telemetria_api", "raw_gps"):
+        extra_columns = "ignition" if table == "telemetria_api" else "NULL AS ignition"
+        conditions = "asset_id=%s AND report_date >= %s AND report_date < %s"
+        params = [asset_id, inicio, fin]
+        if after:
+            conditions += " AND (report_date > %s OR (report_date = %s AND report_id > %s))"
+            params += [after[0], after[0], after[1]]
+        try:
+            cursor.execute(
+                f"""SELECT report_id, asset_name, report_date, latitude, longitude, speed,
+                          event_name, {extra_columns}
+                   FROM {table} WHERE {conditions}
+                   ORDER BY report_date, report_id LIMIT %s""",
+                (*params, limit + 1),
+            )
+        except pymysql.err.ProgrammingError:
+            continue
+        rows.extend(cursor.fetchall())
+    rows.sort(key=lambda row: (row["report_date"], row["report_id"]))
+    unique, seen = [], set()
+    for row in rows:
+        if row["report_id"] in seen:
+            continue
+        seen.add(row["report_id"])
+        unique.append(row)
+    page = unique[:limit]
+    more = len(unique) > limit
+    next_cursor = None
+    if more and page:
+        last = page[-1]
+        next_cursor = last["report_date"].isoformat() + "|" + last["report_id"]
+    return {"asset_id": asset_id, "fecha": dia, "zona": dias.ZONA, "reportes": page,
+            "siguiente": next_cursor}
+
+
+def history_request(path, query):
+    """Valida parámetros. Devuelve (handler, args) o (None, mensaje_error)."""
+    if path == "/api/reportes/mes":
+        mes = _param(query, "mes") or dias.hoy().strftime("%Y-%m")
+        match = re.fullmatch(r"(\d{4})-(\d{2})", mes)
+        if not match or not 1 <= int(match.group(2)) <= 12:
+            return None, "Usa ?mes=YYYY-MM"
+        return monthly_report, (int(match.group(1)), int(match.group(2)))
+    try:
+        dia = date.fromisoformat(_param(query, "fecha") or "")
+    except ValueError:
+        return None, "Usa ?fecha=YYYY-MM-DD"
+    if dia > dias.hoy():
+        return None, "La fecha no puede ser futura"
+    if path == "/api/reportes/dia":
+        return daily_report, (dia,)
+    asset_id = _param(query, "asset_id") or ""
+    if not ASSET_RE.fullmatch(asset_id):
+        return None, "asset_id inválido"
+    try:
+        limit = int(_param(query, "limite") or "500")
+    except ValueError:
+        limit = 0
+    if not 1 <= limit <= DETALLE_MAX:
+        return None, f"limite debe estar entre 1 y {DETALLE_MAX}"
+    after = None
+    raw_after = _param(query, "despues")
+    if raw_after:
+        try:
+            moment, identifier = raw_after.split("|", 1)
+            after = (datetime.fromisoformat(moment.replace("Z", "")), identifier)
+        except ValueError:
+            return None, "despues inválido"
+    return truck_day, (asset_id, dia, limit, after)
 
 
 class Handler(JsonHandler):
@@ -266,13 +390,21 @@ class Handler(JsonHandler):
                                "rutas": ["/health", "/api/estado", "/api/faenas",
                                          "/api/gps?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
                                          "/api/telemetria?limite=30", "/api/telemetria/resumen",
+                                         "/api/reportes/dia?fecha=YYYY-MM-DD", "/api/reportes/mes?mes=YYYY-MM",
+                                         "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
                                          *PENDING_RESPONSES]})
             return
         if path in PENDING_RESPONSES:
             self.respond(200, PENDING_RESPONSES[path])
             return
-        if path not in ("/health", "/api/estado", "/api/faenas", "/api/gps",
-                        "/api/telemetria", "/api/telemetria/resumen"):
+        history = None
+        if path in ("/api/reportes/dia", "/api/reportes/mes", "/api/reportes/camion"):
+            history, args = history_request(path, parsed.query)
+            if history is None:
+                self.respond(400, {"error": args})
+                return
+        elif path not in ("/health", "/api/estado", "/api/faenas", "/api/gps",
+                          "/api/telemetria", "/api/telemetria/resumen"):
             self.respond(404, {"error": "Ruta no encontrada"})
             return
         if path == "/api/telemetria":
@@ -308,6 +440,8 @@ class Handler(JsonHandler):
                     self.respond(200, latest_telemetry(cursor, limit))
                 elif path == "/api/telemetria/resumen":
                     self.respond(200, telemetry_summary(cursor))
+                elif history is not None:
+                    self.respond(200, history(cursor, *args))
         except pymysql.MySQLError as error:
             if path == "/health":
                 self.log_error("Error de MariaDB: %s", type(error).__name__)

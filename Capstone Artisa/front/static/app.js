@@ -8,6 +8,10 @@ const format = (value, decimals = 0) => Number(value).toLocaleString("es-CL", {m
 const formatUtc = (value) => value ? new Intl.DateTimeFormat("es-CL", {
   dateStyle: "short", timeStyle: "medium", timeZone: "UTC"
 }).format(new Date(value)) : "Sin fecha";
+const HISTORY_ZONE = "America/Santiago";  // días de la empresa: 00:00 a 00:00 hora de Chile
+const formatLocal = (value, zone = HISTORY_ZONE) => value ? new Intl.DateTimeFormat("es-CL", {
+  dateStyle: "short", timeStyle: "medium", timeZone: zone
+}).format(new Date(value)) : "Sin fecha";
 const formatDataDay = (value) => value ? new Intl.DateTimeFormat("es-CL", {
   dateStyle: "long", timeZone: "UTC"
 }).format(new Date(value + "T12:00:00Z")) : "Sin fecha";
@@ -68,6 +72,7 @@ function clearPassword() {
 
 function logout(message = "") {
   clearSessionWork();
+  if (typeof historyState !== "undefined") Object.assign(historyState, {day: null, month: null, detail: null, loadedOnce: false});
   activeMapMode = "historical";
   userChoseMapMode = false;
   for (const wrapper of document.querySelectorAll(".explorer-frame-wrap")) {
@@ -1222,7 +1227,7 @@ function formatAge(seconds) {
 }
 
 function connectionMessage(connection) {
-  const since = connection.desconectado_desde ? ` desde ${formatUtc(connection.desconectado_desde)} UTC` : "";
+  const since = connection.desconectado_desde ? ` desde ${formatLocal(connection.desconectado_desde)} (hora de Chile)` : "";
   if (connection.conexion === "reconectando") {
     return `Sin conexión con la API de la empresa${since}. El sistema reintenta solo; cuando vuelva la red recuperará los reportes del período desconectado. Se muestran los últimos datos recibidos.`;
   }
@@ -1261,6 +1266,7 @@ async function refreshTelemetry() {
     if (version !== sessionVersion || !token()) return;
     renderTelemetry(telemetrySummary, telemetryDataset, {});
     telemetryLastOk = new Date();
+    refreshHistory();
   } catch (error) {
     if (version !== sessionVersion || !token()) return;
     if (!$("telemetry-content").hidden) {
@@ -1304,7 +1310,7 @@ function renderTelemetry(summary, dataset, state) {
     ? "Sin dato" : format(summary.vehiculos);
   $("vehicle-count-note").textContent = `Camiones con reportes en las últimas ${format(summary.vehiculos_ventana_horas || 24)} h`;
   $("telemetry-range").textContent = connection.ultimo_dato
-    ? `Último reporte recibido: ${formatUtc(connection.ultimo_dato)} UTC · último contacto con la API: ${connection.ultimo_exito ? formatUtc(connection.ultimo_exito) + " UTC" : "sin contacto aún"}`
+    ? `Último reporte recibido: ${formatLocal(connection.ultimo_dato)} · último contacto con la API: ${connection.ultimo_exito ? formatLocal(connection.ultimo_exito) : "sin contacto aún"} (hora de Chile)`
     : "La API está configurada, pero todavía no entrega reportes.";
   $("telemetry-quality").textContent =
     `${format(connection.guardados || 0)} guardados · ${format(connection.rechazados || 0)} rechazados de ${format(connection.leidos || 0)} leídos`;
@@ -1334,7 +1340,7 @@ function renderTelemetry(summary, dataset, state) {
     tr.append(vehicle);
 
     const date = document.createElement("td");
-    date.textContent = formatUtc(report.report_date);
+    date.textContent = formatLocal(report.report_date);
     const age = document.createElement("small");
     const ageSeconds = Number(report.edad_segundos);
     if (Number.isFinite(ageSeconds)) {
@@ -1414,6 +1420,7 @@ async function refresh() {
     const mapData = window.ArtisaMapData.adaptMapPayload(mapPayload);
     renderState(state);
     renderTelemetry(telemetrySummary, telemetryDataset, state);
+    refreshHistory();
     renderHeatmap(mapData);
     renderDashboard(mapData, dashboard);
     $("notice").hidden = state.status === "ok";
@@ -1431,6 +1438,202 @@ async function refresh() {
     if (version === sessionVersion) { refreshing = false; $("refresh").disabled = false; }
   }
 }
+
+// --- Historial diario (00:00 a 00:00 hora de Chile) ---
+var historyState = {day: null, month: null, detail: null, loadedOnce: false};
+const isoDayIn = (date, zone = HISTORY_ZONE) =>
+  new Intl.DateTimeFormat("en-CA", {timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit"}).format(date);
+const localToday = () => isoDayIn(new Date());
+const shiftDay = (iso, days) => {
+  const value = new Date(iso + "T12:00:00Z");
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+};
+const formatLocalTime = (value, zone = HISTORY_ZONE) => value ? new Intl.DateTimeFormat("es-CL", {
+  timeStyle: "medium", timeZone: zone
+}).format(new Date(value)) : "—";
+const HISTORY_STATES = {
+  en_curso: ["Hoy · en curso hasta las 00:00", "status info"],
+  esperando_datos: ["Cerrando · esperando datos de la API", "status warning"],
+  cerrado: ["Día cerrado", "status"]
+};
+
+function emptyRow(body, columns, message) {
+  const row = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.colSpan = columns; cell.className = "empty"; cell.textContent = message;
+  row.append(cell); body.append(row);
+}
+
+function cell(text, small) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  if (small) { const note = document.createElement("small"); note.textContent = small; td.append(note); }
+  return td;
+}
+
+async function loadHistoryDay(day, quiet = false) {
+  if (!day) return;
+  const today = localToday();
+  if (day > today) day = today;
+  historyState.day = day;
+  $("history-date").value = day;
+  $("history-date").max = today;
+  $("history-next").disabled = day >= today;
+  if (!quiet) { $("history-status").textContent = "Consultando…"; $("history-status").className = "status neutral"; }
+  try {
+    const data = await api(`/api/reportes/dia?fecha=${day}`);
+    if (historyState.day !== day) return;
+    renderHistoryDay(data);
+    const month = day.slice(0, 7);
+    if (historyState.month !== month || quiet) loadHistoryMonth(month);
+  } catch (error) {
+    if (historyState.day !== day) return;
+    $("history-status").textContent = "No se pudo consultar";
+    $("history-status").className = "status warning";
+    $("history-note").textContent = error.message + " Se mantienen los últimos datos mostrados.";
+  }
+}
+
+function renderHistoryDay(data) {
+  const zone = data.zona || HISTORY_ZONE;
+  const state = data.estado;
+  const [label, className] = state ? (HISTORY_STATES[state.estado] || [state.estado, "status neutral"])
+    : ["Sin datos para este día", "status neutral"];
+  $("history-status").textContent = label;
+  $("history-status").className = className;
+  $("history-trucks").textContent = state ? format(state.camiones) : "—";
+  $("history-reports").textContent = state ? format(state.reportes) : "—";
+  $("history-discarded").textContent = state && state.descartados
+    ? `${format(state.descartados)} descartados por coordenadas inválidas` : "Reportes GPS válidos";
+  $("history-km").textContent = state ? format(state.km_observados, 1) : "—";
+  $("history-calculated").textContent = state ? formatLocalTime(state.calculado_en, zone) : "—";
+  $("history-calculated-note").textContent = state && state.recalculos
+    ? `Recalculado ${format(state.recalculos)} ${state.recalculos === 1 ? "vez" : "veces"} por reportes atrasados`
+    : "Hora de Chile";
+  $("history-note").textContent = state && state.estado === "esperando_datos"
+    ? "Las cifras son provisorias: el día se cierra cuando la API confirme los reportes hasta las 00:00."
+    : state && state.estado === "en_curso" ? "Cifras parciales del día de hoy; se actualizan cada pocos minutos." : "";
+
+  const body = $("history-rows");
+  body.replaceChildren();
+  for (const truck of data.camiones || []) {
+    const tr = document.createElement("tr");
+    tr.className = "history-row";
+    tr.tabIndex = 0;
+    tr.title = "Ver los reportes de este camión en el día";
+    tr.append(
+      cell(truck.asset_name || "Camión sin nombre", truck.asset_id),
+      cell(format(truck.reportes)),
+      cell(formatLocalTime(truck.primer_reporte, zone)),
+      cell(formatLocalTime(truck.ultimo_reporte, zone)),
+      cell(format(truck.km_observados, 1)),
+      cell(format(truck.viajes), "pausas de más de 30 min separan viajes")
+    );
+    const open = () => {
+      for (const row of body.querySelectorAll(".is-selected")) row.classList.remove("is-selected");
+      tr.classList.add("is-selected");
+      loadTruckDetail(truck.asset_id, truck.asset_name, data.fecha);
+    };
+    tr.addEventListener("click", open);
+    tr.addEventListener("keydown", (event) => { if (event.key === "Enter") open(); });
+    body.append(tr);
+  }
+  if (!(data.camiones || []).length) {
+    emptyRow(body, 6, state ? "Ningún camión reportó este día." : "Este día todavía no tiene resumen calculado.");
+  }
+  if (historyState.detail && historyState.detail.day !== data.fecha) closeTruckDetail();
+}
+
+async function loadTruckDetail(assetId, assetName, day, after = null) {
+  const detail = after ? historyState.detail : {assetId, assetName, day, next: null};
+  historyState.detail = detail;
+  $("history-detail").hidden = false;
+  $("history-detail-title").textContent = `Reportes de ${assetName || assetId} · ${day} (hora de Chile)`;
+  const body = $("history-detail-rows");
+  if (!after) { body.replaceChildren(); emptyRow(body, 4, "Cargando reportes…"); }
+  $("history-detail-more").hidden = true;
+  try {
+    const query = `/api/reportes/camion?asset_id=${encodeURIComponent(assetId)}&fecha=${day}&limite=500` +
+      (after ? `&despues=${encodeURIComponent(after)}` : "");
+    const data = await api(query);
+    if (historyState.detail !== detail) return;
+    if (!after) body.replaceChildren();
+    for (const report of data.reportes || []) {
+      const tr = document.createElement("tr");
+      tr.append(
+        cell(formatLocalTime(report.report_date, data.zona)),
+        cell(report.event_name || "Sin evento"),
+        cell(`${Number(report.latitude).toFixed(5)}, ${Number(report.longitude).toFixed(5)}`),
+        cell(report.ignition === null || report.ignition === undefined ? "Sin dato" : (Number(report.ignition) === 1 ? "Sí" : "No"))
+      );
+      body.append(tr);
+    }
+    if (!body.children.length) emptyRow(body, 4, "Sin reportes para este camión en el día.");
+    detail.next = data.siguiente;
+    $("history-detail-more").hidden = !data.siguiente;
+  } catch (error) {
+    if (historyState.detail !== detail) return;
+    if (!after) body.replaceChildren();
+    emptyRow(body, 4, "No se pudieron cargar los reportes: " + error.message);
+  }
+}
+
+function closeTruckDetail() {
+  historyState.detail = null;
+  $("history-detail").hidden = true;
+  for (const row of document.querySelectorAll("#history-rows .is-selected")) row.classList.remove("is-selected");
+}
+
+async function loadHistoryMonth(month) {
+  historyState.month = month;
+  $("history-month").value = month;
+  $("history-month").max = localToday().slice(0, 7);
+  const body = $("history-month-rows");
+  try {
+    const data = await api(`/api/reportes/mes?mes=${month}`);
+    if (historyState.month !== month) return;
+    body.replaceChildren();
+    for (const day of data.dias || []) {
+      const tr = document.createElement("tr");
+      const link = document.createElement("button");
+      link.type = "button"; link.className = "history-day-link";
+      link.textContent = day.fecha;
+      link.addEventListener("click", () => loadHistoryDay(day.fecha));
+      const first = document.createElement("td"); first.append(link);
+      const [label] = HISTORY_STATES[day.estado] || [day.estado];
+      tr.append(first, cell(label), cell(format(day.camiones)), cell(format(day.reportes)), cell(format(day.km_observados, 1)));
+      body.append(tr);
+    }
+    if (!(data.dias || []).length) emptyRow(body, 5, "No hay días procesados en este mes.");
+  } catch (error) {
+    if (historyState.month !== month) return;
+    body.replaceChildren();
+    emptyRow(body, 5, "No se pudo consultar el mes: " + error.message);
+  }
+}
+
+function refreshHistory() {
+  if (!token()) return;
+  if (!historyState.loadedOnce) {
+    historyState.loadedOnce = true;
+    loadHistoryDay(shiftDay(localToday(), -1));
+  } else if (historyState.day === localToday()) {
+    loadHistoryDay(historyState.day, true);  // hoy en curso: se mantiene al día
+  }
+}
+
+$("history-date").addEventListener("change", () => loadHistoryDay($("history-date").value));
+$("history-prev").addEventListener("click", () => loadHistoryDay(shiftDay(historyState.day || localToday(), -1)));
+$("history-next").addEventListener("click", () => loadHistoryDay(shiftDay(historyState.day || localToday(), 1)));
+$("history-yesterday").addEventListener("click", () => loadHistoryDay(shiftDay(localToday(), -1)));
+$("history-today").addEventListener("click", () => loadHistoryDay(localToday()));
+$("history-month").addEventListener("change", () => { if ($("history-month").value) loadHistoryMonth($("history-month").value); });
+$("history-detail-close").addEventListener("click", closeTruckDetail);
+$("history-detail-more").addEventListener("click", () => {
+  const detail = historyState.detail;
+  if (detail && detail.next) loadTruckDetail(detail.assetId, detail.assetName, detail.day, detail.next);
+});
 
 $("refresh").addEventListener("click", refresh);
 for (const button of document.querySelectorAll("[data-map-mode]")) {

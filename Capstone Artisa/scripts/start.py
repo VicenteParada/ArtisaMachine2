@@ -13,7 +13,7 @@ subprocess.run(
     [
         "docker", "compose", "up", "--detach", "--build", "--wait",
         "--wait-timeout", "180",
-        "mongodb", "mariadb", "etl", "telemetria", "endpoints", "front", "auth", "nginx",
+        "mongodb", "mariadb", "etl", "telemetria", "machine-diario", "endpoints", "front", "auth", "nginx",
     ],
     cwd=ROOT,
     check=True,

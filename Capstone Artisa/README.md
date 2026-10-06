@@ -164,6 +164,28 @@ Comportamiento ante cortes:
 `COMPANY_API_TIMEZONE=auto` detecta la hora del origen comparándola con el reloj
 de este equipo (mantén la hora del equipo sincronizada).
 
+## Cierre diario (00:00 a 00:00, hora de Chile)
+
+El servicio `machine-diario` (parte de Machine) aplica a cada día las mismas reglas
+del cuaderno `guias_ml/telemetria_colab.ipynb` sobre la telemetría en vivo y el
+histórico: coordenadas válidas, sin repetidos, une reportes seguidos con pausa de
+hasta 5 min y saltos bajo 150 km/h, y separa viajes con pausas de más de 30 min.
+Guarda un resumen por camión en `reporte_diario`.
+
+- Hoy aparece "en curso" y se recalcula cada 10 minutos.
+- Pasadas las 00:00 + 15 min, el día se cierra si la API de la empresa respondió
+  después de medianoche. Si la API estaba caída, el día queda "esperando datos"
+  con cifras provisorias y se cierra cuando vuelva la conexión.
+- Si luego llegan reportes atrasados de un día cerrado (revisa los últimos 7 días),
+  el día se recalcula solo. Los días se definen como rangos UTC contiguos, así que
+  el corte nunca deja reportes fuera ni los cuenta dos veces (incluido el cambio de hora).
+- Para incluir días del histórico, define `DIARIO_DESDE=YYYY-MM-DD` en `.env`.
+
+La página Reportes muestra el historial por día (con detalle de cada camión) y el
+resumen del mes: `/api/reportes/dia`, `/api/reportes/mes`, `/api/reportes/camion`.
+El explorador `/exploracion-gps` ahora también incluye la telemetría en vivo; sus
+días siguen siendo días UTC, como antes.
+
 ## Pendiente de integración Machine
 
 `common/telemetry_map.py` se conserva como referencia legacy utilizada por sus
