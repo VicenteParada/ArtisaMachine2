@@ -151,20 +151,28 @@ window.addEventListener("message", event => {
 });
 
 const MAPAS_BASE = {
-  "Claro (Esri)": L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
-    {attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, OpenStreetMap contributors",
-     maxNativeZoom: 16, maxZoom: 19}),
-  // Respaldo con el mismo estilo claro, por si Esri no responde
-  "Claro (CARTO)": L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    {attribution: "&copy; OpenStreetMap contributors &copy; CARTO", subdomains: "abcd",
-     maxNativeZoom: 19, maxZoom: 19}),
+  "Calles y lugares (OpenStreetMap)": L.tileLayer(
+    "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {attribution: "&copy; OpenStreetMap contributors", maxNativeZoom: 19, maxZoom: 19}),
   "Satélite (Esri)": L.tileLayer(
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     {attribution: "Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, GIS User Community",
      maxNativeZoom: 18, maxZoom: 19}),
 };
-MAPAS_BASE["Claro (Esri)"].addTo(mapa);
+MAPAS_BASE["Calles y lugares (OpenStreetMap)"].addTo(mapa);
+
+// Referencia oficial de Esri: nombres y límites visibles sobre la fotografía satelital.
+// Se añade solo con World Imagery y queda debajo de los trazos GPS.
+mapa.createPane("etiquetas-satelitales");
+mapa.getPane("etiquetas-satelitales").style.zIndex = "350";
+mapa.getPane("etiquetas-satelitales").style.pointerEvents = "none";
+const ETIQUETAS_SATELITALES = L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+  {pane: "etiquetas-satelitales", attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, OpenStreetMap contributors, GIS User Community",
+   maxNativeZoom: 18, maxZoom: 19});
+const SATELITE_ESRI = MAPAS_BASE["Satélite (Esri)"];
+SATELITE_ESRI.on("add", () => ETIQUETAS_SATELITALES.addTo(mapa));
+SATELITE_ESRI.on("remove", () => ETIQUETAS_SATELITALES.remove());
 
 (function respaldoMapaBase(capas, umbral) {
   let cambios = 0;

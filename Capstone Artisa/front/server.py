@@ -35,7 +35,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", csp or "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://unpkg.com https://*.tile.openstreetmap.org; frame-src 'self'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", csp or "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://unpkg.com https://tile.openstreetmap.org; frame-src 'self'; frame-ancestors 'none'")
         self.end_headers()
         self.wfile.write(body)
 
@@ -94,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
                 csp = ("default-src 'self'; script-src 'self' https://unpkg.com "
                        f"'sha256-{script_hash}'; style-src 'self' https://unpkg.com 'unsafe-inline'; "
                        "connect-src 'self'; img-src 'self' data: https://unpkg.com "
-                       "https://server.arcgisonline.com https://*.basemaps.cartocdn.com; "
+                       "https://tile.openstreetmap.org https://server.arcgisonline.com; "
                        "frame-ancestors 'self'")
                 self.reply(200, content, content_type, csp=csp)
             else:

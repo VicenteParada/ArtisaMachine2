@@ -177,14 +177,6 @@
       </section>
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
-      <section class="panel gps-explorer-panel" aria-labelledby="gps-explorer-title">
-        <div class="section-top"><div><span class="eyebrow">DATOS HISTÓRICOS</span><h2 id="gps-explorer-title">Mapas de telemetría histórica</h2></div><span class="status info">GPS de MariaDB</span></div>
-        <p class="telemetry-intro">Prueba los mapas de calor, recorridos por camión, uso de tramos y puntos GPS del análisis de tu compañero. El color del uso de tramos cuenta camiones próximos; todavía no clasifica rutas completas ni ajusta los trazos a los caminos.</p>
-        <button type="button" class="explorer-launch" data-explorer-open="routes" aria-controls="explorer-routes">Abrir mapas de telemetría</button>
-        <div id="explorer-routes" class="explorer-frame-wrap" hidden>
-          <iframe title="Mapas de telemetría histórica" data-explorer-frame="/exploracion-gps" referrerpolicy="no-referrer"></iframe>
-        </div>
-      </section>
       <section class="panel heatmap-panel">
         <div class="section-top"><div><span class="eyebrow">04 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas históricas</h2></div><span id="heatmap-source-status" class="status info">Pendiente de procesamiento Machine</span></div>
         <p id="heatmap-intro" class="telemetry-intro">Consultando la fuente del mapa y su cobertura histórica…</p>
@@ -212,8 +204,18 @@
         <div class="heatmap-layout">
           <article class="map-card">
             <div class="map-title"><div><strong>Monitoreo de rutas y flota</strong><small id="heatmap-zones">Preparando datos técnicos…</small></div><div class="map-title-actions"><span id="map-last-update">Cargando contrato del mapa…</span><button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button></div></div>
-            <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa interactivo de rutas históricas y camiones"><span class="map-loading">Cargando cartografía…</span></div>
-            <div class="heat-legend"><span>Uso bajo</span><i></i><span>Uso medio</span><i></i><span>Uso alto</span><i></i><b class="legend-truck">🚚 Camión</b><small>Trazos representativos de GPS; sin ajuste vial exacto</small></div>
+            <div class="map-view-selector" role="group" aria-label="Vista del mapa">
+              <button type="button" data-map-mode="historical" aria-pressed="true">Mapas de telemetría</button>
+              <button type="button" data-map-mode="classified" aria-pressed="false" disabled>Rutas clasificadas</button>
+              <span id="map-view-description">GPS histórico de MariaDB; la clasificación de rutas depende de Machine.</span>
+            </div>
+            <div class="map-view-stage">
+              <div id="explorer-routes" class="explorer-frame-wrap" hidden>
+                <iframe title="Mapas de telemetría histórica" data-explorer-frame="/exploracion-gps" referrerpolicy="no-referrer"></iframe>
+              </div>
+              <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa interactivo de rutas históricas y camiones" hidden><span class="map-loading">Cargando cartografía…</span></div>
+            </div>
+            <div class="heat-legend" id="classified-map-legend" hidden><span>Uso bajo</span><i></i><span>Uso medio</span><i></i><span>Uso alto</span><i></i><b class="legend-truck">🚚 Camión</b><small>Trazos representativos de GPS; sin ajuste vial exacto</small></div>
           </article>
           <aside class="route-insights" aria-label="Explorador de rutas y vehículos">
             <article class="monitor-panel">

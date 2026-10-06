@@ -68,6 +68,8 @@ function clearPassword() {
 
 function logout(message = "") {
   clearSessionWork();
+  activeMapMode = "historical";
+  userChoseMapMode = false;
   for (const wrapper of document.querySelectorAll(".explorer-frame-wrap")) {
     wrapper.hidden = true;
     const frame = wrapper.querySelector("iframe");
@@ -161,6 +163,10 @@ $("logout").addEventListener("click", () => logout());
 
 function openExplorer(which) {
   if (!token()) return;
+  if (which === "routes") {
+    setMapMode(activeMapMode);
+    return;
+  }
   const button = document.querySelector(`[data-explorer-open="${which}"]`);
   const wrapper = button && $(button.getAttribute("aria-controls"));
   const frame = wrapper?.querySelector("iframe[data-explorer-frame]");
@@ -226,7 +232,9 @@ function syncDatasetView() {
   if (view === "dashboard" || view === "heatmap") {
     window.setTimeout(() => openExplorer(view === "dashboard" ? "dashboard" : "routes"), 50);
   }
-  if (view === "heatmap" && fleetMap) window.setTimeout(fitPendingMap, 0);
+  if (view === "heatmap" && activeMapMode === "classified" && fleetMap) {
+    window.setTimeout(fitPendingMap, 0);
+  }
 }
 
 function routeProperties(route) {
@@ -248,9 +256,12 @@ function routeUsageSummary(route) {
 }
 
 const ROUTE_DRAW_ORDER = ["LOW", "MEDIUM", "HIGH"];
+const ROUTE_COLORS = Object.freeze({HIGH: "#14532d", MEDIUM: "#f97316", LOW: "#dc2626"});
 const mapLayerVisibility = {routes: true, vehicles: true};
 let activeRouteFilter = "ALL";
 let activeMonitorTab = "routes";
+let activeMapMode = "historical";
+let userChoseMapMode = false;
 let fleetMap = null;
 const routeLayers = {LOW: null, MEDIUM: null, HIGH: null};
 let truckLayer = null;
@@ -264,6 +275,34 @@ let selectedRouteId = null;
 let selectedVehicleId = null;
 const truckMarkers = new Map();
 const routeMapLayers = new Map();
+
+function setMapMode(mode, remember = false, pending = !currentMapData || machinePending(currentMapData)) {
+  activeMapMode = mode === "classified" && !pending ? "classified" : "historical";
+  if (remember) userChoseMapMode = true;
+  const historical = activeMapMode === "historical";
+  const explorer = $("explorer-routes");
+  explorer.closest(".map-card").classList.toggle("showing-history", historical);
+  explorer.hidden = !historical;
+  $("heatmap-map").hidden = historical;
+  $("classified-map-legend").hidden = historical;
+  for (const button of document.querySelectorAll("[data-map-mode]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.mapMode === activeMapMode));
+    if (button.dataset.mapMode === "classified") button.disabled = pending;
+  }
+  $("map-view-description").textContent = historical
+    ? "GPS histórico de MariaDB; los filtros de rutas clasificadas estarán disponibles cuando Machine entregue resultados."
+    : "Rutas clasificadas por Machine; los filtros y vehículos corresponden a este mapa.";
+  for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer], [data-monitor-tab], #monitor-search, #reset-map-view")) {
+    control.disabled = pending || historical;
+  }
+  if (historical) {
+    const frame = explorer.querySelector("iframe[data-explorer-frame]");
+    if (frame && !frame.hasAttribute("src") && token()) frame.src = frame.dataset.explorerFrame;
+    frame?.contentWindow?.postMessage("artisa:show-map", location.origin);
+  } else if (fleetMap) {
+    requestAnimationFrame(() => fitPendingMap(true));
+  }
+}
 
 function setLayerVisibility(layer, visible) {
   if (!fleetMap || !layer) return;
@@ -346,7 +385,7 @@ function renderRouteMonitor(routes) {
     button.className = "route-monitor-row";
     button.dataset.routeSelect = properties.route_id;
     const color = document.createElement("i");
-    color.style.backgroundColor = properties.color;
+    color.style.backgroundColor = ROUTE_COLORS[properties.usage_level] || "#718785";
     const copy = document.createElement("span");
     const name = document.createElement("strong");
     name.textContent = properties.route_id;
@@ -393,7 +432,7 @@ function vehicleStatus(vehicle) {
   const timestamp = vehicle.timestamp ? new Date(vehicle.timestamp).getTime() : NaN;
   if (!Number.isFinite(timestamp)) return {label: "Estado no disponible", className: "off"};
   const stale = Number.isFinite(timestamp) && Date.now() - timestamp > 30 * 60 * 1000;
-  if (stale) return {label: "Sin señal reciente", className: "off"};
+  if (stale) return {label: "Última posición histórica", className: "off"};
   const speed = Number(vehicle.speed_kmh || 0);
   if (speed > 3) return {label: "En movimiento", className: "moving"};
   if (vehicle.ignition !== null && vehicle.ignition !== undefined && Number(vehicle.ignition) === 0) {
@@ -401,6 +440,16 @@ function vehicleStatus(vehicle) {
   }
   return {label: "Con señal reciente", className: "moving"};
 }
+
+const TRUCK_MARKUP = '<svg class="truck-glyph" viewBox="0 0 32 32" aria-hidden="true" focusable="false">' +
+  '<rect x="7" y="3" width="18" height="17" rx="2" fill="#f9fbf7" stroke="#173f35" stroke-width="1.5"/>' +
+  '<rect x="6" y="20" width="20" height="8" rx="2" fill="#f9fbf7" stroke="#173f35" stroke-width="1.5"/>' +
+  '<rect x="9" y="22" width="14" height="3" rx="1" fill="#8fc1d1"/>' +
+  '<rect x="4" y="6" width="3" height="6" rx="1" fill="#173f35"/>' +
+  '<rect x="25" y="6" width="3" height="6" rx="1" fill="#173f35"/>' +
+  '<rect x="8" y="27" width="4" height="3" rx="1" fill="#173f35"/>' +
+  '<rect x="20" y="27" width="4" height="3" rx="1" fill="#173f35"/>' +
+  '</svg>';
 
 function renderLiveFleet(vehicles) {
   const list = $("vehicle-live-list");
@@ -420,7 +469,7 @@ function renderLiveFleet(vehicles) {
     button.dataset.vehicleSelect = vehicle.vehicle_id;
     const icon = document.createElement("span");
     icon.className = "vehicle-list-icon";
-    icon.textContent = "🚚";
+    icon.innerHTML = TRUCK_MARKUP;
     const copy = document.createElement("span");
     const name = document.createElement("strong");
     name.textContent = vehicle.vehicle_name || vehicle.vehicle_id;
@@ -503,11 +552,18 @@ function initializeFleetMap() {
     return;
   }
   container.replaceChildren();
-  fleetMap = L.map(container, {preferCanvas: true, zoomControl: true});
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  fleetMap = L.map(container, {preferCanvas: true, zoomControl: true})
+    .setView([-33.45, -70.66], 5);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors"
   }).addTo(fleetMap);
+  const pendingNote = document.createElement("div");
+  pendingNote.id = "map-pending-note";
+  pendingNote.className = "map-pending-note";
+  pendingNote.textContent = "Mapa base OpenStreetMap · rutas pendientes de procesamiento Machine";
+  pendingNote.hidden = true;
+  container.append(pendingNote);
 
   for (const [paneName, zIndex] of [
     ["routeLowPane", 410], ["routeMediumPane", 420],
@@ -540,7 +596,7 @@ function truckIcon(vehicle) {
     ? "<span class='truck-heading' style='transform:rotate(" + Number(vehicle.heading) + "deg)'>▲</span>"
     : "";
   const html = "<span class='truck-marker " + status.className +
-    "'>" + arrow + "<span class='truck-glyph'>🚚</span></span>";
+    "'>" + arrow + TRUCK_MARKUP + "</span>";
   return L.divIcon({
     className: "truck-div-icon",
     html,
@@ -760,10 +816,10 @@ function renderFleetMap(data) {
     if (!layer || !route.geometry || route.geometry.type !== "LineString") continue;
     const pane = level === "HIGH" ? "routeHighPane" : (level === "MEDIUM" ? "routeMediumPane" : "routeLowPane");
     const feature = {type: "Feature", properties, geometry: route.geometry};
-    const baseWeight = level === "HIGH" ? 5.2 : (level === "MEDIUM" ? 4.2 : 2.2);
-    const baseOpacity = level === "HIGH" ? 0.95 : (level === "MEDIUM" ? 0.84 : 0.38);
+    const baseWeight = level === "HIGH" ? 6 : (level === "MEDIUM" ? 4.8 : 3.3);
+    const baseOpacity = level === "HIGH" ? 0.98 : (level === "MEDIUM" ? 0.92 : 0.82);
     const haloWeight = baseWeight + 1.5;
-    const haloOpacity = level === "LOW" ? 0.16 : 0.65;
+    const haloOpacity = 0.9;
     const halo = L.geoJSON(feature, {
       pane, interactive: false,
       style: {color: "#ffffff", weight: haloWeight, opacity: haloOpacity,
@@ -771,7 +827,7 @@ function renderFleetMap(data) {
     }).addTo(layer);
     const line = L.geoJSON(feature, {
       pane,
-      style: {color: properties.color, weight: baseWeight, opacity: baseOpacity,
+      style: {color: ROUTE_COLORS[level], weight: baseWeight, opacity: baseOpacity,
         lineCap: "round", lineJoin: "round"}
     }).bindTooltip(textTooltip(
       (properties.usage_label || level) + " · " + (properties.route_id || "Ruta") +
@@ -864,22 +920,29 @@ function pendingText(ids, message = "Pendiente de procesamiento") {
 
 function renderHeatmap(data) {
   const pending = machinePending(data);
-  for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer], [data-monitor-tab], #monitor-search, #reset-map-view")) {
-    control.disabled = pending;
-  }
+  if (!userChoseMapMode) activeMapMode = pending ? "historical" : "classified";
+  setMapMode(activeMapMode, false, pending);
   if (pending) {
     currentMapData = data;
     journeyRequest++;
     activeJourneyVehicleId = null;
     selectedVehicleId = null;
     selectedRouteId = null;
-    if (fleetMap) { fleetMap.remove(); fleetMap = null; }
-    journeyLayer = null;
-    truckLayer = null;
+    if (fleetMap) {
+      for (const level of ROUTE_DRAW_ORDER) routeLayers[level].clearLayers();
+      truckLayer.clearLayers();
+      journeyLayer.clearLayers();
+    }
     truckMarkers.clear();
     routeMapLayers.clear();
     pendingMapBounds = null;
     mapHasFitted = false;
+    initializeFleetMap();
+    const pendingNote = $("map-pending-note");
+    if (pendingNote) pendingNote.hidden = false;
+    if (fleetMap && $("heatmap-map").offsetParent !== null) {
+      requestAnimationFrame(() => fleetMap.invalidateSize());
+    }
     pendingText(["heatmap-trips", "heatmap-vehicles", "heatmap-routes",
       "most-route", "least-route", "geo-model-zones", "heatmap-source-status"]);
     pendingText(["heatmap-intro", "heatmap-zones", "map-last-update", "most-route-usage",
@@ -892,14 +955,12 @@ function renderHeatmap(data) {
       item.textContent = "Pendiente de procesamiento Machine.";
       $(id).replaceChildren(item);
     }
-    const message = document.createElement("span");
-    message.className = "map-loading";
-    message.textContent = "Disponible cuando Machine genere resultados";
-    $("heatmap-map").replaceChildren(message);
     $("journey-detail").hidden = true;
     $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
     return;
   }
+  const pendingNote = $("map-pending-note");
+  if (pendingNote) pendingNote.hidden = true;
   const summary = data.summary;
   $("heatmap-trips").textContent = format(summary.trip_count || 0);
   $("heatmap-vehicles").textContent = format(summary.vehicle_count || 0);
@@ -1295,6 +1356,9 @@ async function refresh() {
 }
 
 $("refresh").addEventListener("click", refresh);
+for (const button of document.querySelectorAll("[data-map-mode]")) {
+  button.addEventListener("click", () => setMapMode(button.dataset.mapMode, true));
+}
 for (const button of document.querySelectorAll("[data-route-filter]")) {
   button.addEventListener("click", () => {
     activeRouteFilter = button.dataset.routeFilter || "ALL";

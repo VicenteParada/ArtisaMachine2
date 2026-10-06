@@ -41,7 +41,7 @@
 .truck-div-icon{background:transparent;border:0}
 .truck-marker{position:relative;display:grid;place-items:center;width:36px;height:36px;border:3px solid #fff;border-radius:50%;background:#e88836;box-shadow:0 3px 12px rgba(20,40,42,.38)}
 .truck-marker.moving{background:#58a566}.truck-marker.off{background:#708083}
-.truck-glyph{position:relative;z-index:2;font-size:18px;line-height:1;filter:grayscale(.15)}
+.truck-glyph{position:relative;z-index:2;display:block;width:23px;height:23px}
 .truck-heading{position:absolute;z-index:1;left:13px;top:-13px;width:8px;color:#173f35;font-size:10px;line-height:10px;transform-origin:4px 31px}
 .truck-popup{display:grid;min-width:190px;gap:5px;color:#172d32}.truck-popup>strong{font-size:13px}.truck-popup>span,.truck-popup>small{color:#687b7c;font-size:10px}.truck-popup>b{width:max-content;border-radius:10px;padding:3px 7px;font-size:9px}.truck-popup>b.moving{color:#245c36;background:#dcefe0}.truck-popup>b.off{color:#4e5d60;background:#e1e7e8}.truck-popup>p{margin:3px 0;font-size:10px}
 .legend-truck{color:#245c36!important}
@@ -394,8 +394,10 @@
 }
 .popup-journey-button:hover { background: #124b89; }
 
-/* Las vías del mapa base no compiten con la clasificación verde/naranja/roja. */
-#heatmap-map .leaflet-tile-pane { filter: grayscale(.72) saturate(.55) contrast(.96) brightness(1.04); }
+/* Conservar el detalle y los nombres del mapa base sin desaturar sus teselas. */
+#heatmap-map .leaflet-tile-pane { filter: none; }
+.vehicle-list-icon .truck-glyph { width:19px; height:19px; }
+.map-pending-note { position:absolute;bottom:28px;left:12px;z-index:1000;max-width:calc(100% - 24px);padding:9px 12px;border:1px solid #c7d4ce;border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 2px 12px rgba(20,40,42,.18);color:#173f35;font-size:11px;font-weight:700;pointer-events:none; }
 
 /* La vista principal resume únicamente rutas y vehículos. */
 .heatmap-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -425,3 +427,17 @@
 .explorer-frame-wrap{overflow:hidden;border:1px solid #d5e0d9;border-radius:9px;background:#f4f8f5}
 .explorer-frame-wrap iframe{display:block;width:100%;height:680px;border:0}
 @media(max-width:690px){.explorer-frame-wrap iframe{height:580px}}
+
+/* Las dos fuentes comparten un único espacio visible; no se alteran sus mapas. */
+.map-view-selector{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.map-view-selector button{padding:8px 12px;border:1px solid #c8d4cd;border-radius:7px;background:#fff;color:#356254;font-size:10px;font-weight:700;cursor:pointer}
+.map-view-selector button[aria-pressed="true"]{border-color:#216447;background:#216447;color:#fff}
+.map-view-selector button:disabled{opacity:.48;cursor:default}
+.map-view-selector button:focus-visible{outline:3px solid #f97316;outline-offset:2px}
+.map-view-selector>span{flex-basis:100%;color:var(--muted);font-size:10px;line-height:1.4}
+.map-view-stage{min-width:0}
+.map-view-stage .explorer-frame-wrap{width:100%}
+.map-view-stage .explorer-frame-wrap iframe{height:650px}
+.map-view-stage .heatmap-map[hidden],#classified-map-legend[hidden]{display:none!important}
+.map-card.showing-history .map-title-actions,.map-card.showing-history #heatmap-zones{display:none!important}
+@media(max-width:690px){.map-view-stage .explorer-frame-wrap iframe{height:600px}}
