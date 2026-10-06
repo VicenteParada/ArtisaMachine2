@@ -99,7 +99,7 @@ def classified_map(cursor):
     version = active_version(cursor)
     if not version:
         return None
-    cursor.execute("SELECT * FROM rutas WHERE version_id=%s ORDER BY usage_count DESC, route_id", (version["id"],))
+    cursor.execute("SELECT * FROM rutas_clasificadas WHERE version_id=%s ORDER BY usage_count DESC, route_id", (version["id"],))
     routes = [_route(row) for row in cursor.fetchall()]
     cursor.execute("SELECT asset_id, route_id FROM rutas_vehiculo WHERE version_id=%s", (version["id"],))
     route_by_asset = {row["asset_id"]: row["route_id"] for row in cursor.fetchall()}

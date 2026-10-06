@@ -157,10 +157,11 @@ CREATE TABLE IF NOT EXISTS reporte_diario_estado (
     PRIMARY KEY (fecha)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- (Nombre distinto de la tabla `viajes` del prototipo antiguo, que puede existir.)
 -- Viajes entre paradas de cada camión (machine_learning/viajes.py), uno por fila. Se
 -- guardan al calcular cada día y alimentan la clasificación de rutas. geometria es JSON
 -- con tramos de puntos GPS reales [[[lon,lat],...],...] sin unir saltos de GPS.
-CREATE TABLE IF NOT EXISTS viajes (
+CREATE TABLE IF NOT EXISTS viajes_camion (
     fecha DATE NOT NULL,
     asset_id VARCHAR(16) NOT NULL,
     inicio DATETIME(6) NOT NULL,
@@ -176,7 +177,7 @@ CREATE TABLE IF NOT EXISTS viajes (
     abierto_fin TINYINT(1) NOT NULL,
     geometria MEDIUMTEXT NOT NULL,
     PRIMARY KEY (fecha, asset_id, inicio),
-    INDEX idx_viajes_inicio (inicio)
+    INDEX idx_viajes_camion_inicio (inicio)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Versión del cálculo de cada día: si cambia el método (p. ej. al agregar viajes), los
@@ -184,7 +185,7 @@ CREATE TABLE IF NOT EXISTS viajes (
 ALTER TABLE reporte_diario_estado ADD COLUMN IF NOT EXISTS version_calculo SMALLINT UNSIGNED NOT NULL DEFAULT 1;
 
 -- Clasificación de rutas (machine_learning/rutas.py). Cada ejecución crea una versión
--- y la activa al final en una sola transacción. Son datos derivados de `viajes`.
+-- y la activa al final en una sola transacción. Son datos derivados de viajes_camion.
 CREATE TABLE IF NOT EXISTS rutas_version (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
     creado_en DATETIME(6) NOT NULL,
@@ -197,7 +198,7 @@ CREATE TABLE IF NOT EXISTS rutas_version (
     INDEX idx_rutas_version_activa (activa)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS rutas (
+CREATE TABLE IF NOT EXISTS rutas_clasificadas (
     version_id INT UNSIGNED NOT NULL,
     route_id VARCHAR(16) NOT NULL,
     label VARCHAR(255) NOT NULL,

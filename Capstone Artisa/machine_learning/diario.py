@@ -166,10 +166,10 @@ def guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recal
     inicio, fin = dias.limites_utc(dia)
     with connection.cursor() as cursor:
         cursor.execute("DELETE FROM reporte_diario WHERE fecha=%s", (dia,))
-        cursor.execute("DELETE FROM viajes WHERE fecha=%s", (dia,))
+        cursor.execute("DELETE FROM viajes_camion WHERE fecha=%s", (dia,))
         if viajes:
             cursor.executemany(
-                """INSERT IGNORE INTO viajes
+                """INSERT IGNORE INTO viajes_camion
                 (fecha,asset_id,inicio,fin,origen_lat,origen_lon,destino_lat,destino_lon,puntos,km,
                  con_saltos,abierto_inicio,abierto_fin,geometria)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",

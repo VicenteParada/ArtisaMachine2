@@ -1,8 +1,8 @@
 """Ejecuta la clasificación de rutas sobre los viajes de los días cerrados y la publica.
 
-Lee `viajes` (escritos por el cierre diario), empalma los viajes partidos en la
+Lee `viajes_camion` (escritos por el cierre diario), empalma los viajes partidos en la
 medianoche, agrupa en rutas (machine_learning/rutas.py) y guarda una versión nueva en
-`rutas_version` / `rutas` / `rutas_vehiculo`. La versión se activa en la misma
+`rutas_version` / `rutas_clasificadas` / `rutas_vehiculo`. La versión se activa en la misma
 transacción, así la API nunca ve una clasificación a medio escribir. Se conservan las
 últimas CONSERVAR_VERSIONES versiones (son datos derivados, recalculables).
 """
@@ -41,7 +41,7 @@ def ventana(cursor, dias=VENTANA_DIAS):
 
 def cargar_viajes(cursor, desde, hasta):
     cursor.execute(
-        """SELECT v.* FROM viajes AS v
+        """SELECT v.* FROM viajes_camion AS v
            INNER JOIN reporte_diario_estado AS e ON e.fecha = v.fecha AND e.estado = 'cerrado'
            WHERE v.fecha >= %s AND v.fecha <= %s ORDER BY v.asset_id, v.inicio""",
         (desde, hasta),
@@ -84,7 +84,7 @@ def guardar_version(connection, desde, hasta, rutas, lugares, metricas):
         version = cursor.lastrowid
         if rutas:
             cursor.executemany(
-                """INSERT INTO rutas
+                """INSERT INTO rutas_clasificadas
                 (version_id,route_id,label,origen,destino,usage_count,unique_vehicle_count,observed_points,
                  km_mediana,usage_level,geometry_source,geometria,primer_viaje,ultimo_viaje,vehiculos_json)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
@@ -108,7 +108,7 @@ def guardar_version(connection, desde, hasta, rutas, lugares, metricas):
                        (CONSERVAR_VERSIONES,))
         viejas = [fila["id"] for fila in cursor.fetchall()]
         for vieja in viejas:
-            cursor.execute("DELETE FROM rutas WHERE version_id=%s", (vieja,))
+            cursor.execute("DELETE FROM rutas_clasificadas WHERE version_id=%s", (vieja,))
             cursor.execute("DELETE FROM rutas_vehiculo WHERE version_id=%s", (vieja,))
             cursor.execute("DELETE FROM rutas_version WHERE id=%s", (vieja,))
     connection.commit()

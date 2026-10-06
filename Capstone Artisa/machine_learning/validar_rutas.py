@@ -27,7 +27,7 @@ def main(argv):
                 print("Todavía no hay una clasificación activa. Requiere días cerrados con viajes "
                       "(usa --ahora para intentar calcularla ya).")
                 return 1
-            cursor.execute("SELECT * FROM rutas WHERE version_id=%s ORDER BY usage_count DESC, route_id",
+            cursor.execute("SELECT * FROM rutas_clasificadas WHERE version_id=%s ORDER BY usage_count DESC, route_id",
                            (version["id"],))
             rutas = cursor.fetchall()
     metricas = json.loads(version["metricas_json"])

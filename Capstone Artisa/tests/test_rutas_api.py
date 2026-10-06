@@ -48,7 +48,7 @@ class MapContractTests(unittest.TestCase):
     def test_classified_map_matches_frontend_contract(self):
         cursor = FakeCursor([
             ("FROM rutas_version", lambda p: [dict(VERSION)]),
-            ("FROM rutas WHERE", [RUTA]),
+            ("FROM rutas_clasificadas WHERE", [RUTA]),
             ("FROM rutas_vehiculo", [{"asset_id": "RJXS30", "route_id": "R-ABC123"}]),
             ("FROM vehiculos", [{"asset_id": "RJXS30"}]),
             ("FROM telemetria_api WHERE asset_id", [{"asset_id": "RJXS30", "asset_name": "Lampa-826",
