@@ -18,4 +18,9 @@ subprocess.run(
     cwd=ROOT,
     check=True,
 )
+# Nginx guarda la dirección interna de cada servicio al arrancar. Si se reconstruyó
+# front o endpoints, sin este reinicio podría seguir enviando a una dirección vieja.
+subprocess.run(["docker", "compose", "restart", "nginx"], cwd=ROOT, check=True)
+subprocess.run(["docker", "compose", "up", "--detach", "--wait", "--wait-timeout", "60", "nginx"],
+               cwd=ROOT, check=True)
 print("Artisa en funcionamiento: http://localhost:8080")
