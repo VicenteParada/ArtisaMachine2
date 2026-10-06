@@ -109,9 +109,10 @@
           <p class="telemetry-intro">Esta sección quedará disponible cuando se conecte la API de telemetría de la empresa.</p>
         </div>
         <div id="telemetry-content" hidden>
+        <div id="telemetry-connection" class="telemetry-connection warning" role="status" aria-live="polite" hidden></div>
         <div class="real-metrics" aria-label="Resumen de telemetría real">
-          <article><span>Reportes guardados</span><strong id="telemetry-count">—</strong><small>Muestra: últimos 30 reportes</small></article>
-          <article><span>Vehículos observados</span><strong id="vehicle-count">—</strong><small>Identificados por asset_id</small></article>
+          <article><span>Reportes guardados</span><strong id="telemetry-count">—</strong><small>Tabla: últimos 30 reportes de camiones · se actualiza cada minuto</small></article>
+          <article><span>Camiones activos</span><strong id="vehicle-count">—</strong><small id="vehicle-count-note">Camiones con reportes en las últimas 24 h</small></article>
         </div>
         <div class="telemetry-range"><span id="telemetry-range">Esperando rango temporal…</span><span id="telemetry-quality">Esperando control de calidad…</span></div>
         <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha UTC</th><th>Evento</th><th>Coordenadas</th><th>Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>

@@ -441,3 +441,4 @@
 .map-view-stage .heatmap-map[hidden],#classified-map-legend[hidden]{display:none!important}
 .map-card.showing-history .map-title-actions,.map-card.showing-history #heatmap-zones{display:none!important}
 @media(max-width:690px){.map-view-stage .explorer-frame-wrap iframe{height:600px}}
+.telemetry-connection{margin:0 0 14px;padding:12px 14px;border-radius:7px;font-size:11px;line-height:1.6;border:1px solid #ebcfbc;background:#fff4ec;color:#7a3f22}.telemetry-connection.info{border-color:#bed2f1;background:#eef4ff;color:#23538f}.telemetry-table td small.age-recent{color:var(--green);font-weight:600}.telemetry-table td small.age-old{color:#a6532d}

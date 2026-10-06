@@ -58,8 +58,8 @@ por sí solo la salud del sistema base.
 | GET | `/api/estado` | Diagnóstico ETL y Machine |
 | GET | `/api/faenas` | Catálogo existente |
 | GET | `/api/modelo/telemetria` | Estado y zonas DBSCAN existentes |
-| GET | `/api/telemetria?limite=30` | `pending`, fuente `company_api`, sin consulta a históricos |
-| GET | `/api/telemetria/resumen` | `pending`, fuente `company_api`, totales `null` |
+| GET | `/api/telemetria?limite=30` | Últimos reportes de camiones desde la API de la empresa y estado de conexión; `pending` si no está configurada |
+| GET | `/api/telemetria/resumen` | Totales, camiones activos en 24 h y rango; `pending` si no está configurada |
 | GET | `/api/mapa` | `PENDING_MACHINE`, sin rutas ni viajes inventados |
 | GET | `/api/dashboard` | `pending`, sin métricas calculadas |
 
@@ -117,12 +117,55 @@ si ya existe. No cambies estas contraseñas mientras uses el volumen actual sin
 actualizar también las cuentas de MariaDB. `.env` no entra en Git ni en las imágenes.
 La tabla de mensajes y el volumen de la prueba anterior se conservan.
 
+## Catálogo de vehículos (solo camiones)
+
+`raw_gps` conserva todos los vehículos que entregó el GPS; nada se borra. Las
+lecturas de camiones (explorador `/api/gps`, Machine, telemetría actual) filtran
+con las tablas `vehiculos` y `tipos_vehiculo`, ahora versionadas en `DB/schema.sql`.
+
+- `DB/vehiculos_data.sql` trae el catálogo inicial (124 patentes de patentes.csv).
+  El ETL lo aplica al arrancar; solo agrega lo que falta.
+- Al arrancar, el ETL registra los vehículos de `raw_gps` que aún no están en el
+  catálogo, y tanto el ETL como el servicio `telemetria` registran los nuevos que
+  aparezcan. La clasificación automática usa el nombre (`common/vehiculos.py`).
+- Una clasificación existente nunca se sobrescribe. Para corregir un vehículo:
+  `UPDATE vehiculos SET id_tipo=(SELECT id_tipo FROM tipos_vehiculo WHERE nombre='camion') WHERE asset_id='XXXX00';`
+- `/api/estado` muestra cuántos vehículos hay de cada tipo en `catalogo_vehiculos`.
+
+## Telemetría actual (API de la empresa)
+
+El servicio `telemetria` consulta la API SQL de la empresa (`POST {"sql": ...}` →
+`{"rows": [...]}`) y guarda los reportes en `telemetria_api`, separada del histórico.
+Solo funciona con el equipo conectado a la red de la empresa. Configura en `.env`:
+
+```dotenv
+COMPANY_API_URL=http://IP_DE_LA_API:3003/sql
+COMPANY_API_TOKEN=          # solo si la API lo pide (se envía en Authorization)
+```
+
+y ejecuta `python3 scripts/check_company_api.py` para probar la conexión antes de
+levantar el servicio. Sin `COMPANY_API_URL` el servicio queda en espera y la web
+muestra "Pendiente de API empresa", igual que antes.
+
+Comportamiento ante cortes:
+
+- Si se cae el Wi-Fi o la API, reintenta solo (5 s, 10 s, 20 s… máximo 60 s) y
+  la web muestra "Reconectando" con los últimos datos recibidos.
+- El cursor se guarda junto con cada página: al volver la red recupera todo el
+  período desconectado, sin perder ni duplicar reportes (`report_id` es la clave).
+- Relee los últimos 5 minutos en cada ciclo para capturar reportes atrasados, e
+  ignora fechas más de 10 minutos en el futuro (GPS con reloj adelantado).
+- Si cambia la IP de la API, basta con actualizar `COMPANY_API_URL`; el cursor se conserva.
+- Si el ciclo se detiene, el contenedor termina y Docker lo reinicia.
+- La página Reportes se actualiza cada minuto sin recargar y de inmediato al
+  volver la conexión del navegador. Cada fila indica si es una posición reciente
+  (menos de 15 min) o el último dato conocido.
+
+`COMPANY_API_TIMEZONE=auto` detecta la hora del origen comparándola con el reloj
+de este equipo (mantén la hora del equipo sincronizada).
+
 ## Pendiente de integración Machine
 
-El trabajador requiere los catálogos `vehiculos` y `tipos_vehiculo`, ausentes
-del esquema versionado. Existen en la base persistente actual, pero su
-provisión reproducible queda pendiente junto con Machine. Ninguna ruta actual
-del frontend depende de ellos.
 `common/telemetry_map.py` se conserva como referencia legacy utilizada por sus
 pruebas; no está conectado a los endpoints activos.
 

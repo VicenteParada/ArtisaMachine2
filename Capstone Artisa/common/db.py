@@ -21,11 +21,22 @@ def connect_db(autocommit=True):
     )
 
 
+def _statements(path):
+    # Los archivos no usan ";" dentro de comentarios ni de textos.
+    for statement in path.read_text(encoding="utf-8").split(";"):
+        code = "\n".join(line for line in statement.splitlines() if not line.strip().startswith("--"))
+        if code.strip():
+            yield statement
+
+
 def initialize_db():
     # El esquema contiene únicamente CREATE TABLE IF NOT EXISTS, sin borrar datos.
-    schema = Path(__file__).resolve().parent.parent / "DB" / "schema.sql"
+    # El catálogo de vehículos solo agrega filas faltantes (INSERT IGNORE / NOT EXISTS).
+    db_dir = Path(__file__).resolve().parent.parent / "DB"
     with connect_db() as connection, connection.cursor() as cursor:
-        for statement in schema.read_text(encoding="utf-8").split(";"):
-            if statement.strip():
-                cursor.execute(statement)
+        for name in ("schema.sql", "vehiculos_data.sql"):
+            path = db_dir / name
+            if path.exists():
+                for statement in _statements(path):
+                    cursor.execute(statement)
 

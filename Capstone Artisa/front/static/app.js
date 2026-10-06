@@ -1213,11 +1213,80 @@ function renderDashboard(data, metrics = {}) {
     "Las coordenadas se dividen en cinco zonas relativas al centro del área observada: norte, centro, sur, oeste y este. " +
     "Cada ruta conserva una sola clasificación y se cuenta en la zona de su centro geométrico. Actualización automática con el mismo bloque del mapa.";
 }
+function formatAge(seconds) {
+  const value = Math.max(0, Math.round(seconds));
+  if (value < 90) return "hace menos de 2 min";
+  if (value < 5400) return `hace ${format(Math.round(value / 60))} min`;
+  if (value < 172800) return `hace ${format(Math.round(value / 3600))} h`;
+  return `hace ${format(Math.round(value / 86400))} días`;
+}
+
+function connectionMessage(connection) {
+  const since = connection.desconectado_desde ? ` desde ${formatUtc(connection.desconectado_desde)} UTC` : "";
+  if (connection.conexion === "reconectando") {
+    return `Sin conexión con la API de la empresa${since}. El sistema reintenta solo; cuando vuelva la red recuperará los reportes del período desconectado. Se muestran los últimos datos recibidos.`;
+  }
+  if (connection.conexion === "error_configuracion") {
+    return `La API de la empresa rechazó la consulta${since}. Revisa COMPANY_API_URL y las credenciales en .env. Se muestran los últimos datos recibidos.`;
+  }
+  if (connection.conexion === "servicio_detenido") {
+    return "El servicio de telemetría no informa actividad reciente. Revisa el contenedor artisa-telemetria. Se muestran los últimos datos recibidos.";
+  }
+  if (connection.advertencia) return connection.advertencia;
+  return "";
+}
+
+function setTelemetryBanner(message, tone = "warning") {
+  const banner = $("telemetry-connection");
+  banner.hidden = !message;
+  banner.textContent = message || "";
+  banner.className = "telemetry-connection " + tone;
+}
+
+// Bucle propio de Reportes: más frecuente que el refresco general, nunca se
+// superpone, conserva los últimos datos si falla y reintenta al volver la red.
+const TELEMETRY_REFRESH_MS = 60000;
+let telemetryRefreshing = false;
+let telemetryLastOk = null;
+
+async function refreshTelemetry() {
+  if (!token() || document.hidden || telemetryRefreshing) return;
+  const version = sessionVersion;
+  telemetryRefreshing = true;
+  try {
+    const [telemetrySummary, telemetryDataset] = await Promise.all([
+      api("/api/telemetria/resumen"),
+      api("/api/telemetria?limite=30")
+    ]);
+    if (version !== sessionVersion || !token()) return;
+    renderTelemetry(telemetrySummary, telemetryDataset, {});
+    telemetryLastOk = new Date();
+  } catch (error) {
+    if (version !== sessionVersion || !token()) return;
+    if (!$("telemetry-content").hidden) {
+      const last = telemetryLastOk
+        ? ` Última actualización correcta: ${telemetryLastOk.toLocaleTimeString("es-CL")}.`
+        : "";
+      setTelemetryBanner(
+        (navigator.onLine === false
+          ? "Este equipo está sin conexión a la red."
+          : "No se pudo contactar al servidor de Artisa.") +
+        " Se reintentará automáticamente y se muestran los últimos datos disponibles." + last
+      );
+    }
+  } finally {
+    if (version === sessionVersion) telemetryRefreshing = false;
+  }
+}
+
 function renderTelemetry(summary, dataset, state) {
   const pending = dataset.status === "pending" && dataset.source === "company_api";
   $("telemetry-pending").hidden = !pending;
   $("telemetry-content").hidden = pending;
+  const tabNote = document.querySelector('[data-dataset-tab="real"] small');
   if (pending) {
+    if (tabNote) tabNote.textContent = "Pendiente de API empresa";
+    setTelemetryBanner("");
     $("telemetry-status").textContent = "Pendiente de API empresa";
     $("telemetry-status").className = "status neutral";
     $("telemetry-rows").replaceChildren();
@@ -1228,31 +1297,30 @@ function renderTelemetry(summary, dataset, state) {
     return;
   }
   const reports = dataset.reportes || [];
-  const telemetryState = state.telemetria || state.etl || {};
-  $("telemetry-count").textContent = summary.status === "pending" ? "Pendiente de procesamiento" : format(summary.reportes);
-  $("vehicle-count").textContent = summary.status === "pending" ? "Pendiente de procesamiento" : format(summary.vehiculos);
-  $("telemetry-range").textContent = summary.status === "pending"
-    ? "Resumen pendiente de procesamiento; la tabla muestra reportes GPS reales."
-    : summary.reportes
-    ? `Desde ${formatUtc(summary.desde)} hasta ${formatUtc(summary.hasta)}`
-    : "Todavía no hay reportes importados.";
+  const connection = dataset.conexion || summary.conexion || {};
+  const recentSeconds = Number(connection.reporte_reciente_segundos || 900);
+  $("telemetry-count").textContent = format(summary.reportes || 0);
+  $("vehicle-count").textContent = summary.vehiculos === null || summary.vehiculos === undefined
+    ? "Sin dato" : format(summary.vehiculos);
+  $("vehicle-count-note").textContent = `Camiones con reportes en las últimas ${format(summary.vehiculos_ventana_horas || 24)} h`;
+  $("telemetry-range").textContent = connection.ultimo_dato
+    ? `Último reporte recibido: ${formatUtc(connection.ultimo_dato)} UTC · último contacto con la API: ${connection.ultimo_exito ? formatUtc(connection.ultimo_exito) + " UTC" : "sin contacto aún"}`
+    : "La API está configurada, pero todavía no entrega reportes.";
+  $("telemetry-quality").textContent =
+    `${format(connection.guardados || 0)} guardados · ${format(connection.rechazados || 0)} rechazados de ${format(connection.leidos || 0)} leídos`;
 
-  const read = Number(telemetryState.leidos || 0);
-  const valid = Number(telemetryState.validos || 0);
-  const rejected = Number(telemetryState.rechazados || 0);
-  $("telemetry-quality").textContent = `${format(valid)} válidos · ${format(rejected)} rechazados de ${format(read)} leídos`;
-  const labels = {
-    ejecutando: "Extrayendo datos",
-    completo: "Ventana completa",
-    limite_alcanzado: "Carga controlada completa",
-    esperando: "Sincronizado · esperando nuevos datos",
-    esperando_nuevos_datos: "Sincronizado · próxima revisión en 15 min",
-    deshabilitado: "ETL real deshabilitado",
-    error: "Error en la última carga"
+  const states = {
+    en_vivo: ["En vivo", "status"],
+    sin_reportes_recientes: ["Conectado · sin reportes recientes", "status neutral"],
+    reconectando: ["Reconectando con la API…", "status warning"],
+    error_configuracion: ["Revisar configuración de la API", "status warning"],
+    servicio_detenido: ["Servicio de telemetría detenido", "status warning"]
   };
-  const status = telemetryState.estado || (summary.reportes ? "completo" : "deshabilitado");
-  $("telemetry-status").textContent = labels[status] || "Datos disponibles";
-  $("telemetry-status").className = `status ${status === "error" ? "warning" : ""}`;
+  const [label, className] = states[connection.conexion] || ["Estado desconocido", "status neutral"];
+  $("telemetry-status").textContent = label;
+  $("telemetry-status").className = className;
+  if (tabNote) tabNote.textContent = "API empresa · " + label;
+  setTelemetryBanner(connectionMessage(connection), connection.advertencia && connection.conexion === "en_vivo" ? "info" : "warning");
 
   const body = $("telemetry-rows");
   body.replaceChildren();
@@ -1267,6 +1335,15 @@ function renderTelemetry(summary, dataset, state) {
 
     const date = document.createElement("td");
     date.textContent = formatUtc(report.report_date);
+    const age = document.createElement("small");
+    const ageSeconds = Number(report.edad_segundos);
+    if (Number.isFinite(ageSeconds)) {
+      age.textContent = ageSeconds <= recentSeconds
+        ? "Posición reciente · " + formatAge(ageSeconds)
+        : "Último dato conocido · " + formatAge(ageSeconds);
+      age.className = ageSeconds <= recentSeconds ? "age-recent" : "age-old";
+      date.append(age);
+    }
     tr.append(date);
 
     const event = document.createElement("td");
@@ -1399,3 +1476,7 @@ document.addEventListener("visibilitychange", () => {
 });
 restoreSession();
 setInterval(refresh, 300000);
+setInterval(refreshTelemetry, TELEMETRY_REFRESH_MS);
+// Al recuperar la red o volver a la pestaña, actualizar de inmediato sin esperar el minuto.
+window.addEventListener("online", () => { refreshTelemetry(); refresh(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshTelemetry(); });

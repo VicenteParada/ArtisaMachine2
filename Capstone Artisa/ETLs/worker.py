@@ -5,13 +5,26 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from common.db import initialize_db
+from common.db import connect_db, initialize_db
 from common.http import JsonHandler, serve
+from common.vehiculos import sincronizar_desde_raw_gps
 from ETLs.telemetry import TelemetryConfig, record_error, run_once
 
 
 INTERVAL = int(os.environ.get("TELEMETRY_INTERVAL_SECONDS", "30"))
 STATE = {"last_success": 0.0, "error": None, "estado": "pendiente"}
+
+
+def sync_catalog():
+    """Clasifica una vez los vehiculos ya cargados en raw_gps que faltan en el catalogo.
+    Un fallo aqui no detiene el ETL: se reintenta en el proximo arranque."""
+    try:
+        with connect_db() as connection, connection.cursor() as cursor:
+            nuevos = sincronizar_desde_raw_gps(cursor)
+        if nuevos:
+            print(f"ETL: {nuevos} vehiculos agregados al catalogo", flush=True)
+    except Exception as error:
+        print(f"ETL: no se pudo sincronizar el catalogo ({type(error).__name__}: {error})", flush=True)
 
 
 def loop():
@@ -23,6 +36,7 @@ def loop():
                 initialize_db()
                 config = TelemetryConfig.from_env()
                 initialized = True
+                sync_catalog()
             result = run_once(config)
             STATE.update(last_success=time.monotonic(), error=None, **result)
             if result["recibidos"]:

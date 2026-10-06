@@ -71,6 +71,38 @@ services:
     restart: unless-stopped
     init: true
 
+  # Telemetría actual: consulta la API de la empresa (requiere estar en su red/Wi-Fi).
+  # Sin COMPANY_API_URL queda en espera y la web sigue mostrando "pendiente".
+  # Ante cortes reintenta solo y retoma desde el último reporte guardado.
+  telemetria:
+    build:
+      context: .
+      dockerfile: telemetria_api/Dockerfile
+    container_name: artisa-telemetria
+    environment:
+      <<: *db-environment
+      COMPANY_API_URL: ${COMPANY_API_URL:-}
+      COMPANY_API_TOKEN: ${COMPANY_API_TOKEN:-}
+      COMPANY_API_AUTH_HEADER: ${COMPANY_API_AUTH_HEADER:-Authorization}
+      COMPANY_API_TABLE: ${COMPANY_API_TABLE:-reportes}
+      COMPANY_API_TIMEZONE: ${COMPANY_API_TIMEZONE:-auto}
+      COMPANY_API_NATIVE_DATES: ${COMPANY_API_NATIVE_DATES:-1}
+      COMPANY_API_INTERVAL_SECONDS: ${COMPANY_API_INTERVAL_SECONDS:-30}
+      COMPANY_API_TIMEOUT_SECONDS: ${COMPANY_API_TIMEOUT_SECONDS:-30}
+      COMPANY_API_BATCH_SIZE: ${COMPANY_API_BATCH_SIZE:-1000}
+      COMPANY_API_OVERLAP_SECONDS: ${COMPANY_API_OVERLAP_SECONDS:-300}
+      COMPANY_API_INITIAL_LOOKBACK_HOURS: ${COMPANY_API_INITIAL_LOOKBACK_HOURS:-24}
+      COMPANY_API_RETRY_MIN_SECONDS: ${COMPANY_API_RETRY_MIN_SECONDS:-5}
+      COMPANY_API_RETRY_MAX_SECONDS: ${COMPANY_API_RETRY_MAX_SECONDS:-60}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck: *python-health
+    restart: unless-stopped
+    init: true
+
   machine:
     build:
       context: .
@@ -97,6 +129,7 @@ services:
     environment:
       <<: *db-environment
       TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
+      COMPANY_API_INTERVAL_SECONDS: ${COMPANY_API_INTERVAL_SECONDS:-30}
     depends_on:
       mariadb:
         condition: service_healthy

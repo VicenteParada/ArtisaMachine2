@@ -11,6 +11,7 @@ import pymysql
 
 from common.db import connect_db
 from common.http import JsonHandler, serve
+from common.vehiculos import sql_es_camion
 
 
 STARTED_AT = time.monotonic()
@@ -18,7 +19,6 @@ ETL_STALE_SECONDS = max(60, int(os.getenv("TELEMETRY_INTERVAL_SECONDS", "30")) *
 
 
 PENDING_RESPONSES = {
-    "/api/telemetria": {"status": "pending", "source": "company_api", "reportes": []},
     "/api/modelo/telemetria": {"status": "pending", "message": "Pendiente de integración Machine"},
     "/api/mapa": {
         "schema_version": 1, "source_mode": "PENDING_MACHINE", "snapshot_date": None,
@@ -40,11 +40,119 @@ PENDING_RESPONSES = {
         "operacion": {"viajes": None},
         "rutas": {"HIGH": None, "MEDIUM": None, "LOW": None},
     },
-    "/api/telemetria/resumen": {
-        "status": "pending", "source": "company_api", "reportes": None, "vehiculos": None,
-        "desde": None, "hasta": None,
-    },
 }
+
+
+# Telemetría actual (servicio telemetria). Mientras la API de la empresa no esté
+# configurada, estas rutas responden exactamente lo mismo que antes ("pending").
+TELEMETRY_PENDING = {"status": "pending", "source": "company_api", "reportes": []}
+TELEMETRY_SUMMARY_PENDING = {
+    "status": "pending", "source": "company_api", "reportes": None, "vehiculos": None,
+    "desde": None, "hasta": None,
+}
+COMPANY_API_INTERVAL = max(5, int(os.getenv("COMPANY_API_INTERVAL_SECONDS", "30")))
+# Sin un contacto exitoso en este plazo, la conexión se informa como caída.
+COMPANY_API_STALE_SECONDS = max(90, COMPANY_API_INTERVAL * 3)
+# Un reporte más nuevo que esto se presenta como posición reciente; uno más antiguo,
+# como último dato conocido.
+RECENT_REPORT_SECONDS = 15 * 60
+TELEMETRY_MAX_LIMIT = 200
+CONNECTION_ERRORS = {"sin_conexion", "error_origen", "respuesta_invalida", "error_interno"}
+
+
+def company_api_state(cursor):
+    """Estado de la conexión con la API de la empresa, o None si no está configurada."""
+    try:
+        cursor.execute(
+            """SELECT estado, ultimo_error, fallos_consecutivos, leidos, validos, rechazados,
+                      ultimo_exito, ultimo_dato, desconectado_desde, advertencia,
+                      TIMESTAMPDIFF(SECOND, ultimo_exito, UTC_TIMESTAMP(6)) AS exito_hace,
+                      TIMESTAMPDIFF(SECOND, ultimo_dato, UTC_TIMESTAMP(6)) AS dato_hace,
+                      TIMESTAMPDIFF(SECOND, ultima_revision, UTC_TIMESTAMP(6)) AS revision_hace
+               FROM telemetria_api_estado WHERE id=1"""
+        )
+    except pymysql.err.ProgrammingError:
+        return None  # tabla aún no creada: el servicio telemetria no ha arrancado nunca
+    row = cursor.fetchone()
+    if not row or row["estado"] == "sin_configurar":
+        return None
+    reachable = (row["estado"] == "conectado" and row["exito_hace"] is not None
+                 and row["exito_hace"] < COMPANY_API_STALE_SECONDS)
+    worker_alive = row["revision_hace"] is not None and row["revision_hace"] < max(600, COMPANY_API_STALE_SECONDS * 2)
+    if not worker_alive:
+        conexion = "servicio_detenido"
+    elif reachable:
+        recent = row["dato_hace"] is not None and row["dato_hace"] < RECENT_REPORT_SECONDS
+        conexion = "en_vivo" if recent else "sin_reportes_recientes"
+    elif row["estado"] == "error_configuracion":
+        conexion = "error_configuracion"
+    else:
+        conexion = "reconectando"
+    return {
+        "conexion": conexion,
+        "estado": row["estado"],
+        "ultimo_error": row["ultimo_error"],
+        "fallos_consecutivos": row["fallos_consecutivos"],
+        "ultimo_exito": row["ultimo_exito"],
+        "ultimo_dato": row["ultimo_dato"],
+        "desconectado_desde": row["desconectado_desde"],
+        "advertencia": row["advertencia"],
+        "leidos": row["leidos"], "guardados": row["validos"], "rechazados": row["rechazados"],
+        "reporte_reciente_segundos": RECENT_REPORT_SECONDS,
+    }
+
+
+def telemetry_limit(query):
+    raw = parse_qs(query).get("limite", ["30"])[0]
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if 1 <= value <= TELEMETRY_MAX_LIMIT else None
+
+
+def latest_telemetry(cursor, limit):
+    api_state = company_api_state(cursor)
+    if api_state is None:
+        return TELEMETRY_PENDING
+    cursor.execute(
+        f"""SELECT report_id, asset_id, asset_name, report_date, latitude, longitude, speed,
+                  heading, ignition, event_name,
+                  TIMESTAMPDIFF(SECOND, report_date, UTC_TIMESTAMP(6)) AS edad_segundos
+           FROM telemetria_api WHERE {sql_es_camion("asset_id")}
+           ORDER BY report_date DESC LIMIT %s""",
+        (limit,),
+    )
+    return {"status": "ok", "source": "company_api", "conexion": api_state,
+            "reportes": cursor.fetchall()}
+
+
+def telemetry_summary(cursor):
+    api_state = company_api_state(cursor)
+    if api_state is None:
+        return TELEMETRY_SUMMARY_PENDING
+    cursor.execute("SELECT MIN(report_date) AS desde, MAX(report_date) AS hasta FROM telemetria_api")
+    span = cursor.fetchone() or {}
+    cursor.execute(
+        f"""SELECT COUNT(DISTINCT asset_id) AS vehiculos FROM telemetria_api
+           WHERE report_date >= UTC_TIMESTAMP(6) - INTERVAL 24 HOUR AND {sql_es_camion("asset_id")}"""
+    )
+    vehicles = (cursor.fetchone() or {}).get("vehiculos")
+    return {"status": "ok", "source": "company_api", "conexion": api_state,
+            "reportes": api_state["guardados"], "vehiculos": vehicles,
+            "vehiculos_ventana_horas": 24, "desde": span.get("desde"), "hasta": span.get("hasta")}
+
+
+def vehicle_catalog(cursor):
+    try:
+        cursor.execute(
+            """SELECT t.nombre AS tipo, COUNT(*) AS vehiculos FROM vehiculos AS v
+               INNER JOIN tipos_vehiculo AS t ON t.id_tipo = v.id_tipo
+               GROUP BY t.nombre ORDER BY t.nombre"""
+        )
+    except pymysql.err.ProgrammingError:
+        return None
+    return {row["tipo"]: row["vehiculos"] for row in cursor.fetchall()}
 
 
 def pipeline_state(cursor, detailed=True):
@@ -65,8 +173,13 @@ def pipeline_state(cursor, detailed=True):
             "mariadb": "ok",
             "machine": "pending",
             "endpoints": "ok",
+            "telemetria_api": "pending",
         },
     }
+    api_state = company_api_state(cursor)
+    if api_state is not None:
+        live = api_state["conexion"] in ("en_vivo", "sin_reportes_recientes")
+        state["componentes"]["telemetria_api"] = "ok" if live else "unavailable"
     if not detailed:
         return {key: state[key] for key in ("status", "servicio", "componentes")}
     state.update({
@@ -74,6 +187,8 @@ def pipeline_state(cursor, detailed=True):
             "rechazos": json.loads(etl["rechazos_json"])
         }) if etl else None,
         "modelo_telemetria": None,
+        "telemetria_api": api_state,
+        "catalogo_vehiculos": vehicle_catalog(cursor),
         "uptime_seconds": round(time.monotonic() - STARTED_AT, 2),
     })
     return state
@@ -99,14 +214,15 @@ def gps_range(query):
 
 
 def gps_points(cursor, desde, hasta):
-    """Todos los reportes GPS del rango, en columnas compactas para el mapa del navegador.
+    """Reportes GPS de camiones del rango, en columnas compactas para el mapa del navegador.
+    Las camionetas, furgones y demás vehículos siguen guardados en raw_gps, pero no se muestran.
     t = segundos desde 'desde' 00:00 (hora tal cual viene en report_date); lat/lon x 1e5."""
     # Leer por el índice de fecha evita ordenar millones de filas en MariaDB.
     # La misma deduplicación y el orden por camión/hora se completan en memoria.
     cursor.execute(
-        """SELECT asset_id, report_date, latitude, longitude
+        f"""SELECT asset_id, report_date, latitude, longitude
            FROM raw_gps
-           WHERE report_date >= %s AND report_date < %s
+           WHERE report_date >= %s AND report_date < %s AND {sql_es_camion("asset_id")}
            ORDER BY report_date""",
         (desde, hasta + timedelta(days=1)),
     )
@@ -148,14 +264,22 @@ class Handler(JsonHandler):
             self.respond(200, {"servicio": "artisa-api", "contenedor": socket.gethostname(),
                                "mensaje": "Endpoints Artisa",
                                "rutas": ["/health", "/api/estado", "/api/faenas",
-                                         "/api/gps?desde=YYYY-MM-DD&hasta=YYYY-MM-DD", *PENDING_RESPONSES]})
+                                         "/api/gps?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
+                                         "/api/telemetria?limite=30", "/api/telemetria/resumen",
+                                         *PENDING_RESPONSES]})
             return
         if path in PENDING_RESPONSES:
             self.respond(200, PENDING_RESPONSES[path])
             return
-        if path not in ("/health", "/api/estado", "/api/faenas", "/api/gps"):
+        if path not in ("/health", "/api/estado", "/api/faenas", "/api/gps",
+                        "/api/telemetria", "/api/telemetria/resumen"):
             self.respond(404, {"error": "Ruta no encontrada"})
             return
+        if path == "/api/telemetria":
+            limit = telemetry_limit(parsed.query)
+            if limit is None:
+                self.respond(400, {"error": f"limite debe ser un entero entre 1 y {TELEMETRY_MAX_LIMIT}"})
+                return
         if path == "/api/gps":
             desde, hasta, error = gps_range(parsed.query)
             if error:
@@ -180,13 +304,18 @@ class Handler(JsonHandler):
                     self.respond(200, {"faenas": faenas})
                 elif path == "/api/gps":
                     self.respond(200, gps_points(cursor, desde, hasta))
+                elif path == "/api/telemetria":
+                    self.respond(200, latest_telemetry(cursor, limit))
+                elif path == "/api/telemetria/resumen":
+                    self.respond(200, telemetry_summary(cursor))
         except pymysql.MySQLError as error:
             if path == "/health":
                 self.log_error("Error de MariaDB: %s", type(error).__name__)
                 self.respond(503, {
                     "status": "degraded", "servicio": "artisa-api",
                     "componentes": {"mariadb": "unavailable", "etl": "unavailable",
-                                    "machine": "pending", "endpoints": "ok"},
+                                    "machine": "pending", "endpoints": "ok",
+                                    "telemetria_api": "unavailable"},
                 })
             else:
                 self.database_error(error)

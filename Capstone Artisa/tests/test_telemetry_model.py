@@ -26,9 +26,9 @@ class TelemetryModelTests(unittest.TestCase):
             version = cycle("old-version", radius_km=0.5, min_samples=3, max_rows=42)
 
         query, parameters = cursor.execute.call_args_list[1].args
-        self.assertIn("INNER JOIN vehiculos AS v ON v.asset_id = gps.asset_id", query)
+        self.assertIn("gps.asset_id IN (SELECT v.asset_id FROM vehiculos AS v", query)
         self.assertIn("INNER JOIN tipos_vehiculo AS t ON t.id_tipo = v.id_tipo", query)
-        self.assertIn("WHERE t.nombre = 'CAMION'", query)
+        self.assertIn("WHERE t.nombre = 'camion'", query)
         self.assertIn("ORDER BY gps.report_date DESC LIMIT %s", query)
         self.assertEqual(parameters, (42,))
         train.assert_called_once_with(rows, radius_km=0.5, min_samples=3)
