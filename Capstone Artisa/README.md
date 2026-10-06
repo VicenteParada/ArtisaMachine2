@@ -61,13 +61,16 @@ por sí solo la salud del sistema base.
 | GET | `/api/telemetria?limite=30` | `pending`, fuente `company_api`, sin consulta a históricos |
 | GET | `/api/telemetria/resumen` | `pending`, fuente `company_api`, totales `null` |
 | GET | `/api/mapa` | `PENDING_MACHINE`, sin rutas ni viajes inventados |
-| GET | `/api/dashboard` | `pending`, sin métricas calculadas |
+| GET | `/api/dashboard` o `/api/dashboard?fecha=YYYY-MM-DD&dias=7` | Resumen GPS de un día cerrado en Chile; rankings pendientes de Machine |
 
 El recorrido por vehículo no está implementado y su acción permanece desactivada
 mientras Machine está pendiente. El frontend muestra pendientes, no ceros ficticios.
 La telemetría actual depende de la futura API de la empresa. No se muestran
 los históricos de `raw_gps` como datos actuales. Mientras está pendiente,
 `limite` se acepta sin efecto y no se consulta MariaDB para estas dos rutas.
+El Dashboard sí consulta `raw_gps` como histórico por jornada cerrada; no lo
+presenta como posición actual. Su contrato para publicar rutas procesadas está
+en [docs/CONTRATO_DASHBOARD.md](docs/CONTRATO_DASHBOARD.md).
 
 ## Comprobar y detener
 

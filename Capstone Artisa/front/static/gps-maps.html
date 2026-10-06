@@ -72,6 +72,13 @@
     width: 14px; height: 14px; border-radius: 50%; background: #2e7d32;
     border: 2px solid #fff; box-shadow: 0 0 3px rgba(0, 0, 0, .5);
   }
+  .camion-seleccionado { display: grid; place-items: center; width: 38px; height: 38px;
+    border: 3px solid #fff; border-radius: 50%; background: #216447;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, .35); font-size: 21px; }
+  .camion-ficha { display: grid; gap: 5px; min-width: 190px; font-size: 12px; }
+  .camion-ficha strong { font-size: 14px; }
+  .camion-ficha small { color: var(--suave); }
+  .camion-ficha button { margin-top: 4px; color: var(--acento); font-weight: 700; }
   .solo-calor .pestanas { display: none; }
   .etiqueta { color: var(--acento); font-size: 11px; font-weight: 700; }
 </style>
@@ -841,6 +848,131 @@ async function mostrarVista(nombre) {
   estado(v.resumen);
 }
 
+// Selección visual del vehículo: capas independientes de las cuatro vistas y sus cálculos.
+const capaCamionSeleccionado = L.layerGroup().addTo(mapa);
+const capaRecorridoSeleccionado = L.layerGroup().addTo(mapa);
+mapa.createPane("recorrido-camion-seleccionado");
+mapa.getPane("recorrido-camion-seleccionado").style.zIndex = "450";
+let vehiculosDelDia = new Map();
+let camionSeleccionado = null;
+let fichaCamion = null;
+
+function avisarPanel(type, extra = {}) {
+  if (window.parent !== window) window.parent.postMessage({type, ...extra}, location.origin);
+}
+
+function resumirVehiculos(D) {
+  const vehicles = new Map();
+  for (const i of D.unicos) {
+    const asset_id = D.camiones[D.cam[i]];
+    let vehicle = vehicles.get(asset_id);
+    if (!vehicle) {
+      vehicle = {asset_id, reportes: 0, primero: D.t[i], ultimo: D.t[i],
+                 latitude: D.lat[i], longitude: D.lon[i]};
+      vehicles.set(asset_id, vehicle);
+    }
+    vehicle.reportes++;
+    vehicle.ultimo = D.t[i];
+    vehicle.latitude = D.lat[i];
+    vehicle.longitude = D.lon[i];
+  }
+  return vehicles;
+}
+
+function limpiarCamionSeleccionado() {
+  capaCamionSeleccionado.clearLayers();
+  capaRecorridoSeleccionado.clearLayers();
+  camionSeleccionado = null;
+  fichaCamion = null;
+}
+
+function fichaSeleccionada() {
+  const vehicle = vehiculosDelDia.get(camionSeleccionado);
+  if (!vehicle || !datos) return null;
+  const box = document.createElement("div");
+  box.className = "camion-ficha";
+  const title = document.createElement("strong");
+  title.textContent = fichaCamion?.ultimo_reporte?.asset_name ||
+    fichaCamion?.primer_reporte?.asset_name || vehicle.asset_id;
+  const identifier = document.createElement("span");
+  identifier.textContent = "Patente: " + vehicle.asset_id;
+  const driver = document.createElement("span");
+  driver.textContent = "Conductor del último reporte: " +
+    ([fichaCamion?.ultimo_reporte?.driver_name, fichaCamion?.ultimo_reporte?.driver_last_name]
+      .filter(Boolean).join(" ") || "No informado");
+  const first = document.createElement("small");
+  first.textContent = "Primera posición GPS válida: " + ddmmHHMM(datos, vehicle.primero);
+  const last = document.createElement("small");
+  last.textContent = "Última posición GPS válida: " + ddmmHHMM(datos, vehicle.ultimo) + " · posición del ícono";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = "Ver recorrido completo";
+  button.disabled = vehicle.reportes < 2;
+  button.addEventListener("click", () => avisarPanel("artisa:gps-journey-request", {
+    fecha: datos.desde, asset_id: vehicle.asset_id
+  }));
+  box.append(title, identifier, driver, first, last, button);
+  return box;
+}
+
+function seleccionarCamion(asset_id) {
+  const vehicle = vehiculosDelDia.get(asset_id);
+  if (!vehicle) return;
+  limpiarCamionSeleccionado();
+  camionSeleccionado = asset_id;
+  const icon = L.divIcon({className: "", html: '<span class="camion-seleccionado">🚚</span>',
+                          iconSize: [38, 38], iconAnchor: [19, 38], popupAnchor: [0, -34]});
+  const marker = L.marker([vehicle.latitude, vehicle.longitude], {icon, zIndexOffset: 1000})
+    .addTo(capaCamionSeleccionado);
+  mapa.setView([vehicle.latitude, vehicle.longitude], Math.max(mapa.getZoom(), 10));
+  marker.bindPopup(fichaSeleccionada()).openPopup();
+}
+
+function mostrarRecorridoCamion(asset_id) {
+  if (camionSeleccionado !== asset_id || !datos) return;
+  capaRecorridoSeleccionado.clearLayers();
+  const vehicleIndex = datos.camiones.indexOf(asset_id);
+  const tramos = [];
+  let tramo = [];
+  let tiempoAnterior = null;
+  for (const i of datos.unicos) {
+    if (datos.cam[i] !== vehicleIndex) continue;
+    if (tiempoAnterior !== null && datos.t[i] - tiempoAnterior > GAP_MINUTOS * 60) {
+      if (tramo.length > 1) tramos.push(tramo);
+      tramo = [];
+    }
+    tramo.push([datos.lat[i], datos.lon[i]]);
+    tiempoAnterior = datos.t[i];
+  }
+  if (tramo.length > 1) tramos.push(tramo);
+  if (!tramos.length) {
+    avisarPanel("artisa:gps-journey-unavailable", {fecha: datos.desde, asset_id});
+    return;
+  }
+  const line = L.polyline(tramos, {pane: "recorrido-camion-seleccionado",
+    color: "#155e9a", weight: 6, opacity: .95})
+    .addTo(capaRecorridoSeleccionado);
+  mapa.fitBounds(line.getBounds(), {padding: [45, 45], maxZoom: 14});
+}
+
+window.addEventListener("message", event => {
+  if (event.origin !== location.origin || event.source !== window.parent || !event.data ||
+      typeof event.data !== "object") return;
+  const {type, fecha, asset_id} = event.data;
+  if (type === "artisa:gps-clear-vehicle") {
+    limpiarCamionSeleccionado();
+    if (datos?.n) mapa.fitBounds(limitesDatos(datos.lat, datos.lon), {padding: [30, 30]});
+    return;
+  }
+  if (!datos || fecha !== datos.desde || !vehiculosDelDia.has(asset_id)) return;
+  if (type === "artisa:gps-select-vehicle") seleccionarCamion(asset_id);
+  if (type === "artisa:gps-vehicle-info" && camionSeleccionado === asset_id) {
+    fichaCamion = event.data.detail;
+    capaCamionSeleccionado.eachLayer(marker => marker.setPopupContent(fichaSeleccionada()));
+  }
+  if (type === "artisa:gps-show-journey") mostrarRecorridoCamion(asset_id);
+});
+
 // ---------------------------------------------------------------------------
 // Rango de fechas: un día por consulta en la vista integrada.
 // ---------------------------------------------------------------------------
@@ -886,6 +1018,9 @@ async function cargar() {
   turno++;
   quitarMostrado();
   datos = null; cache = {};
+  limpiarCamionSeleccionado();
+  vehiculosDelDia = new Map();
+  avisarPanel("artisa:gps-vehicles-loading", {fecha: desde});
   // Contador mientras llegan los datos: la consulta puede tardar, que se vea que sigue trabajando
   const inicio = Date.now();
   const avisoCarga = () => estado(`Cargando reportes GPS del ${desde} al ${hasta}… ${Math.round((Date.now() - inicio) / 1000)} s`
@@ -904,12 +1039,19 @@ async function cargar() {
         return {nombre: f.nombre, area_m2: f.area_m2, geojson, centro: centroGeojson(geojson)};
       });
     }
-    if (!gps.t.length) { estado(`No hay reportes GPS entre ${desde} y ${hasta}.`); return; }
+    if (!gps.t.length) {
+      estado(`No hay reportes GPS entre ${desde} y ${hasta}.`);
+      avisarPanel("artisa:gps-vehicles", {fecha: desde, vehicles: []});
+      return;
+    }
     datos = prepararDatos(gps);
+    vehiculosDelDia = resumirVehiculos(datos);
     await mostrarVista(vistaActual);
+    avisarPanel("artisa:gps-vehicles", {fecha: desde, vehicles: [...vehiculosDelDia.values()]});
   } catch (e) {
     console.error(e);
     estado(`No se pudieron cargar los datos: ${e.message}`, true);
+    avisarPanel("artisa:gps-vehicles-error", {fecha: desde});
   } finally {
     clearInterval(reloj);
     boton.disabled = false;

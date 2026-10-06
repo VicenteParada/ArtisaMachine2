@@ -71,6 +71,14 @@
 
 /* Dashboard operativo */
 .dashboard-panel{margin-bottom:22px;background:linear-gradient(180deg,#fff 0%,#fbfcfa 100%)}
+.dashboard-date-bar{display:flex;align-items:end;flex-wrap:wrap;gap:10px 14px;margin-top:18px;padding:14px;border:1px solid var(--line);border-radius:9px;background:#f7faf5}
+.dashboard-date-bar label{display:grid;gap:5px;color:var(--ink);font-size:10px;font-weight:700}
+.dashboard-date-bar input,.dashboard-date-bar select{min-height:38px;border:1px solid #cbd9cf;border-radius:7px;padding:7px 10px;background:#fff;color:var(--ink);font:inherit;font-weight:500}
+.dashboard-date-bar button{min-height:38px;border:1px solid #cbd9cf;border-radius:7px;padding:8px 12px;background:#fff;color:var(--green);font:inherit;font-size:10px;font-weight:700;cursor:pointer}
+.dashboard-date-bar button:hover,.dashboard-date-bar button:focus-visible{border-color:var(--green);background:#edf5ee}
+.dashboard-date-bar button:disabled{opacity:.5;cursor:not-allowed}
+.dashboard-date-bar>span{align-self:center;color:var(--muted);font-size:9px}
+.dashboard-source-note{margin:10px 0 0;color:var(--muted);font-size:10px;line-height:1.5}
 .dashboard-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:20px 0}
 .dashboard-kpis article{position:relative;min-width:0;overflow:hidden;border:1px solid var(--line);border-radius:9px;padding:17px;background:#f7faf5}
 .dashboard-kpis article:after{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--green)}
@@ -80,26 +88,14 @@
 .dashboard-card{border:1px solid var(--line);border-radius:9px;padding:18px;background:#fff;box-shadow:0 8px 24px rgba(23,45,50,.035)}
 .dashboard-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.dashboard-card h3{margin:6px 0 0;font-size:16px}.dashboard-card>p{min-height:34px;margin:9px 0 17px;color:var(--muted);font-size:9px;line-height:1.6}.chart-unit{border-radius:14px;padding:5px 8px;background:#eef3ef;color:var(--green);font-size:8px;font-weight:700;white-space:nowrap}
 .dashboard-bars{display:grid;gap:13px}.dashboard-bar-row{display:grid;gap:5px}.dashboard-bar-row>div:first-child{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:10px}.dashboard-bar-row>div:first-child span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dashboard-bar-row>div:first-child strong{font-size:10px}.dashboard-bar-track{height:8px;overflow:hidden;border-radius:6px;background:#e8eeea}.dashboard-bar-track i{display:block;height:100%;border-radius:inherit;transition:width .35s ease}.dashboard-bar-row small{color:var(--muted);font-size:7px;line-height:1.4}.chart-empty{display:grid;min-height:150px;place-items:center;color:var(--muted);font-size:10px;text-align:center}
+#dashboard-route-trend{max-height:360px;overflow-y:auto;padding-right:6px}
 .dashboard-donut-wrap{display:grid;grid-template-columns:150px minmax(0,1fr);align-items:center;gap:24px;min-height:176px}.dashboard-donut{position:relative;width:150px;aspect-ratio:1;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(23,45,50,.08)}.dashboard-donut>div{position:absolute;inset:27px;display:grid;place-content:center;border-radius:50%;background:#fff;text-align:center;box-shadow:0 3px 16px rgba(23,45,50,.09)}.dashboard-donut strong{font-size:25px;letter-spacing:-1px}.dashboard-donut span{color:var(--muted);font-size:8px}.dashboard-donut-legend{list-style:none;margin:0;padding:0;display:grid;gap:11px}.dashboard-donut-legend li{display:grid;grid-template-columns:9px minmax(0,1fr) auto;align-items:center;gap:8px;padding-bottom:8px;border-bottom:1px solid #edf1ee;font-size:9px}.dashboard-donut-legend li:last-child{border-bottom:0}.dashboard-donut-legend i{width:9px;height:9px;border-radius:50%}.dashboard-donut-legend strong{font-size:8px;color:var(--muted)}
-.dashboard-wide{grid-column:1/-1}.dashboard-bars.routes{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:28px}
-.dashboard-highlights{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr);gap:14px}.dashboard-highlights article{border:1px solid #cbd9cf;border-left:5px solid var(--green);border-radius:8px;padding:17px;background:#edf5ee}.dashboard-highlights span{display:block;color:var(--muted);font-size:8px;font-weight:750;letter-spacing:1px}.dashboard-highlights strong{display:block;margin:8px 0 5px;font-size:18px}.dashboard-highlights small{color:var(--muted);font-size:9px}
 .dashboard-method{display:flex;justify-content:space-between;gap:24px;margin-top:16px;border-top:1px solid var(--line);padding-top:14px;color:var(--muted);font-size:9px;line-height:1.55}.dashboard-method strong{flex:0 0 auto;color:var(--ink)}
+.dashboard-method a{color:var(--green);font-weight:750;text-decoration:none}.dashboard-method a:hover,.dashboard-method a:focus-visible{text-decoration:underline}
 @media(max-width:1150px){.dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-donut-wrap{grid-template-columns:125px minmax(0,1fr);gap:16px}.dashboard-donut{width:125px}.dashboard-donut>div{inset:23px}}
-@media(max-width:940px){.dataset-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}.dashboard-grid{grid-template-columns:minmax(0,1fr)}.dashboard-wide,.dashboard-highlights{grid-column:auto}}
-@media(max-width:690px){.dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.dashboard-kpis article{padding:14px}.dashboard-kpis strong{font-size:23px}.dashboard-card{padding:15px}.dashboard-bars.routes{grid-template-columns:minmax(0,1fr)}.dashboard-highlights{grid-template-columns:minmax(0,1fr)}.dashboard-method{flex-direction:column;gap:5px}.dashboard-donut-wrap{grid-template-columns:115px minmax(0,1fr)}.dashboard-donut{width:115px}.dashboard-donut>div{inset:21px}}
+@media(max-width:940px){.dataset-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}.dashboard-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:690px){.dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.dashboard-kpis article{padding:14px}.dashboard-kpis strong{font-size:23px}.dashboard-card{padding:15px}.dashboard-method{flex-direction:column;gap:5px}.dashboard-donut-wrap{grid-template-columns:115px minmax(0,1fr)}.dashboard-donut{width:115px}.dashboard-donut>div{inset:21px}}
 @media(max-width:380px){.dashboard-kpis{grid-template-columns:minmax(0,1fr)}.dashboard-donut-wrap{grid-template-columns:minmax(0,1fr);justify-items:center}.dashboard-donut-legend{width:100%}}
-.dashboard-heatmap-card{margin-top:14px}
-.dashboard-heatmap-card>p{min-height:0}
-.dashboard-heatmap-stage{display:grid;place-items:center;min-height:320px;overflow:hidden;border:1px solid #d5e0d9;border-radius:10px;background-color:#f2f6f3;background-image:linear-gradient(rgba(84,121,101,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(84,121,101,.07) 1px,transparent 1px);background-size:34px 34px}
-.dashboard-heatmap-empty{display:grid;justify-items:center;gap:9px;max-width:340px;margin:20px;padding:23px 28px;border:1px solid #d6e2d9;border-radius:12px;background:rgba(255,255,255,.94);box-shadow:0 14px 38px rgba(23,45,50,.07);text-align:center}
-.dashboard-heatmap-symbol{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:#e8f0e9;color:var(--green);font-size:25px}
-.dashboard-heatmap-empty strong{font-size:14px;color:var(--ink)}
-.dashboard-heatmap-empty>span:last-child{color:var(--muted);font-size:10px;line-height:1.6}
-.dashboard-heatmap-legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:12px;color:var(--muted);font-size:10px}
-.dashboard-heatmap-legend span{display:inline-flex;align-items:center;gap:7px}
-.dashboard-heatmap-legend i{display:inline-block;width:11px;height:11px;border-radius:50%}
-.dashboard-heatmap-legend .low{background:#dc2626}.dashboard-heatmap-legend .medium{background:#f97316}.dashboard-heatmap-legend .high{background:#14532d}
-@media(max-width:690px){.dashboard-heatmap-stage{min-height:260px}.dashboard-heatmap-empty{padding:19px}}
 /* Portada fotográfica de Transportes Artisa */
 .landing {
   position: relative;
@@ -396,7 +392,18 @@
 
 /* Conservar el detalle y los nombres del mapa base sin desaturar sus teselas. */
 #heatmap-map .leaflet-tile-pane { filter: none; }
-.vehicle-list-icon .truck-glyph { width:19px; height:19px; }
+.vehicle-list-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border: 1px solid #bbd7be;
+  border-radius: 11px;
+  background: #e9f4e8;
+}
+.vehicle-live-row.moving .vehicle-list-icon { background: #dff0df; }
+.vehicle-live-row.off .vehicle-list-icon { background: #e9eeee; border-color: #c9d3d2; }
+.vehicle-live-row.is-active .vehicle-list-icon { background: #d7ecce; border-color: #8fba80; }
+.vehicle-list-icon .truck-list-glyph { display: block; width: 30px; height: 23px; }
 .map-pending-note { position:absolute;bottom:28px;left:12px;z-index:1000;max-width:calc(100% - 24px);padding:9px 12px;border:1px solid #c7d4ce;border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 2px 12px rgba(20,40,42,.18);color:#173f35;font-size:11px;font-weight:700;pointer-events:none; }
 
 /* La vista principal resume únicamente rutas y vehículos. */
@@ -421,9 +428,7 @@
 .explorer-launch:hover{background:#174b35}
 .explorer-launch[hidden]{display:none}
 .explorer-launch:focus-visible{outline:3px solid #f97316;outline-offset:3px}
-.dashboard-heatmap-empty .explorer-launch{margin:15px 0 0}
 .explorer-frame-wrap[hidden]{display:none}
-.dashboard-heatmap-stage[hidden]{display:none}
 .explorer-frame-wrap{overflow:hidden;border:1px solid #d5e0d9;border-radius:9px;background:#f4f8f5}
 .explorer-frame-wrap iframe{display:block;width:100%;height:680px;border:0}
 @media(max-width:690px){.explorer-frame-wrap iframe{height:580px}}
@@ -441,3 +446,19 @@
 .map-view-stage .heatmap-map[hidden],#classified-map-legend[hidden]{display:none!important}
 .map-card.showing-history .map-title-actions,.map-card.showing-history #heatmap-zones{display:none!important}
 @media(max-width:690px){.map-view-stage .explorer-frame-wrap iframe{height:600px}}
+
+/* La lista histórica muestra solo el camión elegido en el mapa integrado. */
+.historical-vehicle-context{margin:4px 0 10px;color:var(--muted);font-size:10px;line-height:1.45}
+.historical-vehicle-context[hidden],.historical-vehicle-detail[hidden],.map-selection-detail[hidden]{display:none!important}
+.historical-vehicle-detail{display:grid;gap:8px;margin-top:11px;padding:13px;border:1px solid #bdd5c3;border-left:4px solid var(--green);border-radius:7px;background:#f3faf4}
+.historical-vehicle-detail>span{color:var(--green);font-size:8px;font-weight:800;letter-spacing:.8px}
+.historical-vehicle-detail>strong{font-size:13px;overflow-wrap:anywhere}
+.historical-vehicle-detail>p{margin:0;color:var(--muted);font-size:10px;line-height:1.5}
+.historical-vehicle-detail dl{display:grid;gap:6px;margin:2px 0}
+.historical-vehicle-detail dl>div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #dfebe2;padding-bottom:5px}
+.historical-vehicle-detail dt{color:var(--muted);font-size:9px}
+.historical-vehicle-detail dd{margin:0;text-align:right;font-size:9px;font-weight:700;overflow-wrap:anywhere}
+.historical-vehicle-detail .historical-actions{display:flex;flex-wrap:wrap;gap:6px}
+.historical-vehicle-detail button{padding:7px 9px;border:1px solid #9abca5;border-radius:6px;background:#fff;color:var(--green);font-size:9px;font-weight:700}
+.historical-vehicle-detail button:hover{background:#e7f2e9}
+.historical-vehicle-detail button:disabled{opacity:.6;cursor:default}

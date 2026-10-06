@@ -52,11 +52,21 @@ function token() {
 function clearSessionWork() {
   clearTimeout(expiryTimer);
   sessionVersion++;
+  dashboardRequest++;
+  dashboardDateTouched = false;
+  $("dashboard-date").value = "";
   for (const controller of pendingRequests) controller.abort();
   pendingRequests.clear();
   refreshing = false;
   $("refresh").disabled = false;
   journeyRequest++;
+  historicalDetailRequest++;
+  historicalDate = null;
+  historicalVehicles = [];
+  historicalVehicleStatus = "waiting";
+  selectedHistoricalVehicle = null;
+  historicalVehicleInfo = null;
+  historicalJourneyVisible = false;
 }
 
 function clearPassword() {
@@ -75,8 +85,6 @@ function logout(message = "") {
     const frame = wrapper.querySelector("iframe");
     if (frame) frame.removeAttribute("src");
   }
-  const dashboardPreview = $("dashboard-route-heatmap");
-  if (dashboardPreview) dashboardPreview.hidden = false;
   for (const button of document.querySelectorAll("[data-explorer-open]")) button.hidden = false;
   activeToken = null;
   try { localStorage.removeItem(TOKEN_KEY); } catch { /* Almacenamiento no disponible. */ }
@@ -174,7 +182,6 @@ function openExplorer(which) {
   if (!frame.hasAttribute("src")) frame.src = frame.dataset.explorerFrame;
   wrapper.hidden = false;
   button.hidden = true;
-  if (which === "dashboard") $("dashboard-route-heatmap").hidden = true;
   frame.contentWindow?.postMessage("artisa:show-map", location.origin);
 }
 
@@ -229,9 +236,8 @@ function syncDatasetView() {
   for (const link of document.querySelectorAll(".sidebar [data-dataset-link]")) {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
   }
-  if (view === "dashboard" || view === "heatmap") {
-    window.setTimeout(() => openExplorer(view === "dashboard" ? "dashboard" : "routes"), 50);
-  }
+  if (view === "heatmap") window.setTimeout(() => openExplorer("routes"), 50);
+  if (view === "dashboard" && !appShell.hidden && token()) loadDashboard();
   if (view === "heatmap" && activeMapMode === "classified" && fleetMap) {
     window.setTimeout(fitPendingMap, 0);
   }
@@ -262,6 +268,13 @@ let activeRouteFilter = "ALL";
 let activeMonitorTab = "routes";
 let activeMapMode = "historical";
 let userChoseMapMode = false;
+let historicalDate = null;
+let historicalVehicles = [];
+let historicalVehicleStatus = "waiting";
+let selectedHistoricalVehicle = null;
+let historicalVehicleInfo = null;
+let historicalJourneyVisible = false;
+let historicalDetailRequest = 0;
 let fleetMap = null;
 const routeLayers = {LOW: null, MEDIUM: null, HIGH: null};
 let truckLayer = null;
@@ -292,9 +305,20 @@ function setMapMode(mode, remember = false, pending = !currentMapData || machine
   $("map-view-description").textContent = historical
     ? "GPS histórico de MariaDB; los filtros de rutas clasificadas estarán disponibles cuando Machine entregue resultados."
     : "Rutas clasificadas por Machine; los filtros y vehículos corresponden a este mapa.";
-  for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer], [data-monitor-tab], #monitor-search, #reset-map-view")) {
+  for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer]")) {
     control.disabled = pending || historical;
   }
+  for (const button of document.querySelectorAll("[data-monitor-tab]")) {
+    button.disabled = historical ? button.dataset.monitorTab === "routes" : pending;
+  }
+  $("monitor-search").disabled = historical ? historicalVehicleStatus !== "ready" : pending;
+  $("reset-map-view").disabled = historical ? !selectedHistoricalVehicle : pending;
+  $("historical-vehicle-context").hidden = !historical;
+  $("historical-vehicle-detail").hidden = !historical || !selectedHistoricalVehicle;
+  $("map-selection-detail").hidden = historical;
+  if (historical && activeMonitorTab !== "vehicles") setMonitorTab("vehicles");
+  else if (historical) renderHistoricalVehicles();
+  else renderMonitorLists();
   if (historical) {
     const frame = explorer.querySelector("iframe[data-explorer-frame]");
     if (frame && !frame.hasAttribute("src") && token()) frame.src = frame.dataset.explorerFrame;
@@ -451,6 +475,16 @@ const TRUCK_MARKUP = '<svg class="truck-glyph" viewBox="0 0 32 32" aria-hidden="
   '<rect x="20" y="27" width="4" height="3" rx="1" fill="#173f35"/>' +
   '</svg>';
 
+const LIST_TRUCK_MARKUP = '<svg class="truck-list-glyph" viewBox="0 0 48 32" aria-hidden="true" focusable="false">' +
+  '<path d="M3 8.5c0-1.1.9-2 2-2h22c1.1 0 2 .9 2 2V23H3V8.5Z" fill="#fff" stroke="#173f35" stroke-width="1.7"/>' +
+  '<path d="M29 12h7.5l6.5 7v4H29V12Z" fill="#b9dc72" stroke="#173f35" stroke-width="1.7" stroke-linejoin="round"/>' +
+  '<path d="M33 14.8h3l3.6 4H33v-4Z" fill="#def3f2" stroke="#173f35" stroke-width="1.2" stroke-linejoin="round"/>' +
+  '<path d="M8 11h16M8 15h12" stroke="#91b747" stroke-width="2" stroke-linecap="round"/>' +
+  '<path d="M2 23h43v2H2z" fill="#173f35"/>' +
+  '<circle cx="11" cy="25.5" r="4" fill="#173f35"/><circle cx="36" cy="25.5" r="4" fill="#173f35"/>' +
+  '<circle cx="11" cy="25.5" r="1.6" fill="#e7f2e8"/><circle cx="36" cy="25.5" r="1.6" fill="#e7f2e8"/>' +
+  '</svg>';
+
 function renderLiveFleet(vehicles) {
   const list = $("vehicle-live-list");
   if (!list) return;
@@ -469,7 +503,7 @@ function renderLiveFleet(vehicles) {
     button.dataset.vehicleSelect = vehicle.vehicle_id;
     const icon = document.createElement("span");
     icon.className = "vehicle-list-icon";
-    icon.innerHTML = TRUCK_MARKUP;
+    icon.innerHTML = LIST_TRUCK_MARKUP;
     const copy = document.createElement("span");
     const name = document.createElement("strong");
     name.textContent = vehicle.vehicle_name || vehicle.vehicle_id;
@@ -493,14 +527,184 @@ function renderLiveFleet(vehicles) {
   refreshSelectionStyles();
 }
 
+function historicalFrame() {
+  return $("explorer-routes").querySelector("iframe[data-explorer-frame]")?.contentWindow;
+}
+
+function sendToHistoricalMap(type, extra = {}) {
+  historicalFrame()?.postMessage({type, ...extra}, location.origin);
+}
+
+function clearHistoricalSelection(notifyMap = true) {
+  historicalDetailRequest++;
+  selectedHistoricalVehicle = null;
+  historicalVehicleInfo = null;
+  historicalJourneyVisible = false;
+  $("historical-vehicle-detail").hidden = true;
+  $("reset-map-view").disabled = true;
+  if (notifyMap) sendToHistoricalMap("artisa:gps-clear-vehicle");
+  if (activeMapMode === "historical") renderHistoricalVehicles();
+}
+
+function renderHistoricalVehicles() {
+  if (activeMapMode !== "historical") return;
+  const list = $("vehicle-live-list");
+  const scrollPosition = list.scrollTop;
+  const context = $("historical-vehicle-context");
+  $("vehicle-live-count").textContent = historicalVehicleStatus === "ready"
+    ? format(historicalVehicles.length) : "—";
+  $("monitor-search").disabled = historicalVehicleStatus !== "ready";
+  context.hidden = false;
+  context.textContent = historicalVehicleStatus === "ready"
+    ? `Camiones con posiciones GPS el ${historicalDate}. Selecciona uno para ubicarlo en el mapa.`
+    : historicalVehicleStatus === "loading"
+      ? `Cargando camiones del ${historicalDate}…`
+      : historicalVehicleStatus === "error"
+        ? `No se pudieron cargar los camiones del ${historicalDate}. Intenta Cargar nuevamente.`
+        : "Elige un día en Mapas de telemetría y pulsa Cargar.";
+  list.replaceChildren();
+  const query = $("monitor-search").value.trim().toLocaleLowerCase("es");
+  const visible = historicalVehicles.filter(vehicle =>
+    vehicle.asset_id.toLocaleLowerCase("es").includes(query));
+  for (const vehicle of visible) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "vehicle-live-row";
+    button.classList.toggle("is-active", selectedHistoricalVehicle?.asset_id === vehicle.asset_id);
+    const icon = document.createElement("span");
+    icon.className = "vehicle-list-icon";
+    icon.innerHTML = LIST_TRUCK_MARKUP;
+    const copy = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = vehicle.asset_id;
+    const detail = document.createElement("small");
+    detail.textContent = `${format(vehicle.reportes)} posiciones GPS · última ${formatUtc(
+      new Date(Date.parse(historicalDate + "T00:00:00Z") + vehicle.ultimo * 1000).toISOString())}`;
+    copy.append(name, detail);
+    button.append(icon, copy);
+    button.addEventListener("click", () => selectHistoricalVehicle(vehicle));
+    item.append(button);
+    list.append(item);
+  }
+  if (!visible.length) {
+    const item = document.createElement("li");
+    item.className = "monitor-empty";
+    item.textContent = historicalVehicleStatus === "ready"
+      ? (query ? "No hay camiones para esta búsqueda." : "No hay posiciones GPS en el día elegido.")
+      : context.textContent;
+    list.append(item);
+  }
+  list.scrollTop = scrollPosition;
+}
+
+function renderHistoricalVehicleDetail(error = "") {
+  const card = $("historical-vehicle-detail");
+  if (!selectedHistoricalVehicle || activeMapMode !== "historical") {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  card.replaceChildren();
+  const label = document.createElement("span");
+  label.textContent = "CAMIÓN SELECCIONADO · " + historicalDate;
+  const title = document.createElement("strong");
+  title.textContent = historicalVehicleInfo?.ultimo_reporte?.asset_name ||
+    historicalVehicleInfo?.primer_reporte?.asset_name || selectedHistoricalVehicle.asset_id;
+  const note = document.createElement("p");
+  note.textContent = "El ícono indica la última posición GPS observada de ese día; no es ubicación en vivo.";
+  const rows = [
+    ["Patente", selectedHistoricalVehicle.asset_id],
+    ["Conductor del último reporte", [historicalVehicleInfo?.ultimo_reporte?.driver_name,
+      historicalVehicleInfo?.ultimo_reporte?.driver_last_name].filter(Boolean).join(" ") ||
+      (historicalVehicleInfo ? "No informado" : "Consultando…")],
+    [historicalVehicleInfo ? "Primer reporte del día" : "Primera posición GPS válida",
+      historicalVehicleInfo?.primer_reporte?.report_date
+      ? formatUtc(historicalVehicleInfo.primer_reporte.report_date)
+      : formatUtc(new Date(Date.parse(historicalDate + "T00:00:00Z") +
+        selectedHistoricalVehicle.primero * 1000).toISOString())],
+    [historicalVehicleInfo ? "Último reporte del día" : "Última posición GPS válida",
+      historicalVehicleInfo?.ultimo_reporte?.report_date
+      ? formatUtc(historicalVehicleInfo.ultimo_reporte.report_date)
+      : formatUtc(new Date(Date.parse(historicalDate + "T00:00:00Z") +
+        selectedHistoricalVehicle.ultimo * 1000).toISOString())],
+    ["Posiciones GPS válidas", format(selectedHistoricalVehicle.reportes)]
+  ];
+  const details = document.createElement("dl");
+  for (const [key, value] of rows) {
+    const row = document.createElement("div");
+    const term = document.createElement("dt");
+    term.textContent = key;
+    const data = document.createElement("dd");
+    data.textContent = value;
+    row.append(term, data);
+    details.append(row);
+  }
+  const actions = document.createElement("div");
+  actions.className = "historical-actions";
+  const journey = document.createElement("button");
+  journey.type = "button";
+  journey.textContent = historicalJourneyVisible ? "Recorrido visible" : "Ver recorrido completo";
+  journey.disabled = historicalJourneyVisible || selectedHistoricalVehicle.reportes < 2;
+  journey.addEventListener("click", showHistoricalJourney);
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.textContent = "Volver a todos";
+  reset.addEventListener("click", () => clearHistoricalSelection());
+  actions.append(journey, reset);
+  card.append(label, title, note, details);
+  if (error) {
+    const warning = document.createElement("p");
+    warning.textContent = error;
+    card.append(warning);
+  }
+  card.append(actions);
+}
+
+function showHistoricalJourney() {
+  if (!selectedHistoricalVehicle || historicalJourneyVisible) return;
+  historicalJourneyVisible = true;
+  sendToHistoricalMap("artisa:gps-show-journey", {
+    fecha: historicalDate, asset_id: selectedHistoricalVehicle.asset_id
+  });
+  renderHistoricalVehicleDetail();
+}
+
+async function selectHistoricalVehicle(vehicle) {
+  if (activeMapMode !== "historical" || historicalVehicleStatus !== "ready") return;
+  const request = ++historicalDetailRequest;
+  selectedHistoricalVehicle = vehicle;
+  historicalVehicleInfo = null;
+  historicalJourneyVisible = false;
+  $("reset-map-view").disabled = false;
+  renderHistoricalVehicles();
+  renderHistoricalVehicleDetail();
+  sendToHistoricalMap("artisa:gps-select-vehicle", {fecha: historicalDate, asset_id: vehicle.asset_id});
+  try {
+    const detail = await api(`/api/gps/vehiculo?fecha=${encodeURIComponent(historicalDate)}` +
+      `&asset_id=${encodeURIComponent(vehicle.asset_id)}`);
+    if (request !== historicalDetailRequest || selectedHistoricalVehicle?.asset_id !== vehicle.asset_id) return;
+    historicalVehicleInfo = detail;
+    renderHistoricalVehicleDetail();
+    sendToHistoricalMap("artisa:gps-vehicle-info", {
+      fecha: historicalDate, asset_id: vehicle.asset_id, detail
+    });
+  } catch (error) {
+    if (request === historicalDetailRequest && selectedHistoricalVehicle?.asset_id === vehicle.asset_id) {
+      renderHistoricalVehicleDetail("No se pudieron consultar los datos del conductor: " + error.message);
+    }
+  }
+}
+
 function renderMonitorLists() {
+  if (activeMapMode === "historical") return renderHistoricalVehicles();
   if (!currentMapData) return;
   renderRouteMonitor(currentMapData.routes);
   renderLiveFleet(currentMapData.vehicles);
 }
 
 function setMonitorTab(tab) {
-  activeMonitorTab = tab === "vehicles" ? "vehicles" : "routes";
+  activeMonitorTab = activeMapMode === "historical" || tab === "vehicles" ? "vehicles" : "routes";
   for (const button of document.querySelectorAll("[data-monitor-tab]")) {
     const selected = button.dataset.monitorTab === activeMonitorTab;
     button.classList.toggle("is-active", selected);
@@ -515,6 +719,37 @@ function setMonitorTab(tab) {
     : "Buscar vehículo…";
   renderMonitorLists();
 }
+
+window.addEventListener("message", event => {
+  if (!activeToken || !tokenExpiration(activeToken) || event.origin !== location.origin ||
+      event.source !== historicalFrame() ||
+      !event.data || typeof event.data !== "object") return;
+  const {type, fecha} = event.data;
+  if (type === "artisa:gps-vehicles-loading") {
+    clearHistoricalSelection(false);
+    historicalDate = fecha;
+    historicalVehicles = [];
+    historicalVehicleStatus = "loading";
+    $("monitor-search").value = "";
+    renderHistoricalVehicles();
+  } else if (type === "artisa:gps-vehicles" && fecha === historicalDate &&
+             Array.isArray(event.data.vehicles)) {
+    historicalVehicles = event.data.vehicles;
+    historicalVehicleStatus = "ready";
+    renderHistoricalVehicles();
+  } else if (type === "artisa:gps-vehicles-error" && fecha === historicalDate) {
+    historicalVehicles = [];
+    historicalVehicleStatus = "error";
+    renderHistoricalVehicles();
+  } else if (type === "artisa:gps-journey-request" && fecha === historicalDate &&
+             event.data.asset_id === selectedHistoricalVehicle?.asset_id) {
+    showHistoricalJourney();
+  } else if (type === "artisa:gps-journey-unavailable" && fecha === historicalDate &&
+             event.data.asset_id === selectedHistoricalVehicle?.asset_id) {
+    historicalJourneyVisible = false;
+    renderHistoricalVehicleDetail("No hay un tramo continuo entre esos reportes GPS; el mapa conserva los puntos sin inventar una ruta.");
+  }
+});
 
 function applyRouteFilter() {
   if (!fleetMap) return;
@@ -948,12 +1183,15 @@ function renderHeatmap(data) {
     pendingText(["heatmap-intro", "heatmap-zones", "map-last-update", "most-route-usage",
       "least-route-usage", "geo-model-detail", "heatmap-method", "map-selection-detail"],
       "Disponible cuando Machine genere resultados");
-    pendingText(["monitor-route-count", "vehicle-live-count"], "—");
+    pendingText(["monitor-route-count"], "—");
     for (const counter of document.querySelectorAll("[data-route-count]")) counter.textContent = "—";
-    for (const id of ["route-monitor-list", "vehicle-live-list"]) {
-      const item = document.createElement("li");
-      item.textContent = "Pendiente de procesamiento Machine.";
-      $(id).replaceChildren(item);
+    const item = document.createElement("li");
+    item.textContent = "Pendiente de procesamiento Machine.";
+    $("route-monitor-list").replaceChildren(item);
+    if (activeMapMode === "historical") renderHistoricalVehicles();
+    else {
+      $("vehicle-live-count").textContent = "—";
+      $("vehicle-live-list").replaceChildren(item.cloneNode(true));
     }
     $("journey-detail").hidden = true;
     $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
@@ -991,64 +1229,6 @@ function renderHeatmap(data) {
     "Rutas calculadas con la telemetría disponible.";
   renderFleetMap(data);
 }
-const DASHBOARD_ZONES = ["Zona Norte", "Zona Centro", "Zona Sur", "Zona Oeste", "Zona Este"];
-
-function routeCenter(route) {
-  const coordinates = route && route.geometry && route.geometry.type === "LineString" ? route.geometry.coordinates : [];
-  let latitude = 0;
-  let longitude = 0;
-  let count = 0;
-  for (const coordinate of coordinates) {
-    const lon = Number(coordinate && coordinate[0]);
-    const lat = Number(coordinate && coordinate[1]);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-    latitude += lat;
-    longitude += lon;
-    count += 1;
-  }
-  return count ? {latitude: latitude / count, longitude: longitude / count} : null;
-}
-
-function dashboardBounds(data) {
-  const points = [];
-  for (const route of data.routes) {
-    const point = routeCenter(route);
-    if (point) points.push(point);
-  }
-  for (const vehicle of data.vehicles) {
-    const latitude = Number(vehicle.latitude);
-    const longitude = Number(vehicle.longitude);
-    if (Number.isFinite(latitude) && Number.isFinite(longitude)) points.push({latitude, longitude});
-  }
-  if (!points.length) {
-    return {latitudeMin: -34, latitudeMax: -33, longitudeMin: -71, longitudeMax: -70};
-  }
-  const latitudes = points.map((point) => point.latitude);
-  const longitudes = points.map((point) => point.longitude);
-  return {
-    latitudeMin: Math.min(...latitudes),
-    latitudeMax: Math.max(...latitudes),
-    longitudeMin: Math.min(...longitudes),
-    longitudeMax: Math.max(...longitudes)
-  };
-}
-
-function dashboardZone(latitude, longitude, bounds) {
-  const latitudeCenter = (bounds.latitudeMin + bounds.latitudeMax) / 2;
-  const longitudeCenter = (bounds.longitudeMin + bounds.longitudeMax) / 2;
-  const latitudeRadius = Math.max((bounds.latitudeMax - bounds.latitudeMin) / 2, 0.0001);
-  const longitudeRadius = Math.max((bounds.longitudeMax - bounds.longitudeMin) / 2, 0.0001);
-  const northing = (Number(latitude) - latitudeCenter) / latitudeRadius;
-  const easting = (Number(longitude) - longitudeCenter) / longitudeRadius;
-  if (Math.abs(northing) <= 0.26 && Math.abs(easting) <= 0.26) return "Zona Centro";
-  if (Math.abs(northing) >= Math.abs(easting)) return northing >= 0 ? "Zona Norte" : "Zona Sur";
-  return easting < 0 ? "Zona Oeste" : "Zona Este";
-}
-
-function zoneAccumulator() {
-  return new Map(DASHBOARD_ZONES.map((zone) => [zone, {label: zone, value: 0, count: 0, vehicles: 0}]));
-}
-
 function renderDashboardBars(containerId, items, defaultColor) {
   const container = $(containerId);
   if (!container) return;
@@ -1122,96 +1302,124 @@ function renderDashboardDonut(containerId, items, centerLabel) {
   container.append(chart, legend);
 }
 
-function renderDashboard(data, metrics = {}) {
-  if (metrics.status === "pending" || machinePending(data)) {
-    pendingText(["dashboard-reports", "dashboard-trips", "dashboard-routes",
-      "dashboard-snapshot", "dashboard-most-route-zone"]);
-    pendingText(["dashboard-most-route-zone-detail", "dashboard-method"],
-      "Disponible cuando Machine genere resultados");
-    for (const id of ["dashboard-route-zones", "dashboard-route-levels",
-      "dashboard-fleet-status", "dashboard-top-routes"]) {
-      const message = document.createElement("span");
-      message.className = "chart-empty";
-      message.textContent = "Pendiente de procesamiento Machine.";
-      $(id).replaceChildren(message);
+function dashboardToday() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+function previousDay(day) {
+  const date = new Date(`${day}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+let dashboardRequest = 0;
+let dashboardDateTouched = false;
+let dashboardCutoff = dashboardToday();
+$("dashboard-date").max = previousDay(dashboardCutoff);
+
+function dashboardNotice(containerId, message) {
+  const note = document.createElement("span");
+  note.className = "chart-empty";
+  note.textContent = message;
+  $(containerId).replaceChildren(note);
+}
+
+function dashboardRouteItems(entries, descending) {
+  if (!Array.isArray(entries)) return [];
+  return entries.filter((item) => item && Number.isFinite(Number(item.vehiculos_unicos))
+      && Number(item.vehiculos_unicos) > 0)
+    .sort((a, b) => (Number(a.vehiculos_unicos) - Number(b.vehiculos_unicos)) * (descending ? -1 : 1))
+    .slice(0, 8)
+    .map((item) => ({
+      label: item.nombre || item.route_id || "Ruta sin nombre",
+      value: Number(item.vehiculos_unicos),
+      color: ROUTE_COLORS[item.nivel] || "#246c55",
+      detail: `${item.route_id || "Ruta"} · ${format(item.vehiculos_unicos)} camiones distintos`
+    }));
+}
+
+function renderDashboard(metrics) {
+  if (!metrics || !metrics.fecha || !Number.isSafeInteger(metrics.reportes)
+      || !Number.isSafeInteger(metrics.vehiculos)) {
+    $("dashboard-snapshot").textContent = "Resumen diario pendiente";
+    $("dashboard-snapshot").className = "status neutral";
+    $("dashboard-source-note").textContent = "Esperando el endpoint del resumen diario.";
+    for (const id of ["dashboard-reports", "dashboard-vehicles", "dashboard-routes"]) $(id).textContent = "—";
+    for (const id of ["dashboard-most-routes", "dashboard-least-routes",
+      "dashboard-route-levels", "dashboard-route-trend"]) {
+      dashboardNotice(id, "Pendiente de datos del Dashboard.");
     }
     return;
   }
-  const summary = data.summary || {};
-  const operation = metrics.operacion || {};
-  const quality = metrics.calidad || {};
-  const routeMetrics = metrics.rutas || {};
-  $("dashboard-reports").textContent = format(quality.validos || summary.available_report_count || 0);
-  $("dashboard-trips").textContent = format(operation.viajes || data.trips.length);
-  $("dashboard-routes").textContent = format(
-    Number(routeMetrics.HIGH || 0) + Number(routeMetrics.MEDIUM || 0) + Number(routeMetrics.LOW || 0)
-    || data.routes.length
-  );
-  $("dashboard-snapshot").textContent = "Corte " + formatDataDay(data.snapshotDate);
+  const day = metrics.fecha;
+  $("dashboard-date").value = day;
+  $("dashboard-trend-period").textContent = `Evolución de uso · ${metrics.dias_tendencia} días`;
+  $("dashboard-snapshot").textContent = "Día cerrado · " + formatDataDay(day);
   $("dashboard-snapshot").className = "status info";
+  $("dashboard-reports").textContent = format(metrics.reportes);
+  $("dashboard-vehicles").textContent = format(metrics.vehiculos);
+  $("dashboard-source-note").textContent = metrics.status === "empty"
+    ? "No hay reportes GPS para este día. Puedes elegir otra fecha o volver al último día con datos."
+    : "Resumen histórico de MariaDB; puede actualizarse si llegan reportes atrasados. Las rutas aparecerán cuando Machine publique sus resultados diarios.";
+  $("dashboard-latest").disabled = !metrics.ultima_fecha_cerrada;
 
-  const bounds = dashboardBounds(data);
-  const routeZones = zoneAccumulator();
-  for (const route of data.routes) {
-    const point = routeCenter(route);
-    if (!point) continue;
-    const zone = routeZones.get(dashboardZone(point.latitude, point.longitude, bounds));
-    const properties = routeProperties(route);
-    zone.value += Number(properties.usage_count || 0);
-    zone.count += 1;
-    zone.vehicles += Number(properties.unique_vehicle_count || 0);
-  }
-  const routeZoneItems = [...routeZones.values()]
-    .map((zone) => ({...zone, detail: `${format(zone.count)} rutas · ${format(zone.vehicles)} participaciones de vehículos`}))
-    .sort((first, second) => second.value - first.value);
-  renderDashboardBars("dashboard-route-zones", routeZoneItems, "#246c55");
-
-  const routeLevels = {
-    HIGH: Number(routeMetrics.HIGH || 0),
-    MEDIUM: Number(routeMetrics.MEDIUM || 0),
-    LOW: Number(routeMetrics.LOW || 0)
-  };
-  if (routeLevels.HIGH + routeLevels.MEDIUM + routeLevels.LOW === 0) {
-    for (const route of data.routes) {
-      const level = routeProperties(route).usage_level;
-      if (Object.hasOwn(routeLevels, level)) routeLevels[level] += 1;
+  const routes = metrics.rutas || {};
+  const levels = routes.niveles || {};
+  const ready = routes.status === "ready" && ["HIGH", "MEDIUM", "LOW"].every(
+    (level) => Number.isSafeInteger(levels[level]) && levels[level] >= 0
+  );
+  if (!ready) {
+    $("dashboard-routes").textContent = "Pendiente";
+    for (const id of ["dashboard-most-routes", "dashboard-least-routes",
+      "dashboard-route-levels", "dashboard-route-trend"]) {
+      dashboardNotice(id, "Pendiente de rutas procesadas para el día seleccionado.");
     }
+    return;
   }
+
+  $("dashboard-routes").textContent = format(levels.HIGH + levels.MEDIUM + levels.LOW);
+  const most = dashboardRouteItems(routes.mas_usadas, true);
+  const least = dashboardRouteItems(routes.menos_usadas, false);
+  if (most.length) renderDashboardBars("dashboard-most-routes", most, "#14532d");
+  else dashboardNotice("dashboard-most-routes", "No se observaron rutas clasificadas ese día.");
+  if (least.length) renderDashboardBars("dashboard-least-routes", least, "#dc2626");
+  else dashboardNotice("dashboard-least-routes", "No se observaron rutas clasificadas ese día.");
   renderDashboardDonut("dashboard-route-levels", [
-    {label: "Más usadas", value: routeLevels.HIGH, color: "#14532d"},
-    {label: "Uso medio", value: routeLevels.MEDIUM, color: "#f97316"},
-    {label: "Poco usadas", value: routeLevels.LOW, color: "#dc2626"}
+    {label: "Más usadas", value: levels.HIGH, color: ROUTE_COLORS.HIGH},
+    {label: "Uso medio", value: levels.MEDIUM, color: ROUTE_COLORS.MEDIUM},
+    {label: "Poco usadas", value: levels.LOW, color: ROUTE_COLORS.LOW}
   ], "rutas");
+  const trend = Array.isArray(routes.tendencia) ? routes.tendencia.slice(-metrics.dias_tendencia)
+    .filter((item) => item && Number.isFinite(Number(item.pasos_camion_ruta))
+      && Number(item.pasos_camion_ruta) >= 0)
+    .map((item) => ({label: formatDataDay(item.fecha), value: Number(item.pasos_camion_ruta),
+      detail: `${format(item.pasos_camion_ruta)} pasos de camión por rutas`})) : [];
+  if (trend.length) renderDashboardBars("dashboard-route-trend", trend, "#246c55");
+  else dashboardNotice("dashboard-route-trend", "Pendiente de resumen diario del período elegido.");
+}
 
-  const fleet = {moving: 0, off: 0};
-  for (const vehicle of data.vehicles) fleet[vehicleStatus(vehicle).className] += 1;
-  renderDashboardDonut("dashboard-fleet-status", [
-    {label: "Con señal", value: fleet.moving, color: "#58a566"},
-    {label: "Sin señal o apagados", value: fleet.off, color: "#708083"}
-  ], "vehículos");
-
-  const topRoutes = [...data.routes]
-    .sort((first, second) => Number(routeProperties(second).usage_count || 0) - Number(routeProperties(first).usage_count || 0))
-    .slice(0, 8)
-    .map((route) => {
-      const properties = routeProperties(route);
-      return {
-        label: properties.label || properties.route_id,
-        value: Number(properties.usage_count || 0),
-        color: properties.color,
-        detail: `${properties.route_id} · ${format(properties.unique_vehicle_count || 0)} vehículos · ${properties.usage_label || properties.usage_level}`
-      };
-    });
-  renderDashboardBars("dashboard-top-routes", topRoutes, "#246c55");
-
-  const mostRouteZone = routeZoneItems[0];
-  $("dashboard-most-route-zone").textContent = mostRouteZone ? mostRouteZone.label : "Sin datos";
-  $("dashboard-most-route-zone-detail").textContent = mostRouteZone
-    ? `${format(mostRouteZone.value)} recorridos en ${format(mostRouteZone.count)} rutas`
-    : "No hay rutas suficientes en el bloque.";
-  $("dashboard-method").textContent =
-    "Las coordenadas se dividen en cinco zonas relativas al centro del área observada: norte, centro, sur, oeste y este. " +
-    "Cada ruta conserva una sola clasificación y se cuenta en la zona de su centro geométrico. Actualización automática con el mismo bloque del mapa.";
+async function loadDashboard() {
+  if (!token()) return;
+  const request = ++dashboardRequest;
+  const cutoff = dashboardToday();
+  dashboardCutoff = cutoff;
+  $("dashboard-date").max = previousDay(cutoff);
+  const chosen = $("dashboard-date").value;
+  const query = new URLSearchParams({dias: $("dashboard-range").value});
+  if (dashboardDateTouched && chosen) query.set("fecha", chosen);
+  try {
+    const metrics = await api("/api/dashboard?" + query);
+    if (request === dashboardRequest && token()) renderDashboard(metrics);
+  } catch (error) {
+    if (request !== dashboardRequest || !token()) return;
+    $("dashboard-snapshot").textContent = "Resumen no disponible";
+    $("dashboard-snapshot").className = "status warning";
+    $("dashboard-source-note").textContent = error.message;
+  }
 }
 function renderTelemetry(summary, dataset, state) {
   const pending = dataset.status === "pending" && dataset.source === "company_api";
@@ -1261,7 +1469,7 @@ function renderTelemetry(summary, dataset, state) {
     const vehicle = document.createElement("td");
     vehicle.textContent = report.asset_name || "Vehículo sin nombre";
     const assetId = document.createElement("small");
-    assetId.textContent = report.asset_id || "Sin asset_id";
+    assetId.textContent = report.asset_id || "Sin patente";
     vehicle.append(assetId);
     tr.append(vehicle);
 
@@ -1324,13 +1532,13 @@ async function refresh() {
   if (refreshing) return;
   const version = sessionVersion;
   refreshing = true; $("refresh").disabled = true;
+  const dashboardPromise = loadDashboard();
   try {
-    const [state, telemetrySummary, telemetryDataset, mapPayload, dashboard] = await Promise.all([
+    const [state, telemetrySummary, telemetryDataset, mapPayload] = await Promise.all([
       api("/api/estado"),
       api("/api/telemetria/resumen"),
       api("/api/telemetria?limite=30"),
-      api("/api/mapa"),
-      api("/api/dashboard")
+      api("/api/mapa")
     ]);
     if (version !== sessionVersion || !token()) return;
     if (!window.ArtisaMapData) throw new Error("No se cargó el adaptador del mapa.");
@@ -1338,7 +1546,7 @@ async function refresh() {
     renderState(state);
     renderTelemetry(telemetrySummary, telemetryDataset, state);
     renderHeatmap(mapData);
-    renderDashboard(mapData, dashboard);
+    await dashboardPromise;
     $("notice").hidden = state.status === "ok";
     $("notice").textContent = "Una etapa no ha respondido recientemente o está preparando datos nuevos. Los datos mostrados corresponden a la última carga disponible.";
   } catch (error) {
@@ -1356,6 +1564,21 @@ async function refresh() {
 }
 
 $("refresh").addEventListener("click", refresh);
+$("dashboard-date").addEventListener("change", () => {
+  const selected = $("dashboard-date").value;
+  if (!selected || selected > $("dashboard-date").max) {
+    $("dashboard-source-note").textContent = "Elige un día cerrado anterior a hoy.";
+    return;
+  }
+  dashboardDateTouched = true;
+  loadDashboard();
+});
+$("dashboard-latest").addEventListener("click", () => {
+  dashboardDateTouched = false;
+  $("dashboard-date").value = "";
+  loadDashboard();
+});
+$("dashboard-range").addEventListener("change", loadDashboard);
 for (const button of document.querySelectorAll("[data-map-mode]")) {
   button.addEventListener("click", () => setMapMode(button.dataset.mapMode, true));
 }
@@ -1378,10 +1601,14 @@ for (const button of document.querySelectorAll("[data-monitor-tab]")) {
   button.addEventListener("click", () => setMonitorTab(button.dataset.monitorTab));
 }
 $("monitor-search").addEventListener("input", () => {
-  if (activeMonitorTab === "routes") renderRouteMonitor(currentMapData ? currentMapData.routes : []);
+  if (activeMapMode === "historical") renderHistoricalVehicles();
+  else if (activeMonitorTab === "routes") renderRouteMonitor(currentMapData ? currentMapData.routes : []);
   else renderLiveFleet(currentMapData ? currentMapData.vehicles : []);
 });
-$("reset-map-view").addEventListener("click", resetMapSelection);
+$("reset-map-view").addEventListener("click", () => {
+  if (activeMapMode === "historical") clearHistoricalSelection();
+  else resetMapSelection();
+});
 // Retirar el almacenamiento de la implementación anterior sin persistir el usuario.
 try {
   sessionStorage.removeItem("artisa_token");
@@ -1399,3 +1626,10 @@ document.addEventListener("visibilitychange", () => {
 });
 restoreSession();
 setInterval(refresh, 300000);
+setInterval(() => {
+  const cutoff = dashboardToday();
+  if (cutoff === dashboardCutoff) return;
+  dashboardCutoff = cutoff;
+  $("dashboard-date").max = previousDay(cutoff);
+  if (!dashboardDateTouched && token()) loadDashboard();
+}, 30000);

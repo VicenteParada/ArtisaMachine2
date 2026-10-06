@@ -111,7 +111,7 @@
         <div id="telemetry-content" hidden>
         <div class="real-metrics" aria-label="Resumen de telemetría real">
           <article><span>Reportes guardados</span><strong id="telemetry-count">—</strong><small>Muestra: últimos 30 reportes</small></article>
-          <article><span>Vehículos observados</span><strong id="vehicle-count">—</strong><small>Identificados por asset_id</small></article>
+          <article><span>Vehículos observados</span><strong id="vehicle-count">—</strong><small>Identificados por patente</small></article>
         </div>
         <div class="telemetry-range"><span id="telemetry-range">Esperando rango temporal…</span><span id="telemetry-quality">Esperando control de calidad…</span></div>
         <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha UTC</th><th>Evento</th><th>Coordenadas</th><th>Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
@@ -121,20 +121,32 @@
     <div id="dashboard" class="dataset-space" data-dataset-view="dashboard" hidden>
       <section class="panel dashboard-panel">
         <div class="section-top">
-          <div><span class="eyebrow">03 / PANEL OPERATIVO</span><h2>Dashboard de rutas y flota</h2></div>
+          <div><span class="eyebrow">03 / RESUMEN HISTÓRICO</span><h2>Actividad diaria de rutas y flota</h2></div>
           <span id="dashboard-snapshot" class="status neutral">Preparando indicadores…</span>
         </div>
-        <p class="telemetry-intro">Resumen visual de la telemetría procesada. Los gráficos se actualizan con el mismo bloque de datos del mapa y permiten identificar las zonas con mayor actividad, el uso de las rutas y el estado de la flota.</p>
+        <p class="telemetry-intro">Cada jornada va desde las 00:00 hasta antes de las 00:00 del día siguiente, en horario de Chile. El resumen GPS histórico está separado de la telemetría actual.</p>
+        <div class="dashboard-date-bar">
+          <label for="dashboard-date">Día cerrado <input id="dashboard-date" type="date" aria-describedby="dashboard-date-note"></label>
+          <label for="dashboard-range">Comparar rutas <select id="dashboard-range"><option value="7">Últimos 7 días</option><option value="30">Últimos 30 días</option></select></label>
+          <button id="dashboard-latest" type="button">Último día con datos</button>
+          <span id="dashboard-date-note">Corte diario en horario de Chile · solo días anteriores a hoy</span>
+        </div>
+        <p id="dashboard-source-note" class="dashboard-source-note" role="status">Consultando reportes GPS…</p>
         <div class="dashboard-kpis" aria-label="Indicadores principales del dashboard">
-          <article><span>Reportes disponibles</span><strong id="dashboard-reports">—</strong><small>Telemetría conservada en MariaDB</small></article>
-          <article><span>Recorridos analizados</span><strong id="dashboard-trips">—</strong><small>Viajes dentro de la ventana procesada</small></article>
-          <article><span>Rutas identificadas</span><strong id="dashboard-routes">—</strong><small>Agrupaciones geoespaciales completas</small></article>
+          <article><span>Reportes GPS de camiones</span><strong id="dashboard-reports">—</strong><small>Registros de camiones en el día elegido</small></article>
+          <article><span>Camiones distintos</span><strong id="dashboard-vehicles">—</strong><small>Asset ID de camiones con reportes ese día</small></article>
+          <article><span>Rutas clasificadas</span><strong id="dashboard-routes">—</strong><small>Se completará con los resultados de Machine</small></article>
         </div>
         <div class="dashboard-grid">
-          <article class="dashboard-card dashboard-wide">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">ACTIVIDAD GEOGRÁFICA</span><h3>Uso de rutas por zona</h3></div><span class="chart-unit">Recorridos</span></div>
-            <p>La actividad de cada ruta se asigna a la zona donde se encuentra el centro de su geometría.</p>
-            <div id="dashboard-route-zones" class="dashboard-bars" aria-label="Gráfico de uso de rutas por zona"><span class="chart-empty">Cargando zonas…</span></div>
+          <article class="dashboard-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">RANKING DIARIO</span><h3>Rutas más usadas</h3></div><span class="chart-unit">Camiones distintos</span></div>
+            <p>Rutas ordenadas por la cantidad de camiones distintos que pasaron por ellas durante el día elegido.</p>
+            <div id="dashboard-most-routes" class="dashboard-bars" aria-label="Rutas más usadas"><span class="chart-empty">Esperando rutas procesadas…</span></div>
+          </article>
+          <article class="dashboard-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">RANKING DIARIO</span><h3>Rutas menos usadas</h3></div><span class="chart-unit">Camiones distintos</span></div>
+            <p>Incluye solo rutas observadas; cero reportes se indica como falta de datos, no como poco uso.</p>
+            <div id="dashboard-least-routes" class="dashboard-bars" aria-label="Rutas menos usadas"><span class="chart-empty">Esperando rutas procesadas…</span></div>
           </article>
           <article class="dashboard-card dashboard-donut-card">
             <div class="dashboard-card-heading"><div><span class="eyebrow">CLASIFICACIÓN</span><h3>Nivel de uso de rutas</h3></div></div>
@@ -142,38 +154,12 @@
             <div id="dashboard-route-levels" class="dashboard-donut-wrap" aria-label="Distribución de rutas por nivel de uso"></div>
           </article>
           <article class="dashboard-card dashboard-donut-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">FLOTA ACTUAL</span><h3>Disponibilidad de los vehículos</h3></div></div>
-            <p>Estado de señal y encendido según la última posición disponible.</p>
-            <div id="dashboard-fleet-status" class="dashboard-donut-wrap" aria-label="Distribución del estado de la flota"></div>
+            <div class="dashboard-card-heading"><div><span class="eyebrow">COMPARACIÓN</span><h3 id="dashboard-trend-period">Evolución de uso · 7 días</h3></div></div>
+            <p>Pasos de camiones por rutas procesadas en los días cerrados hasta la fecha elegida.</p>
+            <div id="dashboard-route-trend" class="dashboard-bars" aria-label="Evolución de uso de rutas"><span class="chart-empty">Esperando resumen diario de rutas…</span></div>
           </article>
-          <article class="dashboard-card dashboard-wide">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">RANKING OPERATIVO</span><h3>Rutas con mayor actividad</h3></div><span class="chart-unit">Top 8</span></div>
-            <p>Recorridos agrupados por ruta completa; el color conserva su clasificación global.</p>
-            <div id="dashboard-top-routes" class="dashboard-bars routes" aria-label="Ranking de rutas con mayor actividad"><span class="chart-empty">Calculando ranking…</span></div>
-          </article>
-          <aside class="dashboard-highlights" aria-label="Hallazgos destacados">
-            <article><span>ZONA CON MAYOR USO</span><strong id="dashboard-most-route-zone">—</strong><small id="dashboard-most-route-zone-detail">Calculando recorridos…</small></article>
-          </aside>
         </div>
-        <section class="dashboard-card dashboard-heatmap-card" aria-labelledby="dashboard-heatmap-title">
-          <div class="dashboard-card-heading">
-            <div><span class="eyebrow">ANÁLISIS ESPACIAL</span><h3 id="dashboard-heatmap-title">Mapa de calor GPS</h3></div>
-            <span class="chart-unit">Datos históricos</span>
-          </div>
-          <p>Explora la densidad de reportes GPS de un día histórico. Este calor muestra dónde hubo más reportes; aún no representa el nivel definitivo de uso de rutas.</p>
-          <div id="dashboard-route-heatmap" class="dashboard-heatmap-stage">
-            <div class="dashboard-heatmap-empty">
-              <span class="dashboard-heatmap-symbol" aria-hidden="true">⌖</span>
-              <strong>Explora la actividad GPS</strong>
-              <span>La consulta se inicia solo cuando abras este mapa.</span>
-              <button type="button" class="explorer-launch" data-explorer-open="dashboard" aria-controls="explorer-dashboard">Abrir mapa de calor</button>
-            </div>
-          </div>
-          <div id="explorer-dashboard" class="explorer-frame-wrap" hidden>
-            <iframe title="Mapa de calor GPS histórico" data-explorer-frame="/exploracion-gps?vista=calor" referrerpolicy="no-referrer"></iframe>
-          </div>
-        </section>
-        <div class="dashboard-method"><strong>Cómo se definen las zonas</strong><span id="dashboard-method">Se calculan automáticamente desde las coordenadas del bloque procesado.</span></div>
+        <div class="dashboard-method"><strong>Explorar los recorridos</strong><span>El mapa conserva sus filtros y análisis detallados en una sola vista.</span><a href="#mapa-calor">Abrir mapa de rutas →</a></div>
       </section>
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
@@ -224,11 +210,13 @@
                 <button type="button" class="monitor-tab" data-monitor-tab="vehicles" role="tab" aria-selected="false">Vehículos <b id="vehicle-live-count">—</b></button>
               </div>
               <label class="monitor-search"><span>⌕</span><input id="monitor-search" type="search" placeholder="Buscar ruta…" aria-label="Buscar rutas o vehículos"></label>
+              <p id="historical-vehicle-context" class="historical-vehicle-context" hidden>Elige un día en Mapas de telemetría y pulsa Cargar.</p>
               <ul id="route-monitor-list" class="monitor-list" data-monitor-list="routes"><li>Esperando rutas…</li></ul>
               <ul id="vehicle-live-list" class="monitor-list" data-monitor-list="vehicles" hidden><li>Esperando posiciones…</li></ul>
               <div id="map-selection-detail" class="map-selection-detail" aria-live="polite">
                 <span>SELECCIÓN DEL MAPA</span><strong>Selecciona una ruta o un vehículo</strong><p>El mapa centrará el elemento y mostrará sus datos sin modificar la clasificación.</p>
               </div>
+              <div id="historical-vehicle-detail" class="historical-vehicle-detail" hidden aria-live="polite"></div>
               <div id="journey-detail" class="journey-detail" hidden aria-live="polite">
                 <strong>Recorrido observado del camión</strong>
                 <dl>
