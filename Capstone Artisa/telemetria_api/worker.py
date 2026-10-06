@@ -26,7 +26,7 @@ from common.db import connect_db, initialize_db
 from common.http import JsonHandler, serve
 from common.vehiculos import registrar_nuevos
 from telemetria_api.source import (
-    ApiConfig, ApiSourceError, build_query, detect_offset, fetch_rows, native_key, transform_rows,
+    ApiConfig, ApiSourceError, build_clock_query, build_query, detect_offset, fetch_rows, native_key, transform_rows,
 )
 
 
@@ -186,7 +186,14 @@ def run_cycle(config, fetch=fetch_rows, save=save_page, load=load_state, now=_ut
     Devuelve True si quedó al día y False si aún quedan páginas atrasadas."""
     state = load(config)
     stored_date = state.get("cursor_fecha")
-    if stored_date is None:
+    if stored_date is None and config.start_utc is not None:
+        # Primera vez con COMPANY_API_START: se pregunta la hora del origen para
+        # traducir el inicio a su reloj y recuperar todo desde esa fecha.
+        offset = detect_offset(fetch(config, build_clock_query(config)), now())
+        if offset is None:
+            raise ApiSourceError("respuesta_invalida", "La API no informó su hora (NOW)")
+        after, since = None, config.start_utc + offset
+    elif stored_date is None:
         after, since = None, None  # primera vez: ventana inicial del origen
     elif config.overlap_seconds:
         after, since = None, stored_date - timedelta(seconds=config.overlap_seconds)

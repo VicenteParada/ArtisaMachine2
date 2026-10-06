@@ -49,6 +49,25 @@ def _env_int(name, default, minimum, maximum):
     return value
 
 
+def _parse_start(raw):
+    """COMPANY_API_START en hora de Chile (o con zona explícita) -> UTC naive."""
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("COMPANY_API_START debe ser 'YYYY-MM-DD HH:MM' (hora de Chile)") from error
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo(os.environ.get("ARTISA_TIMEZONE", "America/Santiago")))
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def build_clock_query(config):
+    """Consulta mínima para conocer el reloj del origen (sin leer reportes)."""
+    return f"SELECT {_date_expression(config, 'NOW(6)')} AS ahora_origen"
+
+
 @dataclass(frozen=True)
 class ApiConfig:
     url: str
@@ -62,6 +81,7 @@ class ApiConfig:
     interval_seconds: int
     overlap_seconds: int
     initial_lookback_hours: int
+    start_utc: object            # datetime UTC naive o None (COMPANY_API_START)
     max_future_minutes: int
     max_pages_per_cycle: int
     retry_min_seconds: int
@@ -98,6 +118,7 @@ class ApiConfig:
             interval_seconds=_env_int("COMPANY_API_INTERVAL_SECONDS", 30, 5, 3600),
             overlap_seconds=_env_int("COMPANY_API_OVERLAP_SECONDS", 300, 0, 86400),
             initial_lookback_hours=_env_int("COMPANY_API_INITIAL_LOOKBACK_HOURS", 24, 1, 24 * 31),
+            start_utc=_parse_start(os.environ.get("COMPANY_API_START", "")),
             max_future_minutes=_env_int("COMPANY_API_MAX_FUTURE_MINUTES", 10, 0, 1440),
             max_pages_per_cycle=_env_int("COMPANY_API_MAX_PAGES_PER_CYCLE", 50, 1, 10000),
             retry_min_seconds=retry_min,

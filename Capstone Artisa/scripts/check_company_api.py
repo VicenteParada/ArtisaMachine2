@@ -60,6 +60,13 @@ def main():
     if offset is not None:
         hours = offset.total_seconds() / 3600
         print(f"Reloj del origen: UTC{hours:+g} (COMPANY_API_TIMEZONE={config.timezone_name})")
+    try:
+        oldest = fetch_rows(config, f"SELECT {date_expr.replace('r.report_date', 'MIN(r.report_date)')} "
+                                    f"AS minimo FROM {config.table} AS r")
+        if oldest and oldest[0].get("minimo"):
+            print(f"Reporte más antiguo en la API (hora del origen): {oldest[0]['minimo']}")
+    except ApiSourceError as error:
+        print(f"No se pudo consultar el reporte más antiguo [{error.kind}]: {error}")
     accepted, rejected = transform_rows(rows, config, offset)
     for row in accepted:
         print(f"  {row['report_date']:%Y-%m-%d %H:%M:%S} UTC  {row['asset_id']:<8} {row['asset_name'] or ''}")

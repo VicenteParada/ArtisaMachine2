@@ -39,6 +39,8 @@ class FakeSource:
                           "speed": 40, "heading": 90, "ignition": 1, "event_name": "Reporte por tiempo"})
 
     def query(self, sql):
+        if " FROM " not in sql:  # consulta de reloj del origen
+            return [{"ahora_origen": self.now.strftime(FMT)}]
         assert "DATE_FORMAT(r.report_date" in sql
         limit = int(re.search(r"LIMIT (\d+)$", sql).group(1))
         future = int(re.search(r"NOW\(\) \+ INTERVAL (\d+) MINUTE", sql).group(1))
@@ -115,7 +117,7 @@ def make_config(url, **changes):
     values = dict(
         url=url, table="reportes", timezone_name="auto", native_dates=True,
         auth_header="Authorization", auth_value="", timeout_seconds=3, batch_size=1000,
-        interval_seconds=30, overlap_seconds=300, initial_lookback_hours=24,
+        interval_seconds=30, overlap_seconds=300, initial_lookback_hours=24, start_utc=None,
         max_future_minutes=10, max_pages_per_cycle=50, retry_min_seconds=5, retry_max_seconds=60,
     )
     values.update(changes)
@@ -281,6 +283,32 @@ class OutageRecoveryTests(unittest.TestCase):
         cycle()
         cycle()
         self.assertEqual(len(db.table), 3701)
+
+
+class BackfillTests(unittest.TestCase):
+    def test_first_connection_recovers_gap_since_start(self):
+        utc_now = datetime(2026, 10, 6, 17, 0)
+        source = FakeSource(utc_now)
+        # Hueco desde el fin del histórico: un reporte cada 30 min durante 27 días.
+        hist_end_utc = datetime(2026, 9, 8, 23, 59, 55)
+        for i in range(27 * 48):
+            source.add(f"G{i:05d}", hist_end_utc + SOURCE_OFFSET + timedelta(minutes=30 * i + 1))
+        source.add("ANTES", hist_end_utc + SOURCE_OFFSET - timedelta(hours=5))
+        server = FakeApiServer(source)
+        self.addCleanup(server.stop)
+        config = make_config(f"http://127.0.0.1:{server.port}/sql", start_utc=datetime(2026, 9, 8, 23, 0))
+        db = FakeDatabase()
+        while not run_cycle(config, save=db.save, load=db.load, now=lambda: source.utc_now):
+            pass
+        self.assertEqual(len(db.table), 27 * 48)
+        self.assertNotIn("ANTES", db.table)
+        self.assertEqual(min(r["report_date"] for r in db.table.values()), hist_end_utc + timedelta(minutes=1))
+
+    def test_start_is_chile_time(self):
+        import os
+        from unittest.mock import patch
+        with patch.dict(os.environ, {"COMPANY_API_URL": "http://x:3003/sql", "COMPANY_API_START": "2026-09-08 20:00"}):
+            self.assertEqual(ApiConfig.from_env().start_utc, datetime(2026, 9, 8, 23, 0))
 
 
 if __name__ == "__main__":
