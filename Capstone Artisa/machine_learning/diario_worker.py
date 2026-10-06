@@ -123,6 +123,9 @@ def ciclo(connection, utc_now, procesar=procesar_dia):
 
 
 def loop():
+    print(f"Cierre diario: zona {dias.ZONA}, desde "
+          f"{DESDE or 'el primer dato de la API de la empresa'}, gracia {GRACIA}", flush=True)
+    avisado_sin_datos = False
     initialized = False
     while True:
         HEARTBEAT["value"] = time.monotonic()
@@ -130,12 +133,16 @@ def loop():
             if not initialized:
                 initialize_db()  # idempotente: crea las tablas del cierre si faltan
                 initialized = True
-            with connect_db(autocommit=False) as connection:
+            # Leer un día completo del histórico puede tomar más que el límite normal de 15 s.
+            with connect_db(autocommit=False, read_timeout=600) as connection:
                 hecho = ciclo(connection, _utc_now())
             STATE.update(estado="ok", error=None, ultimo_ciclo=_utc_now().isoformat() + "Z")
             STATE["dias_procesados"] += len(hecho)
             for dia, estado in hecho:
                 print(f"Cierre diario: {dia} -> {estado}", flush=True)
+            if STATE["dias_procesados"] == 0 and not hecho and not avisado_sin_datos:
+                avisado_sin_datos = True
+                print("Cierre diario: sin días para procesar (sin datos de la API y sin DIARIO_DESDE)", flush=True)
             if len(hecho) >= MAX_DIAS_POR_CICLO:
                 continue  # hay días pendientes: seguir sin esperar
         except Exception as error:  # MariaDB caída u otro fallo: se reintenta en el próximo ciclo

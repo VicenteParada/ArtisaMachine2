@@ -6,7 +6,7 @@ from pathlib import Path
 import pymysql
 
 
-def connect_db(autocommit=True):
+def connect_db(autocommit=True, read_timeout=15):
     return pymysql.connect(
         host=os.environ.get("DB_HOST", "mariadb"),
         user=os.environ.get("DB_USER", "artisa_app"),
@@ -16,7 +16,7 @@ def connect_db(autocommit=True):
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=autocommit,
         connect_timeout=3,
-        read_timeout=15,
+        read_timeout=read_timeout,
         write_timeout=5,
     )
 

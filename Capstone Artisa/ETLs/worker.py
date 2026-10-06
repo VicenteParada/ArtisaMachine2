@@ -19,7 +19,7 @@ def sync_catalog():
     """Clasifica una vez los vehiculos ya cargados en raw_gps que faltan en el catalogo.
     Un fallo aqui no detiene el ETL: se reintenta en el proximo arranque."""
     try:
-        with connect_db() as connection, connection.cursor() as cursor:
+        with connect_db(read_timeout=300) as connection, connection.cursor() as cursor:
             nuevos = sincronizar_desde_raw_gps(cursor)
         if nuevos:
             print(f"ETL: {nuevos} vehiculos agregados al catalogo", flush=True)

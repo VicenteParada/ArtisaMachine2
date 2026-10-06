@@ -154,6 +154,7 @@ def guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recal
 
 
 def procesar_dia(connection, dia, estado, recalculo=False):
+    print(f"Cierre diario: calculando {dia}…", flush=True)
     with connection.cursor() as cursor:
         filas = leer_filas_dia(cursor, dia)
         recibido = ultimo_recibido(cursor, dia)
