@@ -58,5 +58,35 @@ class CompanyApiStateTests(unittest.TestCase):
         self.assertIsNone(api.telemetry_limit("limite=abc"))
 
 
+class LatestTelemetryTests(unittest.TestCase):
+    def test_filters_trucks_without_subquery(self):
+        from datetime import timedelta
+        now = datetime(2026, 10, 6, 18)
+        rows = [{"report_id": f"r{i}", "asset_id": "CAMIONETA" if i % 2 else "RJXS30", "asset_name": "x",
+                 "report_date": now - timedelta(seconds=i), "latitude": -33.4, "longitude": -70.6,
+                 "speed": 1, "heading": 0, "ignition": 1, "event_name": "e", "edad_segundos": i} for i in range(400)]
+
+        class Cursor(OneRowCursor):
+            def execute(self, query, params=None):
+                super().execute(query, params)
+                self.last = query
+                self.params = params
+
+            def fetchall(self):
+                if "tipos_vehiculo" in self.last:
+                    return [{"asset_id": "RJXS30"}]
+                if "FROM telemetria_api" in self.last:
+                    batch = self.params[-1]
+                    pool = [r for r in rows if not self.params[:-1] or r["report_date"] < self.params[0]]
+                    return pool[:batch]
+                return []
+
+        cursor = Cursor(state())
+        result = api.latest_telemetry(cursor, 30)
+        self.assertEqual(len(result["reportes"]), 30)
+        self.assertTrue(all(r["asset_id"] == "RJXS30" for r in result["reportes"]))
+        self.assertTrue(all("IN (SELECT" not in q for q, _ in cursor.queries))
+
+
 if __name__ == "__main__":
     unittest.main()

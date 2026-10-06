@@ -116,20 +116,40 @@ def telemetry_limit(query):
     return value if 1 <= value <= TELEMETRY_MAX_LIMIT else None
 
 
+def truck_ids(cursor):
+    cursor.execute(
+        """SELECT v.asset_id FROM vehiculos AS v INNER JOIN tipos_vehiculo AS t ON t.id_tipo = v.id_tipo
+           WHERE t.nombre = 'camion'"""
+    )
+    return {row["asset_id"] for row in cursor.fetchall()}
+
+
 def latest_telemetry(cursor, limit):
     api_state = company_api_state(cursor)
     if api_state is None:
         return TELEMETRY_PENDING
-    cursor.execute(
-        f"""SELECT report_id, asset_id, asset_name, report_date, latitude, longitude, speed,
-                  heading, ignition, event_name,
-                  TIMESTAMPDIFF(SECOND, report_date, UTC_TIMESTAMP(6)) AS edad_segundos
-           FROM telemetria_api WHERE {sql_es_camion("asset_id")}
-           ORDER BY report_date DESC LIMIT %s""",
-        (limit,),
-    )
+    # Se recorre el índice por fecha desde lo más nuevo y se filtran los camiones en Python.
+    # Un "WHERE asset_id IN (subconsulta) ORDER BY ... LIMIT" lleva a MariaDB a ordenar
+    # millones de filas antes de filtrar y supera el tiempo límite.
+    trucks = truck_ids(cursor)
+    reports, before, batch = [], None, max(200, limit * 10)
+    for _ in range(20):
+        condition = "WHERE report_date < %s" if before else ""
+        cursor.execute(
+            f"""SELECT report_id, asset_id, asset_name, report_date, latitude, longitude, speed,
+                      heading, ignition, event_name,
+                      TIMESTAMPDIFF(SECOND, report_date, UTC_TIMESTAMP(6)) AS edad_segundos
+               FROM telemetria_api FORCE INDEX (idx_telemetria_api_fecha_recibido) {condition}
+               ORDER BY report_date DESC LIMIT %s""",
+            ((before, batch) if before else (batch,)),
+        )
+        rows = cursor.fetchall()
+        reports.extend(row for row in rows if row["asset_id"] in trucks)
+        if len(reports) >= limit or len(rows) < batch:
+            break
+        before = rows[-1]["report_date"]
     return {"status": "ok", "source": "company_api", "conexion": api_state,
-            "reportes": cursor.fetchall()}
+            "reportes": reports[:limit]}
 
 
 def telemetry_summary(cursor):
@@ -139,10 +159,10 @@ def telemetry_summary(cursor):
     cursor.execute("SELECT MIN(report_date) AS desde, MAX(report_date) AS hasta FROM telemetria_api")
     span = cursor.fetchone() or {}
     cursor.execute(
-        f"""SELECT COUNT(DISTINCT asset_id) AS vehiculos FROM telemetria_api
-           WHERE report_date >= UTC_TIMESTAMP(6) - INTERVAL 24 HOUR AND {sql_es_camion("asset_id")}"""
+        """SELECT DISTINCT asset_id FROM telemetria_api FORCE INDEX (idx_telemetria_api_fecha_recibido)
+           WHERE report_date >= UTC_TIMESTAMP(6) - INTERVAL 24 HOUR"""
     )
-    vehicles = (cursor.fetchone() or {}).get("vehiculos")
+    vehicles = len({row["asset_id"] for row in cursor.fetchall()} & truck_ids(cursor))
     return {"status": "ok", "source": "company_api", "conexion": api_state,
             "reportes": api_state["guardados"], "vehiculos": vehicles,
             "vehiculos_ventana_horas": 24, "desde": span.get("desde"), "hasta": span.get("hasta")}
