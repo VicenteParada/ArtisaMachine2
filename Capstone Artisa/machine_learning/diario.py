@@ -16,12 +16,15 @@ pierde ni se cuenta dos veces.
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+import json
 import math
 import time
 
 from common import dias
+from machine_learning.viajes import extraer_viajes
 
 
+VERSION_CALCULO = 2  # 2: agrega los viajes entre paradas
 MAX_GAP_MIN = 5
 VEL_MAX_KMH = 150
 GAP_VIAJE_MIN = 30
@@ -50,9 +53,9 @@ class ResumenCamion:
     tramos_unidos: int
 
 
-def resumir(filas):
-    """filas: dicts con asset_id, asset_name, report_id, report_date (UTC), latitude, longitude.
-    Devuelve (lista de ResumenCamion, descartados)."""
+def limpiar(filas):
+    """Puntos válidos por camión, sin repetidos, ordenados por hora.
+    Devuelve ({asset_id: [(fecha, lat, lon, nombre), ...]}, descartados)."""
     vistos_id, vistos_hora = set(), set()
     por_camion = defaultdict(list)
     descartados = 0
@@ -70,10 +73,18 @@ def resumir(filas):
             vistos_id.add(fila["report_id"])
         vistos_hora.add(clave_hora)
         por_camion[fila["asset_id"]].append((fila["report_date"], lat, lon, fila.get("asset_name")))
+    for puntos in por_camion.values():
+        puntos.sort(key=lambda p: p[0])
+    return por_camion, descartados
 
+
+def resumir(filas, por_camion=None, descartados=0):
+    """filas: dicts con asset_id, asset_name, report_id, report_date (UTC), latitude, longitude.
+    Devuelve (lista de ResumenCamion, descartados)."""
+    if por_camion is None:
+        por_camion, descartados = limpiar(filas)
     resumenes = []
     for asset_id, puntos in por_camion.items():
-        puntos.sort(key=lambda p: p[0])
         metros, viajes, unidos = 0.0, 1, 0
         for (t0, la0, lo0, _), (t1, la1, lo1, _) in zip(puntos, puntos[1:]):
             horas = (t1 - t0).total_seconds() / 3600
@@ -91,6 +102,15 @@ def resumir(filas):
         ))
     resumenes.sort(key=lambda r: (-r.reportes, r.asset_id))
     return resumenes, descartados
+
+
+def viajes_del_dia(por_camion, dia):
+    """Viajes entre paradas de cada camión (machine_learning/viajes.py)."""
+    inicio, fin = dias.limites_utc(dia)
+    resultado = []
+    for asset_id, puntos in por_camion.items():
+        resultado.extend(extraer_viajes(asset_id, [(p[0], p[1], p[2]) for p in puntos], inicio, fin))
+    return resultado
 
 
 # --- Base de datos -----------------------------------------------------------------
@@ -136,11 +156,29 @@ def ultimo_recibido(cursor, dia):
     return fila.get("recibido")
 
 
-def guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recalculo=False):
-    """Reemplaza el resumen del día en una sola transacción (son datos derivados)."""
+def _geometria_json(viaje):
+    return json.dumps([[[round(lon, 6), round(lat, 6)] for lat, lon in tramo] for tramo in viaje.tramos],
+                      separators=(",", ":"))
+
+
+def guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recalculo=False, viajes=()):
+    """Reemplaza el resumen y los viajes del día en una sola transacción (datos derivados)."""
     inicio, fin = dias.limites_utc(dia)
     with connection.cursor() as cursor:
         cursor.execute("DELETE FROM reporte_diario WHERE fecha=%s", (dia,))
+        cursor.execute("DELETE FROM viajes WHERE fecha=%s", (dia,))
+        if viajes:
+            cursor.executemany(
+                """INSERT IGNORE INTO viajes
+                (fecha,asset_id,inicio,fin,origen_lat,origen_lon,destino_lat,destino_lon,puntos,km,
+                 con_saltos,abierto_inicio,abierto_fin,geometria)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                [(dia, v.asset_id, v.inicio, v.fin,
+                  v.origen[0] if v.origen else None, v.origen[1] if v.origen else None,
+                  v.destino[0] if v.destino else None, v.destino[1] if v.destino else None,
+                  v.puntos, v.km, int(v.con_saltos), int(v.abierto_inicio), int(v.abierto_fin),
+                  _geometria_json(v)) for v in viajes],
+            )
         if resumenes:
             cursor.executemany(
                 """INSERT INTO reporte_diario
@@ -152,18 +190,18 @@ def guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recal
         cursor.execute(
             """INSERT INTO reporte_diario_estado
             (fecha,zona,inicio_utc,fin_utc,estado,reportes,camiones,km_observados,descartados,
-             ultimo_recibido,calculado_en,cerrado_en,recalculos)
+             ultimo_recibido,calculado_en,cerrado_en,recalculos,version_calculo)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(6),
-                    CASE WHEN %s='cerrado' THEN UTC_TIMESTAMP(6) ELSE NULL END,0)
+                    CASE WHEN %s='cerrado' THEN UTC_TIMESTAMP(6) ELSE NULL END,0,%s)
             ON DUPLICATE KEY UPDATE zona=VALUES(zona),inicio_utc=VALUES(inicio_utc),fin_utc=VALUES(fin_utc),
             estado=VALUES(estado),reportes=VALUES(reportes),camiones=VALUES(camiones),
             km_observados=VALUES(km_observados),descartados=VALUES(descartados),
             ultimo_recibido=VALUES(ultimo_recibido),calculado_en=VALUES(calculado_en),
             cerrado_en=CASE WHEN VALUES(estado)='cerrado' THEN COALESCE(cerrado_en, UTC_TIMESTAMP(6)) ELSE NULL END,
-            recalculos=recalculos+%s""",
+            recalculos=recalculos+%s,version_calculo=VALUES(version_calculo)""",
             (dia, dias.ZONA, inicio, fin, estado, sum(r.reportes for r in resumenes), len(resumenes),
              round(sum(r.km_observados for r in resumenes), 2), descartados, recibido, estado,
-             1 if recalculo else 0),
+             VERSION_CALCULO, 1 if recalculo else 0),
         )
     connection.commit()
 
@@ -173,9 +211,11 @@ def procesar_dia(connection, dia, estado, recalculo=False):
     with connection.cursor() as cursor:
         filas = leer_filas_dia(cursor, dia)
         recibido = ultimo_recibido(cursor, dia)
-    resumenes, descartados = resumir(filas)
-    guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recalculo)
+    por_camion, descartados = limpiar(filas)
+    resumenes, descartados = resumir(None, por_camion, descartados)
+    viajes = viajes_del_dia(por_camion, dia)
+    guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recalculo, viajes)
     reportes = sum(r.reportes for r in resumenes)
-    print(f"Cierre diario: {dia} -> {estado} · {len(resumenes)} camiones, {reportes} reportes "
-          f"en {time.monotonic() - comienzo:.1f} s", flush=True)
+    print(f"Cierre diario: {dia} -> {estado} · {len(resumenes)} camiones, {reportes} reportes, "
+          f"{len(viajes)} viajes en {time.monotonic() - comienzo:.1f} s", flush=True)
     return len(resumenes), reportes

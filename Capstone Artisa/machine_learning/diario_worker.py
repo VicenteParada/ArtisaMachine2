@@ -21,7 +21,8 @@ from urllib.parse import urlsplit
 from common import dias
 from common.db import connect_db, initialize_db
 from common.http import JsonHandler, serve
-from machine_learning.diario import procesar_dia, ultimo_recibido
+from machine_learning import rutas_job
+from machine_learning.diario import VERSION_CALCULO, procesar_dia, ultimo_recibido
 
 
 GRACIA = timedelta(minutes=int(os.environ.get("DIARIO_GRACIA_MINUTOS", "15")))
@@ -32,6 +33,7 @@ DESDE = os.environ.get("DIARIO_DESDE", "").strip()
 INTERVALO = 60
 STATE = {"estado": "iniciando", "error": None, "ultimo_ciclo": None, "dias_procesados": 0}
 HEARTBEAT = {"value": time.monotonic()}
+RUTAS = {"ultimo_intento": -1e9}
 
 
 def _utc_now():
@@ -82,7 +84,8 @@ def ciclo(connection, utc_now, procesar=procesar_dia):
         if inicio is None:
             return hecho
         cursor.execute(
-            "SELECT fecha, estado, calculado_en, ultimo_recibido FROM reporte_diario_estado WHERE fecha >= %s",
+            "SELECT fecha, estado, calculado_en, ultimo_recibido, version_calculo "
+            "FROM reporte_diario_estado WHERE fecha >= %s",
             (inicio,),
         )
         estados = {fila["fecha"]: fila for fila in cursor.fetchall()}
@@ -93,7 +96,11 @@ def ciclo(connection, utc_now, procesar=procesar_dia):
     dia = inicio
     while dia < hoy and len(hecho) < MAX_DIAS_POR_CICLO:
         fila = estados.get(dia)
-        if not fila or fila["estado"] != "cerrado":
+        if fila and fila["estado"] == "cerrado" and fila.get("version_calculo", VERSION_CALCULO) < VERSION_CALCULO:
+            # Día cerrado con un método anterior: se recalcula y sigue cerrado.
+            procesar(connection, dia, "cerrado")
+            hecho.append((dia, "actualizado"))
+        elif not fila or fila["estado"] != "cerrado":
             if dia_listo_para_cerrar(dia, utc_now, modo, ultimo_exito):
                 procesar(connection, dia, "cerrado")
                 hecho.append((dia, "cerrado"))
@@ -137,6 +144,15 @@ def loop():
             # Leer un día completo del histórico puede tomar más que el límite normal de 15 s.
             with connect_db(autocommit=False, read_timeout=600) as connection:
                 hecho = ciclo(connection, _utc_now())
+                # Clasificación de rutas cuando hay días cerrados nuevos (como máximo cada 2 h)
+                # y no quedan días pendientes por procesar en este ciclo.
+                if len(hecho) < MAX_DIAS_POR_CICLO and time.monotonic() - RUTAS["ultimo_intento"] > 1800:
+                    with connection.cursor() as cursor:
+                        recalcular = rutas_job.necesita_recalculo(cursor)
+                    connection.commit()
+                    if recalcular:
+                        RUTAS["ultimo_intento"] = time.monotonic()  # si falla, no reintentar antes de 30 min
+                        STATE["rutas"] = rutas_job.ejecutar(connection)
             STATE.update(estado="ok", error=None, ultimo_ciclo=_utc_now().isoformat() + "Z")
             STATE["dias_procesados"] += len(hecho)
             if STATE["dias_procesados"] == 0 and not hecho and not avisado_sin_datos:

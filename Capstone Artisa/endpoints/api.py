@@ -14,6 +14,7 @@ from common import dias
 from common.db import connect_db
 from common.http import JsonHandler, serve
 from common.vehiculos import sql_es_camion
+from endpoints import rutas_api
 
 
 STARTED_AT = time.monotonic()
@@ -180,6 +181,8 @@ def pipeline_state(cursor, detailed=True):
             "telemetria_api": "pending",
         },
     }
+    if rutas_api.active_version(cursor):
+        state["componentes"]["machine"] = "ok"
     api_state = company_api_state(cursor)
     if api_state is not None:
         live = api_state["conexion"] in ("en_vivo", "sin_reportes_recientes", "sincronizando")
@@ -257,6 +260,7 @@ def gps_points(cursor, desde, hasta):
 # --- Historial diario (cierre de 00:00 a 00:00 hora Chile, machine_learning/diario.py) ---
 
 ASSET_RE = re.compile(r"[A-Za-z0-9_-]{1,16}")
+JOURNEY_RE = re.compile(r"/api/vehiculos/([A-Za-z0-9_-]{1,16})/recorrido")
 DETALLE_MAX = 1000
 
 
@@ -395,6 +399,26 @@ class Handler(JsonHandler):
                                          "/api/reportes/dia?fecha=YYYY-MM-DD", "/api/reportes/mes?mes=YYYY-MM",
                                          "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
                                          *PENDING_RESPONSES]})
+            return
+        if path in ("/api/mapa", "/api/dashboard"):
+            # Resultados de Machine si existe una clasificación activa; si no, "pendiente".
+            try:
+                with connect_db(read_timeout=60) as connection, connection.cursor() as cursor:
+                    result = (rutas_api.classified_map if path == "/api/mapa" else rutas_api.classified_dashboard)(cursor)
+            except pymysql.MySQLError as error:
+                self.database_error(error)
+                return
+            self.respond(200, result if result is not None else PENDING_RESPONSES[path])
+            return
+        journey = JOURNEY_RE.fullmatch(path)
+        if journey:
+            try:
+                with connect_db(read_timeout=60) as connection, connection.cursor() as cursor:
+                    result = rutas_api.truck_journey(cursor, journey.group(1))
+            except pymysql.MySQLError as error:
+                self.database_error(error)
+                return
+            self.respond(200 if result else 404, result or {"error": "Camión sin reportes"})
             return
         if path in PENDING_RESPONSES:
             self.respond(200, PENDING_RESPONSES[path])

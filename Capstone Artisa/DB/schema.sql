@@ -156,3 +156,71 @@ CREATE TABLE IF NOT EXISTS reporte_diario_estado (
     recalculos INT UNSIGNED NOT NULL DEFAULT 0,
     PRIMARY KEY (fecha)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Viajes entre paradas de cada camión (machine_learning/viajes.py), uno por fila. Se
+-- guardan al calcular cada día y alimentan la clasificación de rutas. geometria es JSON
+-- con tramos de puntos GPS reales [[[lon,lat],...],...] sin unir saltos de GPS.
+CREATE TABLE IF NOT EXISTS viajes (
+    fecha DATE NOT NULL,
+    asset_id VARCHAR(16) NOT NULL,
+    inicio DATETIME(6) NOT NULL,
+    fin DATETIME(6) NOT NULL,
+    origen_lat DOUBLE NULL,
+    origen_lon DOUBLE NULL,
+    destino_lat DOUBLE NULL,
+    destino_lon DOUBLE NULL,
+    puntos INT UNSIGNED NOT NULL,
+    km DOUBLE NOT NULL,
+    con_saltos TINYINT(1) NOT NULL,
+    abierto_inicio TINYINT(1) NOT NULL,
+    abierto_fin TINYINT(1) NOT NULL,
+    geometria MEDIUMTEXT NOT NULL,
+    PRIMARY KEY (fecha, asset_id, inicio),
+    INDEX idx_viajes_inicio (inicio)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Versión del cálculo de cada día: si cambia el método (p. ej. al agregar viajes), los
+-- días ya cerrados se recalculan solos sin reabrirse. MariaDB: ADD COLUMN IF NOT EXISTS.
+ALTER TABLE reporte_diario_estado ADD COLUMN IF NOT EXISTS version_calculo SMALLINT UNSIGNED NOT NULL DEFAULT 1;
+
+-- Clasificación de rutas (machine_learning/rutas.py). Cada ejecución crea una versión
+-- y la activa al final en una sola transacción. Son datos derivados de `viajes`.
+CREATE TABLE IF NOT EXISTS rutas_version (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    creado_en DATETIME(6) NOT NULL,
+    desde DATE NOT NULL,
+    hasta DATE NOT NULL,
+    activa TINYINT(1) NOT NULL DEFAULT 0,
+    metricas_json MEDIUMTEXT NOT NULL,
+    lugares_json MEDIUMTEXT NOT NULL,
+    PRIMARY KEY (id),
+    INDEX idx_rutas_version_activa (activa)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS rutas (
+    version_id INT UNSIGNED NOT NULL,
+    route_id VARCHAR(16) NOT NULL,
+    label VARCHAR(255) NOT NULL,
+    origen VARCHAR(64) NOT NULL,
+    destino VARCHAR(64) NOT NULL,
+    usage_count INT UNSIGNED NOT NULL,
+    unique_vehicle_count INT UNSIGNED NOT NULL,
+    observed_points INT UNSIGNED NOT NULL,
+    km_mediana DOUBLE NOT NULL,
+    usage_level VARCHAR(8) NOT NULL,
+    geometry_source VARCHAR(32) NOT NULL,
+    geometria MEDIUMTEXT NOT NULL,
+    primer_viaje DATETIME(6) NOT NULL,
+    ultimo_viaje DATETIME(6) NOT NULL,
+    vehiculos_json TEXT NOT NULL,
+    PRIMARY KEY (version_id, route_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Ruta del viaje clasificado más reciente de cada camión (para el mapa).
+CREATE TABLE IF NOT EXISTS rutas_vehiculo (
+    version_id INT UNSIGNED NOT NULL,
+    asset_id VARCHAR(16) NOT NULL,
+    route_id VARCHAR(16) NOT NULL,
+    ultimo_viaje DATETIME(6) NOT NULL,
+    PRIMARY KEY (version_id, asset_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

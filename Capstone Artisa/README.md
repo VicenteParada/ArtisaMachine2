@@ -193,6 +193,31 @@ resumen del mes: `/api/reportes/dia`, `/api/reportes/mes`, `/api/reportes/camion
 El explorador `/exploracion-gps` ahora también incluye la telemetría en vivo; sus
 días siguen siendo días UTC, como antes.
 
+## Clasificación de rutas (Machine)
+
+Corre dentro de `machine-diario`, sin servicios extra:
+
+1. Al calcular cada día se extraen los **viajes entre paradas** de cada camión
+   (`machine_learning/viajes.py`): una parada es quedarse 10 min dentro de 200 m.
+   Solo se unen reportes seguidos (≤ 5 min, ≤ 150 km/h); los saltos de GPS no se dibujan.
+   Los viajes partidos por la medianoche se vuelven a empalmar.
+2. Cuando hay días cerrados nuevos (como máximo cada 2 h), `machine_learning/rutas.py`
+   toma los viajes de los últimos 90 días (`RUTAS_VENTANA_DIAS`):
+   - Asigna origen y destino a una faena (geocerca) o a un lugar frecuente (DBSCAN, 500 m).
+   - Agrupa por par origen-destino (ida y vuelta juntas) y por trayectoria (32 puntos,
+     distancia media, enlace promedio con umbral de 750 m): un desvío real es otra ruta.
+   - La línea de cada ruta es su viaje medoide: un recorrido real, no un promedio.
+   - Nivel por cantidad de recorridos: HIGH sobre el percentil 67, LOW hasta el 33.
+3. `/api/mapa` y `/api/dashboard` entregan la versión activa; `/api/vehiculos/<id>/recorrido`
+   entrega el último día observado de un camión. Sin versión activa siguen en "pendiente".
+
+Para revisar los resultados con los datos reales:
+
+```bash
+docker compose exec machine-diario python -m machine_learning.validar_rutas
+docker compose exec machine-diario python -m machine_learning.validar_rutas --geojson > rutas.geojson
+```
+
 ## Pendiente de integración Machine
 
 `common/telemetry_map.py` se conserva como referencia legacy utilizada por sus
