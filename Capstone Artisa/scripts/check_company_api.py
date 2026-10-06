@@ -32,19 +32,19 @@ def load_env():
 def main():
     load_env()
     from telemetria_api.source import (
-        ApiConfig, ApiSourceError, NATIVE_FORMAT, detect_offset, fetch_rows, transform_rows,
+        ApiConfig, ApiSourceError, date_expression, detect_offset, fetch_rows, transform_rows,
     )
     config = ApiConfig.from_env()
     if config is None:
         print("COMPANY_API_URL está vacío en .env: la telemetría seguirá como 'pendiente'.")
         return 1
-    date_expr = f"DATE_FORMAT(r.report_date, '{NATIVE_FORMAT}')" if config.native_dates else "r.report_date"
-    now_expr = f"DATE_FORMAT(NOW(6), '{NATIVE_FORMAT}')" if config.native_dates else "NOW(6)"
+    date_expr = date_expression(config, "r.report_date")
+    now_expr = date_expression(config, "LOCALTIMESTAMP" if config.dialect == "postgres" else "NOW(6)")
     query = (f"SELECT r.report_id, r.asset_id, r.asset_name, r.latitude, r.longitude, r.speed, "
              f"r.heading, r.ignition, r.event_name, {date_expr} AS report_date_origen, "
              f"{now_expr} AS ahora_origen FROM {config.table} AS r "
              "ORDER BY r.report_date DESC LIMIT 5")
-    print(f"Origen: {config.origin}  (tabla {config.table})")
+    print(f"Origen: {config.origin}  (tabla {config.table}, {config.dialect})")
     started = time.monotonic()
     try:
         rows = fetch_rows(config, query)

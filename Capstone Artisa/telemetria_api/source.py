@@ -26,6 +26,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 MAX_RESPONSE_BYTES = 25_000_000
 NATIVE_FORMAT = "%Y-%m-%d %H:%i:%s.%f"  # formato MySQL/MariaDB del lado del origen
+PG_FORMAT = "YYYY-MM-DD HH24:MI:SS.US"   # mismo formato en PostgreSQL (la API de la empresa)
+DIALECTS = ("postgres", "mysql")
 SOURCE_COLUMNS = ("report_id", "asset_id", "asset_name", "latitude", "longitude",
                   "speed", "heading", "ignition", "event_name")
 
@@ -63,9 +65,16 @@ def _parse_start(raw):
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def _dialect(raw):
+    value = (raw or "postgres").strip().lower()
+    if value not in DIALECTS:
+        raise ValueError("COMPANY_API_DIALECT debe ser 'postgres' o 'mysql'")
+    return value
+
+
 def build_clock_query(config):
     """Consulta mínima para conocer el reloj del origen (sin leer reportes)."""
-    return f"SELECT {_date_expression(config, 'NOW(6)')} AS ahora_origen"
+    return f"SELECT {_date_expression(config, _now(config))} AS ahora_origen"
 
 
 @dataclass(frozen=True)
@@ -73,7 +82,7 @@ class ApiConfig:
     url: str
     table: str
     timezone_name: str          # "auto" o una zona IANA, solo para convertir a UTC
-    native_dates: bool          # True: DATE_FORMAT en el origen (recomendado)
+    native_dates: bool          # True: la fecha viaja como texto con el valor exacto del origen
     auth_header: str
     auth_value: str
     timeout_seconds: int
@@ -86,6 +95,7 @@ class ApiConfig:
     max_pages_per_cycle: int
     retry_min_seconds: int
     retry_max_seconds: int
+    dialect: str = "postgres"   # motor SQL detrás de la API: postgres (actual) o mysql
 
     @classmethod
     def from_env(cls):
@@ -111,6 +121,7 @@ class ApiConfig:
             table=table,
             timezone_name=timezone_name,
             native_dates=os.environ.get("COMPANY_API_NATIVE_DATES", "1").strip() != "0",
+            dialect=_dialect(os.environ.get("COMPANY_API_DIALECT", "postgres")),
             auth_header=os.environ.get("COMPANY_API_AUTH_HEADER", "Authorization").strip() or "Authorization",
             auth_value=os.environ.get("COMPANY_API_TOKEN", "").strip(),
             timeout_seconds=_env_int("COMPANY_API_TIMEOUT_SECONDS", 30, 3, 300),
@@ -135,16 +146,38 @@ class ApiConfig:
 
 # --- Construcción de la consulta ------------------------------------------------
 
-def _sql_string(value):
-    return "'" + str(value).replace("\\", "\\\\").replace("'", "''") + "'"
+def _sql_string(value, dialect="postgres"):
+    text = str(value)
+    if dialect == "mysql":  # en MySQL la barra invertida escapa; en PostgreSQL es literal
+        text = text.replace("\\", "\\\\")
+    return "'" + text.replace("'", "''") + "'"
 
 
-def native_literal(value):
-    return _sql_string(value.strftime("%Y-%m-%d %H:%M:%S.%f"))
+def native_literal(value, dialect="postgres"):
+    return _sql_string(value.strftime("%Y-%m-%d %H:%M:%S.%f"), dialect)
+
+
+def _now(config):
+    # Hora del reloj del origen, en los mismos términos que su columna report_date.
+    return "LOCALTIMESTAMP" if config.dialect == "postgres" else "NOW(6)"
+
+
+def _interval(config, amount, unit):
+    if config.dialect == "postgres":
+        return f"INTERVAL '{int(amount)} {unit.lower()}s'"
+    return f"INTERVAL {int(amount)} {unit}"
 
 
 def _date_expression(config, column):
-    return f"DATE_FORMAT({column}, '{NATIVE_FORMAT}')" if config.native_dates else column
+    if not config.native_dates:
+        return column
+    if config.dialect == "postgres":
+        return f"to_char({column}, '{PG_FORMAT}')"
+    return f"DATE_FORMAT({column}, '{NATIVE_FORMAT}')"
+
+
+def date_expression(config, column):
+    return _date_expression(config, column)
 
 
 def build_query(config, after=None, since=None):
@@ -158,23 +191,26 @@ def build_query(config, after=None, since=None):
     """
     columns = [f"r.{name}" for name in SOURCE_COLUMNS]
     columns.append(f"{_date_expression(config, 'r.report_date')} AS report_date_origen")
-    columns.append(f"{_date_expression(config, 'NOW(6)')} AS ahora_origen")
+    columns.append(f"{_date_expression(config, _now(config))} AS ahora_origen")
     conditions = ["r.report_id IS NOT NULL", "r.report_date IS NOT NULL",
-                  f"r.report_date <= NOW() + INTERVAL {int(config.max_future_minutes)} MINUTE"]
+                  f"r.report_date <= {_now(config)} + {_interval(config, config.max_future_minutes, 'MINUTE')}"]
     if after is not None:
         date_value, identifier = after
-        literal = native_literal(date_value)
+        literal = native_literal(date_value, config.dialect)
+        identifier = _sql_string(identifier, config.dialect)
+        report_id = "r.report_id::text" if config.dialect == "postgres" else "r.report_id"
         conditions.append(
-            f"(r.report_date > {literal} OR (r.report_date = {literal} AND r.report_id > {_sql_string(identifier)}))"
+            f"(r.report_date > {literal} OR (r.report_date = {literal} AND {report_id} > {identifier}))"
         )
     elif since is not None:
-        conditions.append(f"r.report_date >= {native_literal(since)}")
+        conditions.append(f"r.report_date >= {native_literal(since, config.dialect)}")
     else:
-        conditions.append(f"r.report_date >= NOW() - INTERVAL {int(config.initial_lookback_hours)} HOUR")
+        conditions.append(f"r.report_date >= {_now(config)} - {_interval(config, config.initial_lookback_hours, 'HOUR')}")
     return (
         f"SELECT {', '.join(columns)} FROM {config.table} AS r WHERE "
         + " AND ".join(conditions)
-        + f" ORDER BY r.report_date, r.report_id LIMIT {int(config.batch_size)}"
+        + f" ORDER BY r.report_date, {'r.report_id::text' if config.dialect == 'postgres' else 'r.report_id'}"
+        + f" LIMIT {int(config.batch_size)}"
     )
 
 

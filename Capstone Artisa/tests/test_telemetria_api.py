@@ -41,13 +41,13 @@ class FakeSource:
     def query(self, sql):
         if " FROM " not in sql:  # consulta de reloj del origen
             return [{"ahora_origen": self.now.strftime(FMT)}]
-        assert "DATE_FORMAT(r.report_date" in sql
+        assert "to_char(r.report_date, 'YYYY-MM-DD HH24:MI:SS.US')" in sql
         limit = int(re.search(r"LIMIT (\d+)$", sql).group(1))
-        future = int(re.search(r"NOW\(\) \+ INTERVAL (\d+) MINUTE", sql).group(1))
+        future = int(re.search(r"LOCALTIMESTAMP \+ INTERVAL '(\d+) minutes'", sql).group(1))
         rows = [r for r in self.rows if r["report_date"] <= self.now + timedelta(minutes=future)]
-        keyset = re.search(r"r\.report_date > '([^']+)' OR \(r\.report_date = '[^']+' AND r\.report_id > '([^']*)'\)", sql)
+        keyset = re.search(r"r\.report_date > '([^']+)' OR \(r\.report_date = '[^']+' AND r\.report_id::text > '([^']*)'\)", sql)
         since = re.search(r"r\.report_date >= '([^']+)'", sql)
-        initial = re.search(r"NOW\(\) - INTERVAL (\d+) HOUR", sql)
+        initial = re.search(r"LOCALTIMESTAMP - INTERVAL '(\d+) hours'", sql)
         if keyset:
             key = (datetime.strptime(keyset.group(1), FMT), keyset.group(2))
             rows = [r for r in rows if (r["report_date"], r["report_id"]) > key]
@@ -128,17 +128,26 @@ class QueryTests(unittest.TestCase):
     def setUp(self):
         self.config = make_config("http://api.local:3003/sql")
 
-    def test_initial_query_uses_source_clock_and_native_dates(self):
+    def test_postgres_query_uses_source_clock_and_native_dates(self):
         sql = build_query(self.config)
-        self.assertIn("DATE_FORMAT(r.report_date, '%Y-%m-%d %H:%i:%s.%f') AS report_date_origen", sql)
-        self.assertIn("r.report_date >= NOW() - INTERVAL 24 HOUR", sql)
-        self.assertIn("r.report_date <= NOW() + INTERVAL 10 MINUTE", sql)
-        self.assertTrue(sql.endswith("ORDER BY r.report_date, r.report_id LIMIT 1000"))
+        self.assertIn("to_char(r.report_date, 'YYYY-MM-DD HH24:MI:SS.US') AS report_date_origen", sql)
+        self.assertIn("to_char(LOCALTIMESTAMP, 'YYYY-MM-DD HH24:MI:SS.US') AS ahora_origen", sql)
+        self.assertIn("r.report_date >= LOCALTIMESTAMP - INTERVAL '24 hours'", sql)
+        self.assertIn("r.report_date <= LOCALTIMESTAMP + INTERVAL '10 minutes'", sql)
+        self.assertTrue(sql.endswith("ORDER BY r.report_date, r.report_id::text LIMIT 1000"))
+        self.assertNotIn("DATE_FORMAT", sql)
+        self.assertNotIn("NOW(6)", sql)
 
     def test_keyset_escapes_identifiers(self):
-        sql = build_query(self.config, after=(datetime(2026, 10, 6, 12, 0), "a'b"))
-        self.assertIn("r.report_id > 'a''b'", sql)
+        sql = build_query(self.config, after=(datetime(2026, 10, 6, 12, 0), "a'b\\c"))
+        self.assertIn("r.report_id::text > 'a''b\\c'", sql)  # PostgreSQL: la barra no se duplica
         self.assertIn("r.report_date > '2026-10-06 12:00:00.000000'", sql)
+
+    def test_mysql_dialect_still_supported(self):
+        sql = build_query(make_config("http://x/sql", dialect="mysql"))
+        self.assertIn("DATE_FORMAT(r.report_date, '%Y-%m-%d %H:%i:%s.%f')", sql)
+        self.assertIn("r.report_date >= NOW(6) - INTERVAL 24 HOUR", sql)
+        self.assertTrue(sql.endswith("ORDER BY r.report_date, r.report_id LIMIT 1000"))
 
     def test_rejects_unsafe_table_name(self):
         import os
