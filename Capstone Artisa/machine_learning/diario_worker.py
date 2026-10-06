@@ -138,8 +138,6 @@ def loop():
                 hecho = ciclo(connection, _utc_now())
             STATE.update(estado="ok", error=None, ultimo_ciclo=_utc_now().isoformat() + "Z")
             STATE["dias_procesados"] += len(hecho)
-            for dia, estado in hecho:
-                print(f"Cierre diario: {dia} -> {estado}", flush=True)
             if STATE["dias_procesados"] == 0 and not hecho and not avisado_sin_datos:
                 avisado_sin_datos = True
                 print("Cierre diario: sin días para procesar (sin datos de la API y sin DIARIO_DESDE)", flush=True)

@@ -17,9 +17,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 import math
+import time
 
 from common import dias
-from common.vehiculos import sql_es_camion
 
 
 MAX_GAP_MIN = 5
@@ -95,18 +95,33 @@ def resumir(filas):
 
 # --- Base de datos -----------------------------------------------------------------
 
+def camiones_catalogo(cursor):
+    cursor.execute(
+        """SELECT v.asset_id FROM vehiculos AS v
+           INNER JOIN tipos_vehiculo AS t ON t.id_tipo = v.id_tipo
+           WHERE t.nombre = 'camion' ORDER BY v.asset_id"""
+    )
+    return [fila["asset_id"] for fila in cursor.fetchall()]
+
+
 def leer_filas_dia(cursor, dia):
-    """Reportes de camiones del día local, desde ambas tablas, por índice de fecha."""
+    """Reportes de camiones del día local, desde ambas tablas.
+
+    Igual que el cuaderno: un SELECT por camión con el índice (asset_id, report_date).
+    Una sola consulta por fecha sobre los 23 M de reportes de raw_gps es mucho más lenta.
+    """
     inicio, fin = dias.limites_utc(dia)
     filas = []
-    for tabla in ("telemetria_api", "raw_gps"):
-        cursor.execute(
-            f"""SELECT report_id, asset_id, asset_name, report_date, latitude, longitude
-               FROM {tabla} WHERE report_date >= %s AND report_date < %s
-               AND {sql_es_camion("asset_id")}""",
-            (inicio, fin),
-        )
-        filas.extend(cursor.fetchall())
+    for asset_id in camiones_catalogo(cursor):
+        for tabla, indice in (("raw_gps", "idx_raw_gps_asset_fecha"),
+                              ("telemetria_api", "idx_telemetria_api_asset_fecha")):
+            cursor.execute(
+                f"""SELECT report_id, asset_id, asset_name, report_date, latitude, longitude
+                   FROM {tabla} USE INDEX ({indice})
+                   WHERE asset_id = %s AND report_date >= %s AND report_date < %s""",
+                (asset_id, inicio, fin),
+            )
+            filas.extend(cursor.fetchall())
     return filas
 
 
@@ -154,10 +169,13 @@ def guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recal
 
 
 def procesar_dia(connection, dia, estado, recalculo=False):
-    print(f"Cierre diario: calculando {dia}…", flush=True)
+    comienzo = time.monotonic()
     with connection.cursor() as cursor:
         filas = leer_filas_dia(cursor, dia)
         recibido = ultimo_recibido(cursor, dia)
     resumenes, descartados = resumir(filas)
     guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recalculo)
-    return len(resumenes), sum(r.reportes for r in resumenes)
+    reportes = sum(r.reportes for r in resumenes)
+    print(f"Cierre diario: {dia} -> {estado} · {len(resumenes)} camiones, {reportes} reportes "
+          f"en {time.monotonic() - comienzo:.1f} s", flush=True)
+    return len(resumenes), reportes
