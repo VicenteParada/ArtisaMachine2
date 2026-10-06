@@ -72,6 +72,13 @@ def _dialect(raw):
     return value
 
 
+def _cursor_mode(raw):
+    value = (raw or "ctid").strip().lower()
+    if value not in ("ctid", "fecha"):
+        raise ValueError("COMPANY_API_CURSOR debe ser 'ctid' o 'fecha'")
+    return value
+
+
 def build_clock_query(config):
     """Consulta mínima para conocer el reloj del origen (sin leer reportes)."""
     return f"SELECT {_date_expression(config, _now(config))} AS ahora_origen"
@@ -96,6 +103,8 @@ class ApiConfig:
     retry_min_seconds: int
     retry_max_seconds: int
     dialect: str = "postgres"   # motor SQL detrás de la API: postgres (actual) o mysql
+    cursor_mode: str = "ctid"   # ctid: orden de llegada (sin índice); fecha: por report_date
+    window_pages: int = 500     # páginas físicas por consulta en modo ctid
 
     @classmethod
     def from_env(cls):
@@ -122,6 +131,8 @@ class ApiConfig:
             timezone_name=timezone_name,
             native_dates=os.environ.get("COMPANY_API_NATIVE_DATES", "1").strip() != "0",
             dialect=_dialect(os.environ.get("COMPANY_API_DIALECT", "postgres")),
+            cursor_mode=_cursor_mode(os.environ.get("COMPANY_API_CURSOR", "")),
+            window_pages=_env_int("COMPANY_API_WINDOW_PAGES", 500, 10, 100000),
             auth_header=os.environ.get("COMPANY_API_AUTH_HEADER", "Authorization").strip() or "Authorization",
             auth_value=os.environ.get("COMPANY_API_TOKEN", "").strip(),
             timeout_seconds=_env_int("COMPANY_API_TIMEOUT_SECONDS", 30, 3, 300),
@@ -402,3 +413,48 @@ def transform_rows(rows, config, offset):
                 "clave": native_key(row),
             })
     return accepted, rejected
+
+
+# --- Modo ctid (PostgreSQL) ---------------------------------------------------------
+#
+# La tabla `reportes` de la empresa (~30 M filas) solo tiene índice por report_id (UUID
+# aleatorio) y solo recibe inserciones (0 actualizaciones, 0 borrados). PostgreSQL agrega
+# cada fila nueva al final del archivo, y desde la versión 14 puede leer "lo que está
+# después de la posición física X" (ctid) sin índice y sin recorrer la tabla. Así cada
+# consulta lee solo lo nuevo, en el mismo orden en que llegó: los reportes que el GPS
+# envía con atraso también se capturan.
+
+CTID_RE = re.compile(r"\((\d+),(\d+)\)")
+
+
+def parse_ctid(value):
+    """'(bloque,fila)' -> (bloque, fila) o None."""
+    match = CTID_RE.fullmatch(str(value or "").strip())
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def ctid_text(ctid):
+    return f"({int(ctid[0])},{int(ctid[1])})"
+
+
+def build_pages_query(config):
+    return f"SELECT pg_relation_size('{config.table}') / 8192 AS paginas"
+
+
+def build_probe_query(config, block):
+    """Fecha más reciente dentro de una página física (para ubicar una fecha en la tabla)."""
+    return (f"SELECT {_date_expression(config, 'MAX(r.report_date)')} AS fecha FROM {config.table} AS r "
+            f"WHERE r.ctid >= '({int(block)},0)'::tid AND r.ctid < '({int(block) + 1},0)'::tid")
+
+
+def build_ctid_query(config, after, until_block):
+    """Filas con posición física posterior a `after`, hasta antes de la página `until_block`."""
+    columns = [f"r.{name}" for name in SOURCE_COLUMNS]
+    columns.append(f"{_date_expression(config, 'r.report_date')} AS report_date_origen")
+    columns.append(f"{_date_expression(config, _now(config))} AS ahora_origen")
+    columns.append("r.ctid::text AS ctid_origen")
+    return (
+        f"SELECT {', '.join(columns)} FROM {config.table} AS r "
+        f"WHERE r.ctid > '{ctid_text(after)}'::tid AND r.ctid < '({int(until_block)},0)'::tid "
+        f"ORDER BY r.ctid LIMIT {int(config.batch_size)}"
+    )

@@ -78,11 +78,13 @@ def company_api_state(cursor):
     row = cursor.fetchone()
     if not row or row["estado"] == "sin_configurar":
         return None
-    reachable = (row["estado"] == "conectado" and row["exito_hace"] is not None
+    reachable = (row["estado"] in ("conectado", "sincronizando") and row["exito_hace"] is not None
                  and row["exito_hace"] < COMPANY_API_STALE_SECONDS)
     worker_alive = row["revision_hace"] is not None and row["revision_hace"] < max(600, COMPANY_API_STALE_SECONDS * 2)
     if not worker_alive:
         conexion = "servicio_detenido"
+    elif reachable and row["estado"] == "sincronizando":
+        conexion = "sincronizando"
     elif reachable:
         recent = row["dato_hace"] is not None and row["dato_hace"] < RECENT_REPORT_SECONDS
         conexion = "en_vivo" if recent else "sin_reportes_recientes"
@@ -180,7 +182,7 @@ def pipeline_state(cursor, detailed=True):
     }
     api_state = company_api_state(cursor)
     if api_state is not None:
-        live = api_state["conexion"] in ("en_vivo", "sin_reportes_recientes")
+        live = api_state["conexion"] in ("en_vivo", "sin_reportes_recientes", "sincronizando")
         state["componentes"]["telemetria_api"] = "ok" if live else "unavailable"
     if not detailed:
         return {key: state[key] for key in ("status", "servicio", "componentes")}

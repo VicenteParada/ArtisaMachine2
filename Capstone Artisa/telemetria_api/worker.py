@@ -26,7 +26,9 @@ from common.db import connect_db, initialize_db
 from common.http import JsonHandler, serve
 from common.vehiculos import registrar_nuevos
 from telemetria_api.source import (
-    ApiConfig, ApiSourceError, build_clock_query, build_query, detect_offset, fetch_rows, native_key, transform_rows,
+    ApiConfig, ApiSourceError, build_clock_query, build_ctid_query, build_pages_query, build_probe_query,
+    build_query, ctid_text, detect_offset, fetch_rows, native_key, parse_ctid, parse_source_datetime,
+    transform_rows,
 )
 
 
@@ -90,8 +92,13 @@ def load_state(config):
         return state
 
 
-def save_page(accepted, rejected, raw_count, new_cursor, advertencia):
-    """Guarda filas, vehículos nuevos, cursor y contadores en una sola transacción."""
+def save_page(accepted, rejected, raw_count, new_cursor, advertencia, estado="conectado", modo="fecha",
+              reubicar=False):
+    """Guarda filas, vehículos nuevos, cursor y contadores en una sola transacción.
+
+    modo "fecha": new_cursor = (fecha_origen, report_id).
+    modo "ctid":  new_cursor = (fecha_origen_max o None, "(bloque,fila)"); se avanza por
+                  posición física y cursor_fecha guarda la fecha más reciente vista."""
     values = [(
         row["report_id"], row["asset_id"], row["asset_name"], row["report_date"],
         row["latitude"], row["longitude"], row["speed"], row["heading"],
@@ -112,9 +119,12 @@ def save_page(accepted, rejected, raw_count, new_cursor, advertencia):
             registrar_nuevos(cursor, {row["asset_id"]: row["asset_name"] for row in accepted})
         stored = (current.get("cursor_fecha"), current.get("cursor_id") or "")
         has_stored = stored[0] is not None
-        # Los rechazos dentro de la ventana releída ya se contaron antes.
-        fresh_rejections = [item for item in rejected
-                            if not has_stored or item["clave"] is None or item["clave"] > stored]
+        if modo == "ctid":
+            fresh_rejections = list(rejected)  # en modo ctid nunca se relee una fila
+        else:
+            # Los rechazos dentro de la ventana releída ya se contaron antes.
+            fresh_rejections = [item for item in rejected
+                                if not has_stored or item["clave"] is None or item["clave"] > stored]
         try:
             history = json.loads(current.get("rechazos_json") or "[]")
         except (TypeError, json.JSONDecodeError):
@@ -122,16 +132,24 @@ def save_page(accepted, rejected, raw_count, new_cursor, advertencia):
         history = (history + [{k: v for k, v in item.items() if k != "clave"}
                               for item in fresh_rejections])[-50:]
         # El cursor nunca retrocede.
-        cursor_value = new_cursor if (new_cursor and (not has_stored or new_cursor > stored)) else stored
+        if modo == "ctid":
+            stored_ctid = parse_ctid(stored[1])
+            new_ctid = parse_ctid(new_cursor[1]) if new_cursor else None
+            avanza = new_ctid and (reubicar or not stored_ctid or new_ctid > stored_ctid)
+            ctid_value = new_cursor[1] if avanza else stored[1]
+            dates = [d for d in (stored[0], new_cursor[0] if new_cursor else None) if d is not None]
+            cursor_value = (max(dates) if dates else None, ctid_value)
+        else:
+            cursor_value = new_cursor if (new_cursor and (not has_stored or new_cursor > stored)) else stored
         latest = max((row["report_date"] for row in accepted), default=None)
         cursor.execute(
-            """UPDATE telemetria_api_estado SET cursor_fecha=%s,cursor_id=%s,estado='conectado',
+            """UPDATE telemetria_api_estado SET cursor_fecha=%s,cursor_id=%s,estado=%s,
             ultimo_error=NULL,fallos_consecutivos=0,leidos=leidos+%s,validos=validos+%s,
             rechazados=rechazados+%s,rechazos_json=%s,ultimo_exito=UTC_TIMESTAMP(6),
             ultimo_dato=CASE WHEN %s IS NULL THEN ultimo_dato
                              WHEN ultimo_dato IS NULL OR %s > ultimo_dato THEN %s ELSE ultimo_dato END,
             desconectado_desde=NULL,advertencia=%s,ultima_revision=UTC_TIMESTAMP(6) WHERE id=1""",
-            (cursor_value[0], cursor_value[1] or None, raw_count, inserted, len(fresh_rejections),
+            (cursor_value[0], cursor_value[1] or None, estado, raw_count, inserted, len(fresh_rejections),
              json.dumps(history, ensure_ascii=False, default=str), latest, latest, latest, advertencia),
         )
         connection.commit()
@@ -209,12 +227,102 @@ def run_cycle(config, fetch=fetch_rows, save=save_page, load=load_state, now=_ut
             raise ApiSourceError("respuesta_invalida", "Ninguna fila trae report_id y fecha legibles")
         page_cursor = max(keys) if keys else None
         warning = timezone_warning(config, offset)
-        save(accepted, rejected, len(rows), page_cursor, warning)
-        _set_state(estado="conectado", error=None, fallos_consecutivos=0,
+        caught_up = len(rows) < config.batch_size
+        estado = "conectado" if caught_up else "sincronizando"
+        save(accepted, rejected, len(rows), page_cursor, warning, estado)
+        _set_state(estado=estado, error=None, fallos_consecutivos=0,
                    ultimo_exito=now().isoformat() + "Z", advertencia=warning)
-        if len(rows) < config.batch_size:
+        if caught_up:
             return True
         after, since = page_cursor, None
+    return False
+
+
+# --- Modo ctid -------------------------------------------------------------------
+
+SAFETY_PAGES = 2000  # ~30 mil reportes antes del punto encontrado, por si el orden no es perfecto
+
+
+def table_pages(config, fetch):
+    rows = fetch(config, build_pages_query(config))
+    try:
+        return int(rows[0]["paginas"])
+    except (IndexError, KeyError, TypeError, ValueError):
+        raise ApiSourceError("respuesta_invalida", "La API no informó el tamaño de la tabla") from None
+
+
+def locate_block(config, fetch, target_native, pages):
+    """Primera página física cuyos reportes alcanzan `target_native` (búsqueda binaria,
+    ~21 consultas de una página cada una). Devuelve un bloque con margen de seguridad."""
+    low, high = 0, pages
+    while low < high:
+        HEARTBEAT["value"] = time.monotonic()
+        middle = (low + high) // 2
+        rows = fetch(config, build_probe_query(config, middle))
+        value = rows[0].get("fecha") if rows else None
+        moment = None
+        if value:
+            try:
+                moment = parse_source_datetime(value)
+                if moment.tzinfo is not None:
+                    moment = moment.astimezone(timezone.utc).replace(tzinfo=None)
+            except ValueError:
+                moment = None
+        if moment is None or moment >= target_native:
+            high = middle
+        else:
+            low = middle + 1
+    return max(0, low - SAFETY_PAGES)
+
+
+def run_cycle_ctid(config, fetch=fetch_rows, save=save_page, load=load_state, now=_utc_now):
+    """Lee las filas nuevas por posición física, en orden de llegada, hasta el final de la tabla."""
+    state = load(config)
+    pages = table_pages(config, fetch)
+    cursor = parse_ctid(state.get("cursor_id"))
+    if cursor is None or cursor[0] > pages:
+        # Primera vez, o la tabla fue reescrita (VACUUM FULL): se ubica el punto de partida
+        # por fecha. Lo ya guardado no se duplica gracias a report_id.
+        offset = detect_offset(fetch(config, build_clock_query(config)), now())
+        if offset is None:
+            raise ApiSourceError("respuesta_invalida", "La API no informó su hora")
+        if cursor is not None and state.get("cursor_fecha") is not None:
+            target = state["cursor_fecha"] - timedelta(days=1)
+        elif config.start_utc is not None:
+            target = config.start_utc + offset
+        else:
+            target = now() + offset - timedelta(hours=config.initial_lookback_hours)
+        cursor = (locate_block(config, fetch, target, pages), 0)
+        print(f"Telemetría API: comenzando en la página {cursor[0]} de {pages} "
+              f"(reportes desde {target:%Y-%m-%d %H:%M} hora del origen)", flush=True)
+        save([], [], 0, (None, ctid_text(cursor)), None, "sincronizando", "ctid", reubicar=True)
+    for _ in range(config.max_pages_per_cycle):
+        HEARTBEAT["value"] = time.monotonic()
+        until = min(cursor[0] + config.window_pages, pages + 1)
+        rows = fetch(config, build_ctid_query(config, cursor, until))
+        offset = detect_offset(rows, now())
+        accepted, rejected = transform_rows(rows, config, offset)
+        positions = [p for p in (parse_ctid(row.get("ctid_origen")) for row in rows if isinstance(row, dict)) if p]
+        if rows and not positions:
+            raise ApiSourceError("respuesta_invalida", "Las filas no traen su posición (ctid)")
+        if len(rows) >= config.batch_size:
+            cursor = max(positions)  # ventana densa: seguir justo después de la última fila
+        elif until < pages:
+            cursor = max([(until, 0)] + positions)  # ventana leída completa: pasar a la siguiente
+        else:
+            # La ventana incluye la última página, que puede seguir llenándose: el cursor
+            # queda en la última fila leída, nunca más allá.
+            cursor = max([cursor] + positions)
+        caught_up = until >= pages and len(rows) < config.batch_size
+        keys = [k for k in (native_key(row) for row in rows) if k is not None]
+        newest = max(k[0] for k in keys) if keys else None
+        warning = timezone_warning(config, offset)
+        estado = "conectado" if caught_up else "sincronizando"
+        save(accepted, rejected, len(rows), (newest, ctid_text(cursor)), warning, estado, "ctid")
+        _set_state(estado=estado, error=None, fallos_consecutivos=0,
+                   ultimo_exito=now().isoformat() + "Z", advertencia=warning)
+        if caught_up:
+            return True
     return False
 
 
@@ -235,7 +343,8 @@ def loop():
                 _sleep(60)
                 continue
             _set_state(configurada=True)
-            caught_up = run_cycle(config)
+            cycle = run_cycle_ctid if config.cursor_mode == "ctid" else run_cycle
+            caught_up = cycle(config)
             failures = 0
             _sleep(config.interval_seconds if caught_up else 1)
         except ApiSourceError as error:

@@ -147,6 +147,13 @@ y ejecuta `python3 scripts/check_company_api.py` para probar la conexión antes 
 levantar el servicio. Sin `COMPANY_API_URL` el servicio queda en espera y la web
 muestra "Pendiente de API empresa", igual que antes.
 
+La API ejecuta SQL sobre PostgreSQL. Su tabla `reportes` (~30 M filas) solo tiene
+índice por `report_id` (UUID aleatorio) y solo recibe inserciones, así que el conector
+avanza por la posición física de cada fila (`ctid`): cada consulta lee solo las páginas
+nuevas, en orden de llegada, sin recorrer la tabla ni necesitar índices nuevos. Así
+también se capturan los reportes que el GPS envía con atraso. La primera conexión ubica
+`COMPANY_API_START` con una búsqueda binaria (~21 consultas de una página).
+
 Comportamiento ante cortes:
 
 - Si se cae el Wi-Fi o la API, reintenta solo (5 s, 10 s, 20 s… máximo 60 s) y

@@ -1237,6 +1237,9 @@ function connectionMessage(connection) {
   if (connection.conexion === "servicio_detenido") {
     return "El servicio de telemetría no informa actividad reciente. Revisa el contenedor artisa-telemetria. Se muestran los últimos datos recibidos.";
   }
+  if (connection.conexion === "sincronizando") {
+    return "Conectado. Se están recuperando los reportes acumulados desde la última sincronización; los días afectados se cierran cuando termine.";
+  }
   if (connection.advertencia) return connection.advertencia;
   return "";
 }
@@ -1318,6 +1321,7 @@ function renderTelemetry(summary, dataset, state) {
   const states = {
     en_vivo: ["En vivo", "status"],
     sin_reportes_recientes: ["Conectado · sin reportes recientes", "status neutral"],
+    sincronizando: ["Recuperando reportes atrasados…", "status info"],
     reconectando: ["Reconectando con la API…", "status warning"],
     error_configuracion: ["Revisar configuración de la API", "status warning"],
     servicio_detenido: ["Servicio de telemetría detenido", "status warning"]
@@ -1326,7 +1330,8 @@ function renderTelemetry(summary, dataset, state) {
   $("telemetry-status").textContent = label;
   $("telemetry-status").className = className;
   if (tabNote) tabNote.textContent = "API empresa · " + label;
-  setTelemetryBanner(connectionMessage(connection), connection.advertencia && connection.conexion === "en_vivo" ? "info" : "warning");
+  const infoTone = connection.conexion === "sincronizando" || (connection.advertencia && connection.conexion === "en_vivo");
+  setTelemetryBanner(connectionMessage(connection), infoTone ? "info" : "warning");
 
   const body = $("telemetry-rows");
   body.replaceChildren();

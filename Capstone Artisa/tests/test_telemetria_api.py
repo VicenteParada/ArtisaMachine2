@@ -15,7 +15,8 @@ import unittest
 from telemetria_api.source import (
     ApiConfig, ApiSourceError, build_query, detect_offset, fetch_rows, transform_rows,
 )
-from telemetria_api.worker import backoff_seconds, run_cycle
+from telemetria_api import worker
+from telemetria_api.worker import backoff_seconds, run_cycle, run_cycle_ctid
 
 
 SOURCE_OFFSET = timedelta(hours=-3)
@@ -28,6 +29,7 @@ class FakeSource:
     def __init__(self, utc_now):
         self.utc_now = utc_now
         self.rows = []
+        self.queries = []
 
     @property
     def now(self):
@@ -38,9 +40,34 @@ class FakeSource:
                           "report_date": native_date, "latitude": lat, "longitude": lon,
                           "speed": 40, "heading": 90, "ignition": 1, "event_name": "Reporte por tiempo"})
 
+    ROWS_PER_PAGE = 15
+
+    def ctid(self, index):
+        return (index // self.ROWS_PER_PAGE, index % self.ROWS_PER_PAGE + 1)
+
+    def _out(self, index, r):
+        item = {k: v for k, v in r.items() if k != "report_date"}
+        item["report_date_origen"] = r["report_date"].strftime(FMT)
+        item["ahora_origen"] = self.now.strftime(FMT)
+        item["ctid_origen"] = "({},{})".format(*self.ctid(index))
+        return item
+
     def query(self, sql):
+        self.queries.append(sql)
+        if "pg_relation_size" in sql:
+            return [{"paginas": (len(self.rows) - 1) // self.ROWS_PER_PAGE + 1 if self.rows else 0}]
         if " FROM " not in sql:  # consulta de reloj del origen
             return [{"ahora_origen": self.now.strftime(FMT)}]
+        if "MAX(r.report_date)" in sql:
+            block = int(re.search(r"r\.ctid >= '\((\d+),0\)'", sql).group(1))
+            dates = [r["report_date"] for i, r in enumerate(self.rows) if self.ctid(i)[0] == block]
+            return [{"fecha": max(dates).strftime(FMT) if dates else None}]
+        if "r.ctid > " in sql:
+            after = tuple(map(int, re.search(r"r\.ctid > '\((\d+),(\d+)\)'", sql).groups()))
+            until = int(re.search(r"r\.ctid < '\((\d+),0\)'", sql).group(1))
+            limit = int(re.search(r"LIMIT (\d+)$", sql).group(1))
+            picked = [(i, r) for i, r in enumerate(self.rows) if after < self.ctid(i) < (until, 0)]
+            return [self._out(i, r) for i, r in picked[:limit]]
         assert "to_char(r.report_date, 'YYYY-MM-DD HH24:MI:SS.US')" in sql
         limit = int(re.search(r"LIMIT (\d+)$", sql).group(1))
         future = int(re.search(r"LOCALTIMESTAMP \+ INTERVAL '(\d+) minutes'", sql).group(1))
@@ -104,10 +131,20 @@ class FakeDatabase:
     def load(self, config):
         return dict(self.state)
 
-    def save(self, accepted, rejected, raw_count, new_cursor, warning):
+    def save(self, accepted, rejected, raw_count, new_cursor, warning, estado="conectado", modo="fecha",
+             reubicar=False):
+        from telemetria_api.source import parse_ctid
         for row in accepted:
             self.table.setdefault(row["report_id"], row)
         self.rejected += len(rejected)
+        self.state["estado"] = estado
+        if modo == "ctid":
+            new, old = parse_ctid(new_cursor[1]), parse_ctid(self.state["cursor_id"])
+            if new and (reubicar or not old or new > old):
+                self.state["cursor_id"] = new_cursor[1]
+            if new_cursor[0] and (not self.state["cursor_fecha"] or new_cursor[0] > self.state["cursor_fecha"]):
+                self.state["cursor_fecha"] = new_cursor[0]
+            return
         stored = (self.state["cursor_fecha"], self.state["cursor_id"] or "")
         if new_cursor and (stored[0] is None or new_cursor > stored):
             self.state["cursor_fecha"], self.state["cursor_id"] = new_cursor
@@ -292,6 +329,74 @@ class OutageRecoveryTests(unittest.TestCase):
         cycle()
         cycle()
         self.assertEqual(len(db.table), 3701)
+
+
+class CtidCursorTests(unittest.TestCase):
+    """Modo real de la empresa: PostgreSQL sin índice por fecha, cursor por posición física."""
+
+    def setUp(self):
+        self.saved_safety = worker.SAFETY_PAGES
+        worker.SAFETY_PAGES = 2
+        self.addCleanup(setattr, worker, "SAFETY_PAGES", self.saved_safety)
+        self.source = FakeSource(datetime(2026, 10, 6, 17, 0))
+        self.source.ROWS_PER_PAGE = 15
+        base = self.source.now - timedelta(days=30)
+        for i in range(4500):  # 30 días, en orden de llegada
+            self.source.add(f"H{i:05d}", base + timedelta(minutes=9.6 * i))
+        self.server = FakeApiServer(self.source)
+        self.port = self.server.port
+        self.addCleanup(lambda: self.server.stop())
+        self.db = FakeDatabase()
+
+    def config(self, **changes):
+        values = dict(cursor_mode="ctid", window_pages=40, batch_size=200, max_pages_per_cycle=500)
+        values.update(changes)
+        return make_config(f"http://127.0.0.1:{self.port}/sql", **values)
+
+    def cycle(self, config):
+        return run_cycle_ctid(config, save=self.db.save, load=self.db.load, now=lambda: self.source.utc_now)
+
+    def test_backfill_from_start_reads_only_new_part_and_never_full_scans(self):
+        start_native = self.source.now - timedelta(days=10)
+        config = self.config(start_utc=start_native - SOURCE_OFFSET)
+        self.assertTrue(self.cycle(config))
+        wanted = {r["report_id"] for r in self.source.rows if r["report_date"] >= start_native}
+        self.assertTrue(wanted <= set(self.db.table))
+        self.assertLess(len(self.db.table), len(wanted) + 2 * 15 + 15)  # solo el margen de seguridad
+        self.assertTrue(all("r.ctid" in q or "pg_relation_size" in q or " FROM " not in q
+                            for q in self.source.queries), "ninguna consulta debe recorrer la tabla por fecha")
+        self.assertEqual(self.db.state["estado"], "conectado")
+
+    def test_late_reports_outage_and_partial_last_page(self):
+        config = self.config(start_utc=self.source.utc_now - timedelta(hours=6))
+        self.assertTrue(self.cycle(config))
+        before = len(self.db.table)
+        # Cae el Wi-Fi; mientras tanto llegan reportes, algunos con 40 min de atraso.
+        self.server.stop()
+        now = self.source.now
+        for i in range(37):  # deja la última página a medio llenar
+            self.source.add(f"N{i:03d}", now - timedelta(minutes=40 if i % 5 == 0 else 0) + timedelta(seconds=i))
+        with self.assertRaises(ApiSourceError):
+            self.cycle(config)
+        self.server = FakeApiServer(self.source, port=self.port)
+        self.assertTrue(self.cycle(config))
+        self.assertEqual(len(self.db.table), before + 37)
+        # Más reportes en la misma última página: también se capturan.
+        for i in range(3):
+            self.source.add(f"M{i}", now + timedelta(minutes=1, seconds=i))
+        self.assertTrue(self.cycle(config))
+        self.assertEqual(len(self.db.table), before + 40)
+        # Sin novedades: no duplica.
+        self.assertTrue(self.cycle(config))
+        self.assertEqual(len(self.db.table), before + 40)
+
+    def test_table_rewrite_relocates_cursor(self):
+        config = self.config(start_utc=self.source.utc_now - timedelta(hours=6))
+        self.cycle(config)
+        self.db.state["cursor_id"] = "(999999,1)"  # p. ej. tras un VACUUM FULL
+        self.source.add("DESPUES", self.source.now)
+        self.assertTrue(self.cycle(config))
+        self.assertIn("DESPUES", self.db.table)
 
 
 class BackfillTests(unittest.TestCase):

@@ -38,16 +38,22 @@ def main():
     if config is None:
         print("COMPANY_API_URL está vacío en .env: la telemetría seguirá como 'pendiente'.")
         return 1
+    from telemetria_api.source import build_pages_query, build_probe_query
     date_expr = date_expression(config, "r.report_date")
     now_expr = date_expression(config, "LOCALTIMESTAMP" if config.dialect == "postgres" else "NOW(6)")
-    query = (f"SELECT r.report_id, r.asset_id, r.asset_name, r.latitude, r.longitude, r.speed, "
-             f"r.heading, r.ignition, r.event_name, {date_expr} AS report_date_origen, "
-             f"{now_expr} AS ahora_origen FROM {config.table} AS r "
-             "ORDER BY r.report_date DESC LIMIT 5")
-    print(f"Origen: {config.origin}  (tabla {config.table}, {config.dialect})")
+    print(f"Origen: {config.origin}  (tabla {config.table}, {config.dialect}, cursor {config.cursor_mode})")
     started = time.monotonic()
     try:
-        rows = fetch_rows(config, query)
+        if config.cursor_mode == "ctid":
+            # Solo lee las últimas páginas físicas: no recorre los ~30 M de filas.
+            pages = int(fetch_rows(config, build_pages_query(config))[0]["paginas"])
+            where = f"WHERE r.ctid > '({max(0, pages - 5)},0)'::tid ORDER BY r.ctid DESC"
+        else:
+            pages, where = None, "ORDER BY r.report_date DESC"
+        rows = fetch_rows(config, (
+            f"SELECT r.report_id, r.asset_id, r.asset_name, r.latitude, r.longitude, r.speed, "
+            f"r.heading, r.ignition, r.event_name, {date_expr} AS report_date_origen, "
+            f"{now_expr} AS ahora_origen FROM {config.table} AS r {where} LIMIT 5"))
     except ApiSourceError as error:
         print(f"FALLÓ [{error.kind}]: {error}")
         if error.kind == "sin_conexion":
@@ -55,18 +61,18 @@ def main():
         return 2
     elapsed = time.monotonic() - started
     utc_now = datetime.now(timezone.utc).replace(tzinfo=None)
-    print(f"Conexión OK en {elapsed:.2f} s — {len(rows)} filas")
+    print(f"Conexión OK en {elapsed:.2f} s — {len(rows)} filas" + (f", tabla de {pages:,} páginas" if pages else ""))
     offset = detect_offset(rows, utc_now)
     if offset is not None:
         hours = offset.total_seconds() / 3600
         print(f"Reloj del origen: UTC{hours:+g} (COMPANY_API_TIMEZONE={config.timezone_name})")
-    try:
-        oldest = fetch_rows(config, f"SELECT {date_expr.replace('r.report_date', 'MIN(r.report_date)')} "
-                                    f"AS minimo FROM {config.table} AS r")
-        if oldest and oldest[0].get("minimo"):
-            print(f"Reporte más antiguo en la API (hora del origen): {oldest[0]['minimo']}")
-    except ApiSourceError as error:
-        print(f"No se pudo consultar el reporte más antiguo [{error.kind}]: {error}")
+    if config.cursor_mode == "ctid":
+        try:
+            first = fetch_rows(config, build_probe_query(config, 0))
+            if first and first[0].get("fecha"):
+                print(f"Reportes más antiguos (primera página de la tabla, hora del origen): {first[0]['fecha']}")
+        except ApiSourceError as error:
+            print(f"No se pudo consultar la primera página [{error.kind}]: {error}")
     accepted, rejected = transform_rows(rows, config, offset)
     for row in accepted:
         print(f"  {row['report_date']:%Y-%m-%d %H:%M:%S} UTC  {row['asset_id']:<8} {row['asset_name'] or ''}")

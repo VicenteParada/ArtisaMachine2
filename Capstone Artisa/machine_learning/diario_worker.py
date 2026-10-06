@@ -60,7 +60,8 @@ def estado_conector(cursor):
     fila = cursor.fetchone()
     if not fila or fila["estado"] == "sin_configurar":
         return "sin_api", None
-    return "api", fila["ultimo_exito"]
+    # Mientras recupera reportes atrasados no se puede asegurar que un día esté completo.
+    return "api", fila["ultimo_exito"] if fila["estado"] == "conectado" else None
 
 
 def dia_listo_para_cerrar(dia, utc_now, modo, ultimo_exito):
