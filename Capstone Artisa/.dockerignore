@@ -4,8 +4,11 @@
 !common/**
 !DB/
 !DB/schema.sql
+!DB/vehiculos_data.sql
 !ETLs/
 !ETLs/**
+!telemetria_api/
+!telemetria_api/**
 !machine_learning/
 !machine_learning/**
 !endpoints/
