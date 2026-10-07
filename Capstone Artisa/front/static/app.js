@@ -566,7 +566,7 @@ function applyRouteFilter() {
     const selected = button.dataset.routeFilter === activeRouteFilter;
     button.classList.toggle("is-active", selected);
     button.setAttribute("aria-pressed", selected ? "true" : "false");
-    button.disabled = !mapLayerVisibility.routes || !!activeJourneyVehicleId;
+    button.disabled = !mapLayerVisibility.routes;
   }
   if (currentMapData) renderRouteMonitor(currentMapData.routes);
 }
@@ -1742,7 +1742,7 @@ for (const button of document.querySelectorAll("[data-map-mode]")) {
 for (const button of document.querySelectorAll("[data-route-filter]")) {
   button.addEventListener("click", () => {
     activeRouteFilter = button.dataset.routeFilter || "ALL";
-    if (selectedRouteId) resetMapSelection();
+    if (selectedRouteId || selectedVehicleId || activeJourneyVehicleId) resetMapSelection();
     applyRouteFilter();
   });
 }
