@@ -29,7 +29,8 @@ NATIVE_FORMAT = "%Y-%m-%d %H:%i:%s.%f"  # formato MySQL/MariaDB del lado del ori
 PG_FORMAT = "YYYY-MM-DD HH24:MI:SS.US"   # mismo formato en PostgreSQL (la API de la empresa)
 DIALECTS = ("postgres", "mysql")
 SOURCE_COLUMNS = ("report_id", "asset_id", "asset_name", "latitude", "longitude",
-                  "speed", "heading", "ignition", "event_name", "driver_name", "driver_last_name")
+                  "speed", "heading", "ignition", "event_name", "driver_name", "driver_last_name",
+                  "location")
 # El RUT del conductor (driver_document_number) no se trae: no se muestra en la web y así
 # no se copia un dato personal sin necesidad.
 
@@ -397,6 +398,7 @@ def normalize_row(row, config, offset):
         "event_name": _text(row.get("event_name"), "event_name", 128),
         "driver_name": _text(row.get("driver_name"), "driver_name", 64),
         "driver_last_name": _text(row.get("driver_last_name"), "driver_last_name", 128),
+        "location": (_text(row.get("location"), "location", 1000) or "")[:255] or None,
     }
 
 

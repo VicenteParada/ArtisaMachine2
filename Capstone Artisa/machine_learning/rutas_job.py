@@ -58,6 +58,45 @@ def cargar_viajes(cursor, desde, hasta):
     return viajes
 
 
+def comuna(location):
+    """'S/N, Calama, Provincia de El Loa, Región de Antofagasta, Chile' -> 'Calama'."""
+    partes = [p.strip() for p in str(location or "").split(",") if p.strip()]
+    for i, parte in enumerate(partes):
+        if parte.lower().startswith(("provincia", "región", "region")) and i > 0:
+            return partes[i - 1]
+    utiles = [p for p in partes if p.upper() != "S/N" and not p[:1].isdigit() and p.lower() != "chile"]
+    return utiles[1] if len(utiles) > 1 else (utiles[0] if utiles else None)
+
+
+def nombrador(cursor):
+    """Devuelve una función que agrega 'comuna' a cada lugar frecuente, leyendo la dirección
+    del GPS en el momento de una de sus paradas (consultas por el índice camión+fecha)."""
+    def nombrar(lugares):
+        for lugar in lugares.values():
+            if lugar["tipo"] != "lugar":
+                continue
+            for asset_id, momento in lugar.get("muestras", [])[:3]:
+                encontrado = None
+                for tabla in ("telemetria_api", "raw_gps"):
+                    try:
+                        cursor.execute(
+                            f"""SELECT location FROM {tabla}
+                                WHERE asset_id=%s AND report_date BETWEEN %s AND %s
+                                  AND location IS NOT NULL AND location <> '' LIMIT 1""",
+                            (asset_id, momento - timedelta(minutes=10), momento + timedelta(minutes=10)),
+                        )
+                    except Exception:
+                        continue
+                    fila = cursor.fetchone()
+                    if fila and comuna(fila["location"]):
+                        encontrado = comuna(fila["location"])
+                        break
+                if encontrado:
+                    lugar["comuna"] = encontrado
+                    break
+    return nombrar
+
+
 def preparar(viajes):
     """Empalma y separa los viajes clasificables de los que no tienen origen o destino."""
     completos, sin_extremos, cortos = [], 0, 0
@@ -125,7 +164,11 @@ def ejecutar(connection, dias=VENTANA_DIAS):
         faenas = cargar_faenas(cursor)
     connection.commit()
     completos, excluidos = preparar(viajes)
-    rutas, lugares, metricas = construir_rutas(completos, faenas)
+    with connection.cursor() as cursor:
+        rutas, lugares, metricas = construir_rutas(completos, faenas, nombrar=nombrador(cursor))
+    connection.commit()
+    for lugar in lugares.values():
+        lugar.pop("muestras", None)  # solo se usaban para nombrar
     metricas.update(excluidos)
     metricas["viajes_leidos"] = len(viajes)
     metricas["camiones"] = len({v.asset_id for v in completos})

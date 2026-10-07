@@ -234,3 +234,5 @@ ALTER TABLE reporte_diario ADD COLUMN IF NOT EXISTS minutos_detenido DOUBLE NOT 
 -- Conductor informado por la API de la empresa (el RUT no se guarda).
 ALTER TABLE telemetria_api ADD COLUMN IF NOT EXISTS driver_name VARCHAR(64) NULL;
 ALTER TABLE telemetria_api ADD COLUMN IF NOT EXISTS driver_last_name VARCHAR(128) NULL;
+-- Dirección que entrega el GPS (sirve para nombrar los lugares de las rutas por comuna).
+ALTER TABLE telemetria_api ADD COLUMN IF NOT EXISTS location VARCHAR(255) NULL;

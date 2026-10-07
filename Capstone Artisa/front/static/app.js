@@ -278,6 +278,7 @@ let fleetMap = null;
 const routeLayers = {LOW: null, MEDIUM: null, HIGH: null};
 let truckLayer = null;
 let journeyLayer = null;
+let selectedRouteLayer = null;
 let journeyRequest = 0;
 let activeJourneyVehicleId = null;
 let pendingMapBounds = null;
@@ -350,18 +351,44 @@ function setSelectionDetail(kind, title, description, metadata) {
   }
 }
 
+function drawSelectedRoute(record) {
+  // La ruta seleccionada se dibuja encima de todas, con contorno, y con sus dos extremos.
+  if (!selectedRouteLayer) return;
+  selectedRouteLayer.clearLayers();
+  if (!record) return;
+  const properties = routeProperties(record.route);
+  const coordinates = record.route.geometry.coordinates || [];
+  const latlngs = coordinates.map((point) => [point[1], point[0]]);
+  if (latlngs.length < 2) return;
+  L.polyline(latlngs, {pane: "routeSelectedPane", color: "#0b1f1a", weight: 13, opacity: 0.9,
+    lineCap: "round", lineJoin: "round", interactive: false}).addTo(selectedRouteLayer);
+  L.polyline(latlngs, {pane: "routeSelectedPane", color: ROUTE_COLORS[properties.usage_level] || "#246c55",
+    weight: 7, opacity: 1, lineCap: "round", lineJoin: "round", interactive: false}).addTo(selectedRouteLayer);
+  const [nameA, nameB] = String(properties.label || "").split("↔").map((part) => part.trim());
+  const ends = [[latlngs[0], nameA || "Extremo A"], [latlngs[latlngs.length - 1], nameB || nameA || "Extremo B"]];
+  for (const [latlng, name] of ends) {
+    L.circleMarker(latlng, {pane: "routeSelectedPane", radius: 8, color: "#0b1f1a", weight: 3,
+      fillColor: "#ffffff", fillOpacity: 1, interactive: false})
+      .bindTooltip(name, {permanent: true, direction: "top", offset: [0, -8], className: "route-endpoint"})
+      .addTo(selectedRouteLayer);
+  }
+}
+
 function refreshSelectionStyles() {
+  const focused = Boolean(selectedRouteId);
   for (const [routeId, record] of routeMapLayers) {
     const selected = routeId === selectedRouteId;
+    // Con una ruta seleccionada, el resto queda tenue para que se vea su recorrido completo.
     record.halo.setStyle({
-      weight: selected ? record.haloWeight + 3 : record.haloWeight,
-      opacity: selected ? 1 : record.haloOpacity
+      weight: record.haloWeight,
+      opacity: focused ? 0 : record.haloOpacity
     });
     record.line.setStyle({
-      weight: selected ? record.baseWeight + 3 : record.baseWeight,
-      opacity: selected ? 1 : record.baseOpacity
+      weight: focused && !selected ? Math.max(2, record.baseWeight - 2) : record.baseWeight,
+      opacity: focused ? (selected ? 0 : 0.12) : record.baseOpacity
     });
   }
+  drawSelectedRoute(focused ? routeMapLayers.get(selectedRouteId) : null);
   for (const [vehicleId, marker] of truckMarkers) {
     const element = marker.getElement();
     if (element) element.classList.toggle("is-selected", vehicleId === selectedVehicleId);
@@ -400,9 +427,9 @@ function renderRouteMonitor(routes) {
     color.style.backgroundColor = ROUTE_COLORS[properties.usage_level] || "#718785";
     const copy = document.createElement("span");
     const name = document.createElement("strong");
-    name.textContent = properties.route_id;
+    name.textContent = properties.label || properties.route_id;
     const label = document.createElement("small");
-    label.textContent = `${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} vehículos`;
+    label.textContent = `${properties.route_id} · ${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} vehículos`;
     copy.append(name, label);
     const level = document.createElement("b");
     level.textContent = properties.usage_level;
@@ -579,7 +606,7 @@ function initializeFleetMap() {
 
   for (const [paneName, zIndex] of [
     ["routeLowPane", 410], ["routeMediumPane", 420],
-    ["routeHighPane", 430], ["journeyPane", 625], ["truckPane", 650]
+    ["routeHighPane", 430], ["routeSelectedPane", 440], ["journeyPane", 625], ["truckPane", 650]
   ]) {
     fleetMap.createPane(paneName).style.zIndex = String(zIndex);
   }
@@ -587,6 +614,7 @@ function initializeFleetMap() {
   for (const level of ROUTE_DRAW_ORDER) routeLayers[level] = L.layerGroup();
   truckLayer = L.layerGroup();
   journeyLayer = L.featureGroup().addTo(fleetMap);
+  selectedRouteLayer = L.featureGroup().addTo(fleetMap);
   $("journey-hide").addEventListener("click", resetMapSelection);
   applyMapLayerVisibility();
 }

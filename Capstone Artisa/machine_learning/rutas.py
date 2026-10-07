@@ -34,6 +34,8 @@ LUGAR_MIN_VIAJES = 3
 RUTA_DIST_M = 750
 MUESTRAS = 32
 MAX_GRUPO = 2500
+MIN_RECORRIDOS = 5   # una ruta de la operación se repite...
+MIN_VEHICULOS = 2    # ...y la usa más de un camión
 METROS_POR_GRADO = 111_000
 NIVELES = {"HIGH": ("Más usada", "#14532d"), "MEDIUM": ("Uso medio", "#f97316"), "LOW": ("Poco usada", "#dc2626")}
 
@@ -86,8 +88,11 @@ def asignar_lugares(viajes, faenas):
         faena = next((f for f in faenas if dentro_geojson(lat, lon, f["geojson"])), None)
         if faena:
             clave = f"F{faena['id']}"
-            lugares.setdefault(clave, {"clave": clave, "nombre": faena["nombre"], "tipo": "faena",
-                                       "puntos": []})["puntos"].append((lat, lon))
+            lugar = lugares.setdefault(clave, {"clave": clave, "nombre": faena["nombre"], "tipo": "faena",
+                                               "puntos": [], "muestras": []})
+            lugar["puntos"].append((lat, lon))
+            if len(lugar["muestras"]) < 5:
+                lugar["muestras"].append((v.asset_id, v.inicio if lado == "origen" else v.fin))
             setattr(v, f"lugar_{lado}", clave)
         else:
             libres.append(k)
@@ -99,8 +104,11 @@ def asignar_lugares(viajes, faenas):
             v, lado, lat, lon = extremos[k]
             clave = f"L{int(etiqueta)}" if etiqueta >= 0 else f"P{lat:.3f},{lon:.3f}"
             tipo = "lugar" if etiqueta >= 0 else "punto"
-            lugares.setdefault(clave, {"clave": clave, "nombre": None, "tipo": tipo,
-                                       "puntos": []})["puntos"].append((lat, lon))
+            lugar = lugares.setdefault(clave, {"clave": clave, "nombre": None, "tipo": tipo,
+                                               "puntos": [], "muestras": []})
+            lugar["puntos"].append((lat, lon))
+            if len(lugar["muestras"]) < 5:
+                lugar["muestras"].append((v.asset_id, v.inicio if lado == "origen" else v.fin))
             setattr(v, f"lugar_{lado}", clave)
     numerados = sorted((l for l in lugares.values() if l["tipo"] != "faena"),
                        key=lambda l: (-len(l["puntos"]), l["clave"]))
@@ -181,15 +189,34 @@ def clasificar_niveles(conteos):
         niveles = ["MEDIUM"] * len(valores)
     else:
         niveles = ["HIGH" if c > p67 else "LOW" if c <= p33 else "MEDIUM" for c in valores]
+        if "MEDIUM" not in niveles and p33 == p67:
+            # Empate en el corte (p. ej. muchas rutas con el mismo conteo): el empate queda
+            # como uso medio, así no desaparece el nivel intermedio.
+            niveles = ["HIGH" if c > p67 else "MEDIUM" if c == p67 else "LOW" for c in valores]
     return niveles, {"percentil_33": float(p33), "percentil_67": float(p67),
                      "regla": "HIGH > p67, LOW <= p33, MEDIUM entre ambos (recorridos por ruta)"}
 
 
-def construir_rutas(viajes, faenas):
+def nombres_unicos(lugares):
+    """'Calama', 'Calama 2'... cuando varios lugares caen en la misma comuna."""
+    vistos = Counter()
+    for lugar in sorted(lugares.values(), key=lambda l: (-l["extremos"], l["clave"])):
+        if lugar["tipo"] == "faena" or not lugar.get("comuna"):
+            continue
+        vistos[lugar["comuna"]] += 1
+        n = vistos[lugar["comuna"]]
+        lugar["nombre"] = lugar["comuna"] if n == 1 else f"{lugar['comuna']} {n}"
+
+
+def construir_rutas(viajes, faenas, nombrar=None):
+    """nombrar(lugares): opcional, agrega lugar['comuna'] a partir de los datos GPS."""
     """viajes: ViajeRuta con origen y destino conocidos. Devuelve (rutas, lugares, métricas)."""
     if not viajes:
         return [], {}, {"viajes_clasificados": 0, "rutas": 0}
     lugares = asignar_lugares(viajes, faenas)
+    if nombrar:
+        nombrar(lugares)
+        nombres_unicos(lugares)
     lat_ref = float(np.mean([v.origen[0] for v in viajes]))
     grupos = defaultdict(list)
     for v in viajes:
@@ -256,20 +283,27 @@ def construir_rutas(viajes, faenas):
                 "geometry_source": fuente,
                 "miembros": lista,
             })
+    # Un camino recorrido pocas veces o por un solo camión no es una ruta de la operación sino
+    # un viaje esporádico (desvío, traslado puntual): no se muestra ni entra en los niveles.
+    esporadicas = [r for r in rutas if r["usage_count"] < MIN_RECORRIDOS or r["unique_vehicle_count"] < MIN_VEHICULOS]
+    rutas = [r for r in rutas if r["usage_count"] >= MIN_RECORRIDOS and r["unique_vehicle_count"] >= MIN_VEHICULOS]
     niveles, umbrales = clasificar_niveles([r["usage_count"] for r in rutas])
     for ruta, nivel in zip(rutas, niveles):
         ruta["usage_level"] = nivel
         ruta["usage_label"], ruta["color"] = NIVELES[nivel]
     rutas.sort(key=lambda r: (-r["usage_count"], r["route_id"]))
     metricas = {
-        "viajes_clasificados": len(viajes),
+        "viajes_clasificados": sum(r["usage_count"] for r in rutas),
+        "viajes_analizados": len(viajes),
         "rutas": len(rutas),
         "pares_origen_destino": len(grupos),
         "lugares": len(lugares),
         "por_nivel": dict(Counter(r["usage_level"] for r in rutas)),
-        "rutas_de_un_solo_viaje": sum(1 for r in rutas if r["usage_count"] == 1),
+        "caminos_esporadicos": len(esporadicas),
+        "viajes_esporadicos": sum(r["usage_count"] for r in esporadicas),
         "umbrales": umbrales,
         "parametros": {"lugar_radio_m": LUGAR_RADIO_M, "lugar_min_viajes": LUGAR_MIN_VIAJES,
+                       "min_recorridos": MIN_RECORRIDOS, "min_vehiculos": MIN_VEHICULOS,
                        "ruta_distancia_m": RUTA_DIST_M, "muestras": MUESTRAS},
     }
     return rutas, lugares, metricas

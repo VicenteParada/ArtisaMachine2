@@ -40,21 +40,34 @@ class RouteTests(unittest.TestCase):
         for i in range(12):   # camino directo A-B, en ambos sentidos y con ruido GPS
             ida = i % 2 == 0
             self.viajes.append(viaje(f"T{i % 4}", n, A if ida else B, B if ida else A, ruido=0.0003)); n += 1
-        for i in range(4):    # desvío real: 4 km al este
-            self.viajes.append(viaje(f"T{i}", n, A, B, desvio_lon=0.045)); n += 1
-        for i in range(2):    # A-C poco usado
-            self.viajes.append(viaje("T9", n, A, C)); n += 1
+        for i in range(6):    # desvío real: 4 km al este
+            self.viajes.append(viaje(f"T{i % 3}", n, A, B, desvio_lon=0.045)); n += 1
+        for i in range(5):    # A-C poco usado
+            self.viajes.append(viaje(f"T{8 + i % 2}", n, A, C)); n += 1
+        D = (-33.400, -70.200)
+        self.viajes.append(viaje("T7", n, A, D)); n += 1   # viaje esporádico: no es una ruta
 
     def test_routes_are_separated_by_origin_destination_and_path(self):
         rutas, lugares, metricas = construir_rutas(self.viajes, [FAENA_A])
         conteos = sorted((r["usage_count"] for r in rutas), reverse=True)
-        self.assertEqual(conteos, [12, 4, 2])
+        self.assertEqual(conteos, [12, 6, 5])
         directa, desvio, ac = rutas
         self.assertEqual(directa["unique_vehicle_count"], 4)
         self.assertIn("Faena Lampa", directa["label"])
-        self.assertEqual(directa["usage_level"], "HIGH")
-        self.assertEqual(ac["usage_level"], "LOW")
-        self.assertEqual(metricas["viajes_clasificados"], 18)
+        self.assertEqual([r["usage_level"] for r in rutas], ["HIGH", "MEDIUM", "LOW"])
+        self.assertEqual(metricas["viajes_clasificados"], 23)
+        self.assertEqual((metricas["caminos_esporadicos"], metricas["viajes_esporadicos"]), (1, 1))
+
+    def test_places_named_by_commune(self):
+        def nombrar(lugares):
+            for lugar in lugares.values():
+                if lugar["tipo"] != "faena":
+                    self.assertTrue(lugar["muestras"])
+                    lugar["comuna"] = "Calama"
+        rutas, lugares, _ = construir_rutas(self.viajes, [FAENA_A], nombrar=nombrar)
+        nombres = sorted(l["nombre"] for l in lugares.values() if l["tipo"] != "faena")
+        self.assertEqual(nombres[:2], ["Calama", "Calama 2"])
+        self.assertTrue(rutas[0]["label"].startswith("Faena Lampa ↔ Calama"))
 
     def test_geometry_is_a_real_observed_trip(self):
         rutas, _, _ = construir_rutas(self.viajes, [FAENA_A])
@@ -68,6 +81,9 @@ class RouteTests(unittest.TestCase):
         niveles, umbrales = clasificar_niveles([1, 1, 1, 2, 3, 5, 8, 13, 40])
         self.assertEqual(niveles[0], "LOW")
         self.assertEqual(niveles[-1], "HIGH")
+        self.assertIn("MEDIUM", niveles)
+        # Empate en el corte: el nivel medio no desaparece.
+        niveles, _ = clasificar_niveles([5] * 8 + [9, 30])
         self.assertIn("MEDIUM", niveles)
         self.assertEqual(clasificar_niveles([3, 3, 3])[0], ["MEDIUM"] * 3)
 
