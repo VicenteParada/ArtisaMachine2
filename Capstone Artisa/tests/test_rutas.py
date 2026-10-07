@@ -57,6 +57,9 @@ class RouteTests(unittest.TestCase):
         self.assertEqual([r["usage_level"] for r in rutas], ["HIGH", "MEDIUM", "LOW"])
         self.assertEqual(metricas["viajes_clasificados"], 23)
         self.assertEqual((metricas["caminos_esporadicos"], metricas["viajes_esporadicos"]), (1, 1))
+        # Contabilidad: los tres niveles suman el total de rutas.
+        self.assertEqual(sum(metricas["por_nivel"].values()), metricas["rutas"])
+        self.assertEqual(metricas["por_nivel"], {"HIGH": 1, "MEDIUM": 1, "LOW": 1})
 
     def test_places_named_by_commune(self):
         def nombrar(lugares):
@@ -82,9 +85,12 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(niveles[0], "LOW")
         self.assertEqual(niveles[-1], "HIGH")
         self.assertIn("MEDIUM", niveles)
-        # Empate en el corte: el nivel medio no desaparece.
-        niveles, _ = clasificar_niveles([5] * 8 + [9, 30])
+        # Empate en el corte (muchas rutas con el mismo conteo): el nivel medio no desaparece
+        # y cada ruta queda en exactamente un nivel.
+        conteos = [5] * 8 + [9, 30]
+        niveles, _ = clasificar_niveles(conteos)
         self.assertIn("MEDIUM", niveles)
+        self.assertEqual(len(niveles), len(conteos))
         self.assertEqual(clasificar_niveles([3, 3, 3])[0], ["MEDIUM"] * 3)
 
     def test_point_in_faena(self):
