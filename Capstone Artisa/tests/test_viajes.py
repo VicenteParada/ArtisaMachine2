@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 import unittest
 
-from machine_learning.viajes import detectar_paradas, empalmar, extraer_viajes
+from machine_learning.viajes import detectar_paradas, empalmar, extraer_viajes, resumen_paradas
 
 A = (-33.40, -70.60)
 B = (-33.25, -70.60)   # ~16,6 km al norte
@@ -64,6 +64,23 @@ class TripTests(unittest.TestCase):
         viajes = extraer_viajes("X", puntos)
         self.assertIsNone(viajes[0].destino)
         self.assertTrue(all(v.destino is None or v.origen is None or v is viajes[-1] for v in viajes))
+
+    def test_long_loading_stop_without_reports_is_one_stop(self):
+        # Llega a cargar, apaga el motor 2 horas (sin reportes) y sigue: son 2 viajes y 1 parada
+        # intermedia de ~2 h, no un viaje cortado sin destino.
+        t0 = datetime(2026, 10, 6, 8)
+        puntos = quieto(t0, A, 20) + manejar(t0 + timedelta(minutes=19), A, B, 20)
+        llegada = puntos[-1][0] + timedelta(minutes=1)
+        puntos += quieto(llegada, B, 5)
+        vuelta = puntos[-1][0] + timedelta(hours=2)
+        puntos += quieto(vuelta, B, 5) + manejar(vuelta + timedelta(minutes=4), B, A, 20)
+        puntos += quieto(puntos[-1][0] + timedelta(minutes=1), A, 20)
+        viajes = extraer_viajes("X", puntos)
+        self.assertEqual(len(viajes), 2)
+        self.assertTrue(all(v.origen and v.destino for v in viajes))
+        n, minutos = resumen_paradas(puntos)
+        self.assertEqual(n, 3)
+        self.assertGreater(minutos, 150)
 
     def test_midnight_split_is_stitched(self):
         medianoche = datetime(2026, 10, 7, 3)  # 00:00 de Chile en UTC

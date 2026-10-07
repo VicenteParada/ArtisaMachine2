@@ -297,7 +297,7 @@ def daily_report(cursor, dia):
     estado = cursor.fetchone()
     cursor.execute(
         """SELECT asset_id, asset_name, reportes, primer_reporte, ultimo_reporte, km_observados,
-                  viajes, tramos_unidos
+                  viajes, tramos_unidos, paradas, minutos_detenido
            FROM reporte_diario WHERE fecha=%s ORDER BY reportes DESC, asset_id""",
         (dia,),
     )

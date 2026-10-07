@@ -1368,12 +1368,13 @@ function renderTelemetry(summary, dataset, state) {
     tr.append(coordinates);
 
     const ignition = document.createElement("td");
-    ignition.textContent = report.ignition === null || report.ignition === undefined
-      ? "Sin dato"
-      : (Number(report.ignition) === 1 ? "Sí" : "No");
+    ignition.className = "col-ignition";
+    ignition.textContent = hasValue(report.ignition) ? (Number(report.ignition) === 1 ? "Sí" : "No") : "";
     tr.append(ignition);
     body.append(tr);
   }
+  // Si la fuente no informa encendido, la columna se oculta en vez de mostrar "Sin dato".
+  body.closest("table").classList.toggle("no-ignition", !reports.some((report) => hasValue(report.ignition)));
   if (!reports.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
@@ -1463,6 +1464,15 @@ const HISTORY_STATES = {
   cerrado: ["Día cerrado", "status"]
 };
 
+const hasValue = (value) => value !== null && value !== undefined && value !== "";
+
+function formatMinutes(value) {
+  const minutes = Math.round(Number(value || 0));
+  if (!minutes) return "—";
+  const hours = Math.floor(minutes / 60);
+  return hours ? `${hours} h ${String(minutes % 60).padStart(2, "0")} min` : `${minutes} min`;
+}
+
 function emptyRow(body, columns, message) {
   const row = document.createElement("tr");
   const cell = document.createElement("td");
@@ -1533,7 +1543,8 @@ function renderHistoryDay(data) {
       cell(formatLocalTime(truck.primer_reporte, zone)),
       cell(formatLocalTime(truck.ultimo_reporte, zone)),
       cell(format(truck.km_observados, 1)),
-      cell(format(truck.viajes), "pausas de más de 30 min separan viajes")
+      cell(format(truck.viajes), "recorridos entre paradas"),
+      cell(formatMinutes(truck.minutos_detenido), `${format(truck.paradas || 0)} ${Number(truck.paradas) === 1 ? "parada" : "paradas"} de 10 min o más`)
     );
     const open = () => {
       for (const row of body.querySelectorAll(".is-selected")) row.classList.remove("is-selected");
@@ -1545,13 +1556,13 @@ function renderHistoryDay(data) {
     body.append(tr);
   }
   if (!(data.camiones || []).length) {
-    emptyRow(body, 6, state ? "Ningún camión reportó este día." : "Este día todavía no tiene resumen calculado.");
+    emptyRow(body, 7, state ? "Ningún camión reportó este día." : "Este día todavía no tiene resumen calculado.");
   }
   if (historyState.detail && historyState.detail.day !== data.fecha) closeTruckDetail();
 }
 
 async function loadTruckDetail(assetId, assetName, day, after = null) {
-  const detail = after ? historyState.detail : {assetId, assetName, day, next: null};
+  const detail = after ? historyState.detail : {assetId, assetName, day, next: null, hasIgnition: false};
   historyState.detail = detail;
   $("history-detail").hidden = false;
   $("history-detail-title").textContent = `Reportes de ${assetName || assetId} · ${day} (hora de Chile)`;
@@ -1569,11 +1580,15 @@ async function loadTruckDetail(assetId, assetName, day, after = null) {
       tr.append(
         cell(formatLocalTime(report.report_date, data.zona)),
         cell(report.event_name || "Sin evento"),
-        cell(`${Number(report.latitude).toFixed(5)}, ${Number(report.longitude).toFixed(5)}`),
-        cell(report.ignition === null || report.ignition === undefined ? "Sin dato" : (Number(report.ignition) === 1 ? "Sí" : "No"))
+        cell(`${Number(report.latitude).toFixed(5)}, ${Number(report.longitude).toFixed(5)}`)
       );
+      const ignition = cell(hasValue(report.ignition) ? (Number(report.ignition) === 1 ? "Sí" : "No") : "");
+      ignition.className = "col-ignition";
+      tr.append(ignition);
+      if (hasValue(report.ignition)) detail.hasIgnition = true;
       body.append(tr);
     }
+    body.closest("table").classList.toggle("no-ignition", !detail.hasIgnition);
     if (!body.children.length) emptyRow(body, 4, "Sin reportes para este camión en el día.");
     detail.next = data.siguiente;
     $("history-detail-more").hidden = !data.siguiente;

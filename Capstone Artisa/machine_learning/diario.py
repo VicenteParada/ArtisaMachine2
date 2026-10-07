@@ -6,7 +6,8 @@ camiones según el catálogo. Mismas reglas que el cuaderno:
 - Se quitan repeticiones (mismo camión y misma hora) y reportes repetidos entre tablas.
 - Dos reportes seguidos se unen como recorrido solo si la pausa es <= MAX_GAP_MIN y el
   salto no supera VEL_MAX_KMH (no se inventa recorrido ni se unen saltos de GPS).
-- Una pausa mayor a GAP_VIAJE_MIN inicia un nuevo viaje.
+- Viajes = recorridos entre paradas (machine_learning/viajes.py). Una pausa larga no
+  separa viajes: el tiempo detenido (p. ej. cargando) se informa aparte.
 
 Corte: el día va de 00:00 a 00:00 hora Chile (common/dias.py). Un viaje que cruza
 la medianoche aparece en ambos días con sus propios reportes; ningún reporte se
@@ -21,10 +22,10 @@ import math
 import time
 
 from common import dias
-from machine_learning.viajes import extraer_viajes
+from machine_learning.viajes import extraer_viajes, resumen_paradas
 
 
-VERSION_CALCULO = 2  # 2: agrega los viajes entre paradas
+VERSION_CALCULO = 3  # 2: viajes entre paradas · 3: paradas sin cortar por pausas, tiempo detenido
 MAX_GAP_MIN = 5
 VEL_MAX_KMH = 150
 GAP_VIAJE_MIN = 30
@@ -51,6 +52,8 @@ class ResumenCamion:
     km_observados: float
     viajes: int
     tramos_unidos: int
+    paradas: int = 0
+    minutos_detenido: float = 0.0
 
 
 def limpiar(filas):
@@ -85,11 +88,9 @@ def resumir(filas, por_camion=None, descartados=0):
         por_camion, descartados = limpiar(filas)
     resumenes = []
     for asset_id, puntos in por_camion.items():
-        metros, viajes, unidos = 0.0, 1, 0
+        metros, unidos = 0.0, 0
         for (t0, la0, lo0, _), (t1, la1, lo1, _) in zip(puntos, puntos[1:]):
             horas = (t1 - t0).total_seconds() / 3600
-            if horas * 60 > GAP_VIAJE_MIN:
-                viajes += 1
             d = distancia_m(la0, lo0, la1, lo1)
             if 0 < horas <= MAX_GAP_MIN / 60 and d > 0 and d / 1000 <= VEL_MAX_KMH * horas:
                 metros += d
@@ -98,7 +99,7 @@ def resumir(filas, por_camion=None, descartados=0):
         resumenes.append(ResumenCamion(
             asset_id=asset_id, asset_name=nombre, reportes=len(puntos),
             primer_reporte=puntos[0][0], ultimo_reporte=puntos[-1][0],
-            km_observados=round(metros / 1000, 2), viajes=viajes, tramos_unidos=unidos,
+            km_observados=round(metros / 1000, 2), viajes=0, tramos_unidos=unidos,
         ))
     resumenes.sort(key=lambda r: (-r.reportes, r.asset_id))
     return resumenes, descartados
@@ -182,10 +183,11 @@ def guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recal
         if resumenes:
             cursor.executemany(
                 """INSERT INTO reporte_diario
-                (fecha,asset_id,asset_name,reportes,primer_reporte,ultimo_reporte,km_observados,viajes,tramos_unidos)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (fecha,asset_id,asset_name,reportes,primer_reporte,ultimo_reporte,km_observados,viajes,tramos_unidos,
+                 paradas,minutos_detenido)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 [(dia, r.asset_id, r.asset_name, r.reportes, r.primer_reporte, r.ultimo_reporte,
-                  r.km_observados, r.viajes, r.tramos_unidos) for r in resumenes],
+                  r.km_observados, r.viajes, r.tramos_unidos, r.paradas, r.minutos_detenido) for r in resumenes],
             )
         cursor.execute(
             """INSERT INTO reporte_diario_estado
@@ -214,6 +216,14 @@ def procesar_dia(connection, dia, estado, recalculo=False):
     por_camion, descartados = limpiar(filas)
     resumenes, descartados = resumir(None, por_camion, descartados)
     viajes = viajes_del_dia(por_camion, dia)
+    # Viajes = recorridos entre paradas (no pausas de 30 min); paradas y tiempo detenido
+    # sirven para revisar tiempos de carga.
+    por_asset = defaultdict(int)
+    for v in viajes:
+        por_asset[v.asset_id] += 1
+    for r in resumenes:
+        r.viajes = por_asset.get(r.asset_id, 0)
+        r.paradas, r.minutos_detenido = resumen_paradas([(p[0], p[1], p[2]) for p in por_camion[r.asset_id]])
     guardar_dia(connection, dia, estado, resumenes, descartados, recibido, recalculo, viajes)
     reportes = sum(r.reportes for r in resumenes)
     print(f"Cierre diario: {dia} -> {estado} · {len(resumenes)} camiones, {reportes} reportes, "

@@ -7,8 +7,9 @@ que ocurre entre dos paradas consecutivas. Reglas para no inventar recorrido:
 - Solo se unen reportes seguidos con pausa <= MAX_GAP_MIN y velocidad implícita
   <= VEL_MAX_KMH (las mismas reglas del cuaderno). Un salto de GPS no se dibuja: la
   geometría del viaje queda en tramos y el viaje se marca con_saltos.
-- Una pausa sin reportes mayor a GAP_VIAJE_MIN corta el viaje: su destino queda
-  desconocido (y el siguiente empieza sin origen conocido).
+- Una pausa sin reportes mayor a GAP_VIAJE_MIN *en movimiento* (el camión reaparece en
+  otro lugar) corta el viaje: su destino queda desconocido. Si reaparece en el mismo
+  lugar es una parada (p. ej. cargando con el motor apagado), sin importar cuánto dure.
 - El corte del día (00:00 hora Chile) puede partir un viaje en dos: se marcan como
   abierto_fin / abierto_inicio y la clasificación los vuelve a empalmar.
 
@@ -60,12 +61,15 @@ class Viaje:
 
 
 def detectar_paradas(puntos):
-    """Índices [(i, j)] de los tramos donde el camión estuvo detenido (puntos i..j)."""
+    """Índices [(i, j)] de los tramos donde el camión estuvo detenido (puntos i..j).
+
+    Una parada no se corta por falta de reportes: un camión cargando con el motor apagado
+    puede dejar de reportar mucho rato y sigue siendo la misma parada si al volver a
+    reportar está en el mismo lugar. El tiempo que pasa detenido no separa viajes."""
     paradas, i, n = [], 0, len(puntos)
     while i < n:
         j = i + 1
-        while j < n and (puntos[j][0] - puntos[j - 1][0]).total_seconds() <= GAP_VIAJE_MIN * 60 \
-                and distancia_m(puntos[i][1], puntos[i][2], puntos[j][1], puntos[j][2]) <= PARADA_RADIO_M:
+        while j < n and distancia_m(puntos[i][1], puntos[i][2], puntos[j][1], puntos[j][2]) <= PARADA_RADIO_M:
             j += 1
         if (puntos[j - 1][0] - puntos[i][0]).total_seconds() >= PARADA_MIN_MIN * 60:
             paradas.append((i, j - 1))
@@ -196,3 +200,10 @@ def empalmar(viajes):
         else:
             resultado.append(viaje)
     return resultado
+
+
+def resumen_paradas(puntos):
+    """(cantidad de paradas, minutos detenido) de un camión en el día."""
+    paradas = detectar_paradas(puntos)
+    minutos = sum((puntos[j][0] - puntos[i][0]).total_seconds() for i, j in paradas) / 60
+    return len(paradas), round(minutos, 1)

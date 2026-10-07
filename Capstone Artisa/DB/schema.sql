@@ -225,3 +225,8 @@ CREATE TABLE IF NOT EXISTS rutas_vehiculo (
     ultimo_viaje DATETIME(6) NOT NULL,
     PRIMARY KEY (version_id, asset_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Paradas del día (10 min dentro de 200 m, sin cortar por pausas de reporte) y tiempo
+-- total detenido por camión: base para revisar tiempos de carga.
+ALTER TABLE reporte_diario ADD COLUMN IF NOT EXISTS paradas INT UNSIGNED NOT NULL DEFAULT 0;
+ALTER TABLE reporte_diario ADD COLUMN IF NOT EXISTS minutos_detenido DOUBLE NOT NULL DEFAULT 0;

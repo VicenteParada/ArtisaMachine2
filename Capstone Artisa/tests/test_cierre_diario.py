@@ -54,7 +54,7 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(descartados, 1)
         (a,) = resumenes
         self.assertEqual(a.reportes, 23)
-        self.assertEqual(a.viajes, 2)
+        self.assertEqual(a.viajes, 0)  # se completa en procesar_dia con los viajes entre paradas
         self.assertEqual(a.tramos_unidos, 20)
         self.assertAlmostEqual(a.km_observados, 0.5 * 20, delta=0.6)
         self.assertEqual(a.primer_reporte, t0)
@@ -160,6 +160,30 @@ class CloseCycleTests(unittest.TestCase):
     def test_nothing_to_do_without_data(self):
         self.db["primero"] = None
         self.assertEqual(self.run_at(datetime(2026, 10, 6, 15)), [])
+
+
+class ScheduleTests(unittest.TestCase):
+    def test_runs_once_after_scheduled_hour_chile(self):
+        from unittest.mock import patch
+        with patch.object(diario_worker, "HORA_PROGRAMADA", "00:30"):
+            # 00:20 Chile (03:20 UTC): todavía no
+            self.assertFalse(diario_worker.toca_programado(datetime(2026, 10, 7, 3, 20), None))
+            # 00:31 Chile: sí
+            self.assertTrue(diario_worker.toca_programado(datetime(2026, 10, 7, 3, 31), None))
+            # ya corrió hoy: no se repite
+            self.assertFalse(diario_worker.toca_programado(datetime(2026, 10, 7, 15, 0), date(2026, 10, 7)))
+            # al día siguiente vuelve a tocar
+            self.assertTrue(diario_worker.toca_programado(datetime(2026, 10, 8, 3, 31), date(2026, 10, 7)))
+        with patch.object(diario_worker, "HORA_PROGRAMADA", ""):
+            self.assertTrue(diario_worker.toca_programado(datetime(2026, 10, 7, 15, 0), date(2026, 10, 7)))
+
+    def test_light_cycle_only_updates_today(self):
+        db = {"primero": datetime(2026, 10, 4, 15), "estados": {}, "recibidos": {},
+              "conector": {"estado": "conectado", "ultimo_exito": datetime(2026, 10, 6, 15)}}
+        hecho = []
+        diario_worker.ciclo(FakeConnection(db), datetime(2026, 10, 6, 15),
+                            procesar=lambda c, d, e, recalculo=False: hecho.append((d, e)), completo=False)
+        self.assertEqual(hecho, [(date(2026, 10, 6), "en_curso")])
 
 
 if __name__ == "__main__":

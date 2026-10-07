@@ -176,10 +176,15 @@ de este equipo (mantén la hora del equipo sincronizada).
 El servicio `machine-diario` (parte de Machine) aplica a cada día las mismas reglas
 del cuaderno `guias_ml/telemetria_colab.ipynb` sobre la telemetría en vivo y el
 histórico: coordenadas válidas, sin repetidos, une reportes seguidos con pausa de
-hasta 5 min y saltos bajo 150 km/h, y separa viajes con pausas de más de 30 min.
+hasta 5 min y saltos bajo 150 km/h. Un viaje es el recorrido entre dos paradas (10 min
+en 200 m); una pausa larga en el mismo lugar (p. ej. cargando con el motor apagado) es
+una parada, no corta viajes, y su duración se informa como tiempo detenido.
 Guarda un resumen por camión en `reporte_diario`.
 
-- Hoy aparece "en curso" y se recalcula cada 10 minutos.
+- El trabajo pesado (cerrar días, recalcular atrasados y clasificar rutas) corre una vez
+  al día a la hora `DIARIO_HORA` (Chile, por defecto 00:30). Para ejecutarlo a mano:
+  `docker compose exec machine-diario python -m machine_learning.diario_worker --ahora`.
+- Hoy aparece "en curso" y se recalcula cada 10 minutos (`DIARIO_HOY_CADA_MINUTOS`, 0 lo desactiva).
 - Pasadas las 00:00 + 15 min, el día se cierra si la API de la empresa respondió
   después de medianoche. Si la API estaba caída, el día queda "esperando datos"
   con cifras provisorias y se cierra cuando vuelva la conexión.

@@ -122,6 +122,8 @@ services:
       DIARIO_GRACIA_MINUTOS: ${DIARIO_GRACIA_MINUTOS:-15}
       DIARIO_REVISAR_DIAS: ${DIARIO_REVISAR_DIAS:-7}
       DIARIO_DESDE: ${DIARIO_DESDE:-}
+      DIARIO_HORA: ${DIARIO_HORA-00:30}
+      DIARIO_HOY_CADA_MINUTOS: ${DIARIO_HOY_CADA_MINUTOS:-10}
     depends_on:
       mariadb:
         condition: service_healthy
