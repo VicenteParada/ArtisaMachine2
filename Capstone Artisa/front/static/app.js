@@ -466,14 +466,22 @@ function vehicleStatus(vehicle) {
   return {label: "Con señal reciente", className: "moving"};
 }
 
-const TRUCK_MARKUP = '<svg class="truck-glyph" viewBox="0 0 32 32" aria-hidden="true" focusable="false">' +
-  '<rect x="7" y="3" width="18" height="17" rx="2" fill="#f9fbf7" stroke="#173f35" stroke-width="1.5"/>' +
-  '<rect x="6" y="20" width="20" height="8" rx="2" fill="#f9fbf7" stroke="#173f35" stroke-width="1.5"/>' +
-  '<rect x="9" y="22" width="14" height="3" rx="1" fill="#8fc1d1"/>' +
-  '<rect x="4" y="6" width="3" height="6" rx="1" fill="#173f35"/>' +
-  '<rect x="25" y="6" width="3" height="6" rx="1" fill="#173f35"/>' +
-  '<rect x="8" y="27" width="4" height="3" rx="1" fill="#173f35"/>' +
-  '<rect x="20" y="27" width="4" height="3" rx="1" fill="#173f35"/>' +
+const TRUCK_MARKUP = '<svg class="truck-glyph" viewBox="0 0 48 36" aria-hidden="true" focusable="false">' +
+  '<ellipse cx="24" cy="31" rx="21" ry="2" fill="#173f35" opacity=".12"/>' +
+  '<g stroke="#193f38" stroke-width="1.5" stroke-linejoin="round">' +
+  '<rect x="2.5" y="6" width="26" height="19" rx="2.5" fill="#f2f6f4"/>' +
+  '<path d="M4 21h23v4H4z" fill="#c6d9cf" stroke="none"/>' +
+  '<path d="M8 10v7m6-7v7m6-7v7" stroke="#c2d1cb" stroke-linecap="round"/>' +
+  '<path d="M29 13h9l7 9v5H29z" fill="#28785c"/>' +
+  '<path d="M32 15h5l5 7H32z" fill="#b7e0e5"/>' +
+  '<path d="M34 15v7" stroke="#f4fbfc" stroke-width="1"/>' +
+  '<path d="M3 25h28v3H3z" fill="#34574e"/>' +
+  '<path d="M41 24h4v3h-4z" fill="#f4d98b" stroke="none"/>' +
+  '<path d="M31 25h3" stroke="#d5ee9c" stroke-linecap="round"/>' +
+  '<path d="M43 28h3" stroke="#193f38" stroke-linecap="round"/>' +
+  '</g>' +
+  '<g fill="#193f38"><circle cx="10" cy="28" r="4"/><circle cx="20" cy="28" r="4"/><circle cx="38" cy="28" r="4"/></g>' +
+  '<g fill="#dce7e2"><circle cx="10" cy="28" r="1.7"/><circle cx="20" cy="28" r="1.7"/><circle cx="38" cy="28" r="1.7"/></g>' +
   '</svg>';
 
 function renderLiveFleet(vehicles) {
@@ -733,9 +741,9 @@ function truckIcon(vehicle) {
   return L.divIcon({
     className: "truck-div-icon",
     html,
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
-    popupAnchor: [0, -17]
+    iconSize: [42, 42],
+    iconAnchor: [21, 21],
+    popupAnchor: [0, -21]
   });
 }
 
@@ -1012,9 +1020,13 @@ function renderFleetMap(data) {
   const minutes = Math.max(1, Math.round(Number(data.metadata.refresh_seconds || 300) / 60));
   $("map-last-update").textContent = "Clasificación al " + formatDataDay(data.snapshotDate) +
     " · se actualiza cada " + minutes + " min";
-  $("heatmap-source-status").textContent = "Rutas clasificadas";
+  const coverage = data.metadata.metricas?.cobertura;
+  const processingHistory = Number(coverage?.dias_pendientes || 0) > 0;
+  $("heatmap-source-status").textContent = processingHistory
+    ? "Rutas disponibles · histórico en procesamiento" : "Rutas clasificadas";
   $("heatmap-intro").textContent =
-    "Verde: rutas más usadas · naranja: uso medio · rojo: poco usadas. Cada camión aparece en su última posición recibida.";
+    "Verde: rutas más usadas · naranja: uso medio · rojo: poco usadas. Cada camión aparece en su última posición recibida." +
+    (processingHistory ? ` Clasificación parcial: ${coverage.dias_cerrados} de ${coverage.dias_ventana} días procesados en la ventana.` : "");
 
   const visibleBounds = L.latLngBounds([]);
   for (const route of data.routes) {
@@ -1286,7 +1298,10 @@ function renderDashboard(data, metrics = {}) {
     Number(routeMetrics.HIGH || 0) + Number(routeMetrics.MEDIUM || 0) + Number(routeMetrics.LOW || 0)
     || data.routes.length
   );
-  $("dashboard-snapshot").textContent = "Corte " + formatDataDay(data.snapshotDate);
+  const coverage = data.metadata.metricas?.cobertura;
+  $("dashboard-snapshot").textContent = Number(coverage?.dias_pendientes || 0) > 0
+    ? `Histórico en procesamiento · ${coverage.dias_cerrados}/${coverage.dias_ventana} días`
+    : "Corte " + formatDataDay(data.snapshotDate);
   $("dashboard-snapshot").className = "status info";
 
   const bounds = dashboardBounds(data);

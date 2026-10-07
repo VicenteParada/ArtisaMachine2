@@ -9,7 +9,7 @@ INSERT INTO tipos_vehiculo (nombre) SELECT 'camion_pequeño' FROM DUAL WHERE NOT
 INSERT INTO tipos_vehiculo (nombre) SELECT 'camioneta' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM tipos_vehiculo WHERE nombre = 'camioneta');
 INSERT INTO tipos_vehiculo (nombre) SELECT 'minibus' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM tipos_vehiculo WHERE nombre = 'minibus');
 
--- camion: 113 vehículos
+-- camion: 112 vehículos
 SET @id_tipo := (SELECT id_tipo FROM tipos_vehiculo WHERE nombre = 'camion' ORDER BY id_tipo LIMIT 1);
 INSERT IGNORE INTO vehiculos (asset_id, id_tipo, actualizado_en) VALUES
     ('RJXS30', @id_tipo, UTC_TIMESTAMP(6)),
@@ -81,7 +81,6 @@ INSERT IGNORE INTO vehiculos (asset_id, id_tipo, actualizado_en) VALUES
     ('RYCV75', @id_tipo, UTC_TIMESTAMP(6)),
     ('RYCV76', @id_tipo, UTC_TIMESTAMP(6)),
     ('RYCV77', @id_tipo, UTC_TIMESTAMP(6)),
-    ('SBKT91', @id_tipo, UTC_TIMESTAMP(6)),
     ('SHKZ50', @id_tipo, UTC_TIMESTAMP(6)),
     ('SVFD23', @id_tipo, UTC_TIMESTAMP(6)),
     ('SVFD25', @id_tipo, UTC_TIMESTAMP(6)),
@@ -131,7 +130,7 @@ SET @id_tipo := (SELECT id_tipo FROM tipos_vehiculo WHERE nombre = 'camion_peque
 INSERT IGNORE INTO vehiculos (asset_id, id_tipo, actualizado_en) VALUES
     ('LZPY94', @id_tipo, UTC_TIMESTAMP(6));
 
--- camioneta: 9 vehículos
+-- camioneta: 10 vehículos
 SET @id_tipo := (SELECT id_tipo FROM tipos_vehiculo WHERE nombre = 'camioneta' ORDER BY id_tipo LIMIT 1);
 INSERT IGNORE INTO vehiculos (asset_id, id_tipo, actualizado_en) VALUES
     ('LCSS42', @id_tipo, UTC_TIMESTAMP(6)),
@@ -140,6 +139,7 @@ INSERT IGNORE INTO vehiculos (asset_id, id_tipo, actualizado_en) VALUES
     ('LXJW25', @id_tipo, UTC_TIMESTAMP(6)),
     ('RGFK68', @id_tipo, UTC_TIMESTAMP(6)),
     ('RGFK71', @id_tipo, UTC_TIMESTAMP(6)),
+    ('SBKT91', @id_tipo, UTC_TIMESTAMP(6)),
     ('SBKT94', @id_tipo, UTC_TIMESTAMP(6)),
     ('SBKT96', @id_tipo, UTC_TIMESTAMP(6)),
     ('VWWH15', @id_tipo, UTC_TIMESTAMP(6));

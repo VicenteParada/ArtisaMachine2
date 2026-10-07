@@ -162,6 +162,12 @@ def ejecutar(connection, dias=VENTANA_DIAS):
             return None
         viajes = cargar_viajes(cursor, desde, hasta)
         faenas = cargar_faenas(cursor)
+        cursor.execute(
+            "SELECT COUNT(*) AS cerrados FROM reporte_diario_estado "
+            "WHERE estado='cerrado' AND fecha >= %s AND fecha <= %s",
+            (desde, hasta),
+        )
+        cerrados = cursor.fetchone()["cerrados"]
     connection.commit()
     completos, excluidos = preparar(viajes)
     with connection.cursor() as cursor:
@@ -172,6 +178,9 @@ def ejecutar(connection, dias=VENTANA_DIAS):
     metricas.update(excluidos)
     metricas["viajes_leidos"] = len(viajes)
     metricas["camiones"] = len({v.asset_id for v in completos})
+    dias_ventana = (hasta - desde).days + 1
+    metricas["cobertura"] = {"dias_cerrados": cerrados, "dias_ventana": dias_ventana,
+                            "dias_pendientes": max(0, dias_ventana - cerrados)}
     metricas["segundos"] = round(time.monotonic() - comienzo, 1)
     version = guardar_version(connection, desde, hasta, rutas, lugares, metricas)
     print(f"Rutas: versión {version} · {desde}..{hasta} · {metricas['viajes_clasificados']} viajes -> "

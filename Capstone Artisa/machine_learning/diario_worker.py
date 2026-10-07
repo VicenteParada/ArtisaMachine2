@@ -14,7 +14,8 @@ solo actualiza el resumen "en curso" de hoy (liviano).
    (por un corte de red, un GPS que envía tarde, etc.), el día se recalcula solo.
    Se revisan los últimos DIARIO_REVISAR_DIAS días.
 
-Si el servicio estuvo apagado varios días, al volver cierra todos los pendientes.
+Si el servicio estuvo apagado varios días, prioriza los recientes y recupera el resto.
+Publica clasificaciones intermedias para no bloquear la web durante toda la recuperación.
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -87,10 +88,20 @@ def dia_listo_para_cerrar(dia, utc_now, modo, ultimo_exito):
     return ultimo_exito is not None and ultimo_exito >= fin + GRACIA
 
 
-def ciclo(connection, utc_now, procesar=procesar_dia, completo=True):
+def ciclo(connection, utc_now, procesar=procesar_dia, completo=True, revisados=None):
     """Un ciclo de trabajo. Devuelve la lista de (día, estado) procesados.
     completo=False solo actualiza el día de hoy (trabajo liviano fuera de la hora programada)."""
     hecho = []
+    revisados = revisados if revisados is not None else set()
+
+    def calcular(dia, estado, recalculo=False):
+        HEARTBEAT["value"] = time.monotonic()
+        STATE.update(estado="procesando", fecha_en_proceso=dia.isoformat())
+        procesar(connection, dia, estado, recalculo=recalculo)
+        HEARTBEAT["value"] = time.monotonic()
+        STATE.update(ultimo_dia_procesado=dia.isoformat(), fecha_en_proceso=None)
+        if dia < hoy:
+            revisados.add(dia)
     with connection.cursor() as cursor:
         inicio = primer_dia(cursor)
         modo, ultimo_exito = estado_conector(cursor)
@@ -105,32 +116,38 @@ def ciclo(connection, utc_now, procesar=procesar_dia, completo=True):
     connection.commit()
     hoy = dias.hoy(utc_now)
 
-    # 1) Días pasados sin cerrar, del más antiguo al más reciente.
-    dia = inicio if completo else hoy
-    while dia < hoy and len(hecho) < MAX_DIAS_POR_CICLO:
+    # 1) Primero los días recientes. Cada día se visita una sola vez por ejecución,
+    # incluso si la API sigue sincronizando: no repetir el principio del histórico.
+    dia = hoy - timedelta(days=1)
+    while completo and dia >= inicio and len(hecho) < MAX_DIAS_POR_CICLO:
+        if dia in revisados:
+            dia -= timedelta(days=1)
+            continue
         fila = estados.get(dia)
         if fila and fila["estado"] == "cerrado" and fila.get("version_calculo", VERSION_CALCULO) < VERSION_CALCULO:
             # Día cerrado con un método anterior: se recalcula y sigue cerrado.
-            procesar(connection, dia, "cerrado")
+            calcular(dia, "cerrado")
             hecho.append((dia, "actualizado"))
         elif not fila or fila["estado"] != "cerrado":
             if dia_listo_para_cerrar(dia, utc_now, modo, ultimo_exito):
-                procesar(connection, dia, "cerrado")
+                calcular(dia, "cerrado")
                 hecho.append((dia, "cerrado"))
             elif not fila or fila["calculado_en"] is None or fila["calculado_en"] <= utc_now - HOY_CADA:
-                procesar(connection, dia, "esperando_datos")
+                calcular(dia, "esperando_datos")
                 hecho.append((dia, "esperando_datos"))
-        dia += timedelta(days=1)
+        dia -= timedelta(days=1)
 
     # 2) Hoy, en curso.
     fila = estados.get(hoy)
     if HOY_CADA.total_seconds() > 0 and hoy >= inicio and (not fila or fila["calculado_en"] is None or fila["calculado_en"] <= utc_now - HOY_CADA):
-        procesar(connection, hoy, "en_curso")
+        calcular(hoy, "en_curso")
         hecho.append((hoy, "en_curso"))
 
     # 3) Reportes que llegaron tarde a días ya cerrados.
     for atras in range(1, (REVISAR_DIAS if completo else 0) + 1):
         dia = hoy - timedelta(days=atras)
+        if dia in revisados:
+            continue
         fila = estados.get(dia)
         if not fila or fila["estado"] != "cerrado":
             continue
@@ -138,7 +155,7 @@ def ciclo(connection, utc_now, procesar=procesar_dia, completo=True):
             recibido = ultimo_recibido(cursor, dia)
         connection.commit()
         if recibido and (fila["ultimo_recibido"] is None or recibido > fila["ultimo_recibido"]):
-            procesar(connection, dia, "cerrado", recalculo=True)
+            calcular(dia, "cerrado", recalculo=True)
             hecho.append((dia, "recalculado"))
     return hecho
 
@@ -165,21 +182,46 @@ def toca_programado(utc_now, ultima_fecha):
     return (local.hour, local.minute) >= hora and ultima_fecha != local.date()
 
 
-def ejecucion_completa(connection, utc_now):
-    """Cierra todos los días pendientes y luego clasifica rutas. Devuelve días procesados."""
-    total = 0
-    while True:
-        HEARTBEAT["value"] = time.monotonic()
-        hecho = ciclo(connection, utc_now, completo=True)
-        total += len(hecho)
-        if len(hecho) < MAX_DIAS_POR_CICLO:
-            break
-        utc_now = _utc_now()
+def publicar_rutas(connection, final=False):
+    """Publica lo ya cerrado; durante la recuperación, como máximo cada cinco minutos."""
     with connection.cursor() as cursor:
-        recalcular = rutas_job.necesita_recalculo(cursor, horas_minimas=0)
+        recalcular = rutas_job.necesita_recalculo(cursor, horas_minimas=0 if final else 5 / 60)
     connection.commit()
     if recalcular:
+        STATE["estado"] = "clasificando"
+        HEARTBEAT["value"] = time.monotonic()
         STATE["rutas"] = rutas_job.ejecutar(connection)
+        HEARTBEAT["value"] = time.monotonic()
+
+
+def cierres_listos(connection, utc_now):
+    """Al terminar la carga, cierra los días provisorios sin esperar otra medianoche."""
+    with connection.cursor() as cursor:
+        modo, ultimo_exito = estado_conector(cursor)
+        cursor.execute(
+            "SELECT fecha FROM reporte_diario_estado WHERE fecha < %s "
+            "AND (estado <> 'cerrado' OR version_calculo < %s)",
+            (dias.hoy(utc_now), VERSION_CALCULO),
+        )
+        pendientes = cursor.fetchall()
+    connection.commit()
+    return any(dia_listo_para_cerrar(fila["fecha"], utc_now, modo, ultimo_exito) for fila in pendientes)
+
+
+def ejecucion_completa(connection, utc_now):
+    """Recupera días pendientes y publica rutas por lotes. Devuelve días procesados."""
+    total = 0
+    revisados = set()
+    while True:
+        HEARTBEAT["value"] = time.monotonic()
+        hecho = ciclo(connection, utc_now, completo=True, revisados=revisados)
+        total += len(hecho)
+        STATE["dias_procesados_ejecucion"] = total
+        terminado = len(hecho) < MAX_DIAS_POR_CICLO
+        publicar_rutas(connection, final=terminado)
+        if terminado:
+            break
+        utc_now = _utc_now()
     return total
 
 
@@ -212,7 +254,7 @@ def loop():
             ahora = _utc_now()
             # Leer un día completo del histórico puede tomar más que el límite normal de 15 s.
             with connect_db(autocommit=False, read_timeout=600) as connection:
-                if toca_programado(ahora, ultima_programada):
+                if toca_programado(ahora, ultima_programada) or cierres_listos(connection, ahora):
                     print("Cierre diario: comienza el trabajo programado", flush=True)
                     total = _con_bloqueo(connection, lambda: ejecucion_completa(connection, ahora))
                     if total is not None:

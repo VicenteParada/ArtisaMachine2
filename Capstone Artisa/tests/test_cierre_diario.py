@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, timedelta
 import unittest
+from unittest.mock import patch
 
 from common import dias
 from machine_learning import diario_worker
@@ -79,6 +80,10 @@ class FakeCursor:
             self.result = [{"primero": self.db["primero"]}]
         elif "FROM telemetria_api_estado" in query:
             self.result = [self.db["conector"]] if self.db["conector"] else []
+        elif "SELECT fecha FROM reporte_diario_estado" in query:
+            self.result = [{"fecha": k} for k, v in self.db["estados"].items()
+                           if k < params[0] and (v["estado"] != "cerrado"
+                           or v.get("version_calculo", diario_worker.VERSION_CALCULO) < params[1])]
         elif "FROM reporte_diario_estado" in query:
             self.result = [dict(v, fecha=k) for k, v in self.db["estados"].items()]
         elif "MAX(recibido_en)" in query:
@@ -127,7 +132,50 @@ class CloseCycleTests(unittest.TestCase):
     def test_closes_pending_days_and_keeps_today_open(self):
         # 6 de octubre 12:00 Chile (15:00 UTC); datos desde el 4.
         done = self.run_at(datetime(2026, 10, 6, 15))
-        self.assertEqual(done, [("2026-10-04", "cerrado"), ("2026-10-05", "cerrado"), ("2026-10-06", "en_curso")])
+        self.assertEqual(done, [("2026-10-05", "cerrado"), ("2026-10-04", "cerrado"), ("2026-10-06", "en_curso")])
+
+    def test_backlog_prioritizes_recent_days(self):
+        self.db["primero"] = datetime(2026, 4, 1, 15)
+        done = self.run_at(datetime(2026, 10, 6, 15))
+        self.assertEqual([day for day, _ in done[:3]], ["2026-10-05", "2026-10-04", "2026-10-03"])
+
+    def test_syncing_backlog_does_not_recalculate_same_days_in_one_run(self):
+        self.db["primero"] = datetime(2026, 10, 1, 15)
+        self.db["conector"]["estado"] = "sincronizando"
+        revisados, done = set(), []
+        with patch.object(diario_worker, "HOY_CADA", timedelta(0)):
+            for cycle in range(3):
+                self.now = datetime(2026, 10, 6, 15) + timedelta(hours=cycle)
+                done.extend(diario_worker.ciclo(FakeConnection(self.db), self.now,
+                            procesar=self.procesar, revisados=revisados))
+        self.assertEqual(len(done), 5)
+        self.assertEqual(len({day for day, _ in done}), 5)
+        self.assertTrue(all(state == "esperando_datos" for _, state in done))
+
+    def test_closes_provisional_days_when_api_catches_up(self):
+        self.now = datetime(2026, 10, 6, 15)
+        self.db["estados"][date(2026, 10, 5)] = {"estado": "esperando_datos"}
+        self.db["conector"] = {"estado": "sincronizando", "ultimo_exito": self.now}
+        connection = FakeConnection(self.db)
+        self.assertFalse(diario_worker.cierres_listos(connection, self.now))
+        self.db["conector"]["estado"] = "conectado"
+        self.assertTrue(diario_worker.cierres_listos(connection, self.now))
+        self.db["estados"][date(2026, 10, 5)]["estado"] = "cerrado"
+        self.assertFalse(diario_worker.cierres_listos(connection, self.now))
+
+    def test_route_results_are_published_before_entire_backlog_finishes(self):
+        with patch.object(diario_worker, "publicar_rutas") as publish:
+            def batch(connection, now, **kwargs):
+                if batch.first:
+                    batch.first = False
+                    return [(date(2026, 10, day), "cerrado") for day in (5, 4, 3)]
+                self.assertTrue(publish.called)
+                return []
+            batch.first = True
+            with patch.object(diario_worker, "ciclo", side_effect=batch):
+                self.assertEqual(diario_worker.ejecucion_completa(FakeConnection(self.db),
+                                 datetime(2026, 10, 6, 15)), 3)
+            self.assertEqual([call.kwargs["final"] for call in publish.call_args_list], [False, True])
 
     def test_midnight_waits_grace_and_api_confirmation(self):
         self.run_at(datetime(2026, 10, 6, 15))
