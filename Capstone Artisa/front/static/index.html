@@ -154,7 +154,7 @@
           <div><span class="eyebrow">03 / PANEL OPERATIVO</span><h2>Dashboard de rutas y flota</h2></div>
           <span id="dashboard-snapshot" class="status neutral">Preparando indicadores…</span>
         </div>
-        <p class="telemetry-intro">Resumen visual de la telemetría procesada. Los gráficos se actualizan con el mismo bloque de datos del mapa y permiten identificar las zonas con mayor actividad, el uso de las rutas y el estado de la flota.</p>
+        <p class="telemetry-intro">Resumen de las rutas clasificadas y del estado de la flota. Se actualiza junto con el mapa de rutas.</p>
         <div class="dashboard-kpis" aria-label="Indicadores principales del dashboard">
           <article><span>Reportes disponibles</span><strong id="dashboard-reports">—</strong><small>Telemetría conservada en MariaDB</small></article>
           <article><span>Recorridos analizados</span><strong id="dashboard-trips">—</strong><small>Viajes dentro de la ventana procesada</small></article>
@@ -163,7 +163,7 @@
         <div class="dashboard-grid">
           <article class="dashboard-card dashboard-wide">
             <div class="dashboard-card-heading"><div><span class="eyebrow">ACTIVIDAD GEOGRÁFICA</span><h3>Uso de rutas por zona</h3></div><span class="chart-unit">Recorridos</span></div>
-            <p>La actividad de cada ruta se asigna a la zona donde se encuentra el centro de su geometría.</p>
+            <p>Recorridos de cada ruta, contados en la zona donde queda su punto central.</p>
             <div id="dashboard-route-zones" class="dashboard-bars" aria-label="Gráfico de uso de rutas por zona"><span class="chart-empty">Cargando zonas…</span></div>
           </article>
           <article class="dashboard-card dashboard-donut-card">
@@ -185,12 +185,12 @@
             <article><span>ZONA CON MAYOR USO</span><strong id="dashboard-most-route-zone">—</strong><small id="dashboard-most-route-zone-detail">Calculando recorridos…</small></article>
           </aside>
         </div>
-        <div class="dashboard-method"><strong>Cómo se definen las zonas</strong><span id="dashboard-method">Se calculan automáticamente desde las coordenadas del bloque procesado.</span></div>
+        <div class="dashboard-method"><strong>Cómo se definen las zonas</strong><span id="dashboard-method">Se calculan con las rutas clasificadas.</span></div>
       </section>
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
       <section class="panel heatmap-panel">
-        <div class="section-top"><div><span class="eyebrow">04 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas históricas</h2></div><span id="heatmap-source-status" class="status info">Pendiente de procesamiento Machine</span></div>
+        <div class="section-top"><div><span class="eyebrow">MAPA DE RUTAS</span><h2>Rutas y flota</h2></div><span id="heatmap-source-status" class="status info">Cargando…</span></div>
         <p id="heatmap-intro" class="telemetry-intro">Consultando la fuente del mapa y su cobertura histórica…</p>
         <div class="route-filter-panel">
           <span>Mostrar rutas</span>
@@ -215,11 +215,11 @@
         </div>
         <div class="heatmap-layout">
           <article class="map-card">
-            <div class="map-title"><div><strong>Monitoreo de rutas y flota</strong><small id="heatmap-zones">Preparando datos técnicos…</small></div><div class="map-title-actions"><span id="map-last-update">Cargando contrato del mapa…</span><button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button></div></div>
+            <div class="map-title"><div><strong>Monitoreo de rutas y flota</strong><small id="heatmap-zones">Cargando rutas…</small></div><div class="map-title-actions"><span id="map-last-update">Cargando…</span><button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button></div></div>
             <div class="map-view-selector" role="group" aria-label="Vista del mapa">
               <button type="button" data-map-mode="classified" aria-pressed="false" disabled>Rutas clasificadas</button>
               <button type="button" data-map-mode="historical" aria-pressed="true">Mapas de telemetría</button>
-              <span id="map-view-description">GPS histórico de MariaDB; la clasificación de rutas depende de Machine.</span>
+              <span id="map-view-description"></span>
             </div>
             <div class="map-view-stage">
               <div id="explorer-routes" class="explorer-frame-wrap" hidden>
@@ -250,7 +250,7 @@
                   <div><dt>Última posición</dt><dd id="journey-end">—</dd></div>
                   <div><dt>Distancia GPS</dt><dd id="journey-distance">—</dd></div>
                   <div><dt>Tiempo en movimiento</dt><dd id="journey-moving">—</dd></div>
-                  <div><dt>Viajes encadenados</dt><dd id="journey-chains">—</dd></div>
+                  <div><dt>Cortes de señal (más de 5 min)</dt><dd id="journey-gaps">—</dd></div>
                   <div><dt>Ruta histórica</dt><dd id="journey-route">—</dd></div>
                 </dl>
                 <small id="journey-note"></small>
@@ -260,8 +260,8 @@
             <article class="route-highlight most"><span>RUTA MÁS USADA</span><strong id="most-route">Calculando…</strong><small id="most-route-usage">—</small></article>
             <article class="route-highlight least"><span>RUTA MENOS USADA</span><strong id="least-route">Calculando…</strong><small id="least-route-usage">—</small></article>
             <article class="geo-model">
-              <span class="eyebrow">FUENTE DEL MAPA</span>
-              <strong id="geo-model-zones">Contrato procesado</strong>
+              <span class="eyebrow">PERÍODO ANALIZADO</span>
+              <strong id="geo-model-zones">Clasificación vigente</strong>
               <small id="geo-model-detail">Preparando la telemetría.</small>
             </article>
           </aside>

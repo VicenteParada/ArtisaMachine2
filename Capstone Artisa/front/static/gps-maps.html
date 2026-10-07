@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  Mapas de telemetria: los 4 mapas de guias_ml/telemetria_colab.ipynb (calor, rutas por camion,
+  Mapas de telemetria: los 4 mapas del cuaderno de telemetría del equipo (calor, rutas por camion,
   uso de rutas y puntos) calculados en el navegador para el rango de fechas que se elija.
 
   Datos que usa (mismo origen que el front, que hace de proxy a endpoints):
@@ -129,13 +129,6 @@ function redondeoPar(v) {
   return (r - v === 0.5 && r % 2 !== 0) ? r - 1 : r;
 }
 
-function mediana(ordenado) { return cuantil(ordenado, 0.5); }
-function cuantil(ordenado, q) {  // interpolacion lineal, igual que pandas
-  if (!ordenado.length) return NaN;
-  const pos = (ordenado.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
-  return ordenado[lo] + (ordenado[hi] - ordenado[lo]) * (pos - lo);
-}
-
 function estado(texto, error = false) {
   const el = document.getElementById("estado");
   el.textContent = texto;
@@ -257,6 +250,10 @@ function capaFaenas(conMarcadores) {
 // ---------------------------------------------------------------------------
 let datos = null;          // puntos del rango cargado
 let cache = {};            // vista -> promesa de {overlays, leyenda, resumen, encuadre}
+
+// "06-10-2026" o "01-10-2026 al 06-10-2026"
+const fechaCL = iso => iso.split("-").reverse().join("-");
+const periodo = D => D.desde === D.hasta ? fechaCL(D.desde) : `${fechaCL(D.desde)} al ${fechaCL(D.hasta)}`;
 let vistaActual = "calor";
 let mostrado = null;       // lo que esta dibujado ahora en el mapa
 let turno = 0;             // invalida calculos viejos si se cambia de vista o de fechas
@@ -352,7 +349,7 @@ function vistaCalor(D) {
   const encuadre = {limites: limitesDatos(D.lat, D.lon), opciones: {padding: [40, 40], maxZoom: 12}};
   return {
     overlays: {"Densidad GPS": calor, "Faenas": capaFaenas(true)},
-    resumen: `Mapa de calor: ${nf.format(D.n)} reportes de ${D.nPatentes} patentes en ${nf.format(celdas.size)} celdas`,
+    resumen: `${periodo(D)}: ${nf.format(D.n)} reportes GPS de ${D.nPatentes} camiones.`,
     encuadre,
   };
 }
@@ -399,7 +396,7 @@ function vistaRutas(D) {
   overlays["Faenas"] = capaFaenas(false);
   return {
     overlays, controlCerrado: true,
-    resumen: `Rutas: ${nf.format(dibujados)} de ${nf.format(D.n)} reportes · ${camiones.length} patentes`,
+    resumen: `${periodo(D)}: recorridos de ${camiones.length} camiones (${nf.format(dibujados)} reportes dibujados).`,
     encuadre: {limites: limitesDatos(D.lat, D.lon), opciones: {padding: [30, 30]}},
   };
 }
@@ -545,12 +542,9 @@ async function vistaUso(D, progreso) {
     if (dtH > 0 && dtH <= P.MAX_GAP_MIN / 60 && distM > 0 && distM / 1000 <= P.VEL_MAX_KMH * dtH) { I0.push(p); I1.push(i); }
   }
   const n = I0.length;
-  pares.sort((a, b) => a - b);
   const resumen = [
-    `${D.desde} a ${D.hasta}: ${nf.format(D.n)} filas -> ${nf.format(u.length)} reportes reales `
-      + `(${nf.format(D.n - u.length)} copias eliminadas) de ${new Set(Array.from(u, i => D.cam[i])).size} camiones`,
-    `Distancia entre reportes seguidos: mediana ${Math.round(mediana(pares))} m · 90% bajo ${Math.round(cuantil(pares, 0.9))} m`,
-    `Lineas dibujadas: ${nf.format(n)} · no unidas (pausa larga o salto de GPS): ${nf.format(pares.length - n)}`,
+    `${periodo(D)}: ${nf.format(u.length)} reportes GPS de ${new Set(Array.from(u, i => D.cam[i])).size} camiones.`,
+    `Tramos dibujados: ${nf.format(n)} · sin dibujar ${nf.format(pares.length - n)} (más de ${P.MAX_GAP_MIN} min sin reportes o salto de GPS).`,
   ];
   if (!n) return {overlays: {"Faenas": capaFaenas(false)}, resumen: resumen.join("\n")};
 
@@ -589,8 +583,6 @@ async function vistaUso(D, progreso) {
     nivel[l] = mejor;
     xMin = Math.min(xMin, x0[l], x1); yMin = Math.min(yMin, y0[l], y1); yMax = Math.max(yMax, y0[l], y1);
   }
-  const radiosOrdenados = Float64Array.from(radio).sort();
-  resumen.push(`Radio de las lineas: mediana ${Math.round(mediana(radiosOrdenados))} m · maximo ${Math.round(radiosOrdenados[n - 1])} m`);
 
   const dAng = [];
   for (let d = -Math.floor(N_ANG / 2); d <= Math.floor(N_ANG / 2); d++) if (Math.abs(d) * P.ANG_PASO <= P.ANG_MAX) dAng.push(d);
@@ -804,10 +796,8 @@ function vistaPuntos(D) {
     overlays: {"Puntos GPS": new CapaPuntos({lat, lon, cam, dia, seg, niv, colores, dias, camiones: D.camiones}),
                "Faenas": capaFaenas(false)},
     leyenda: leyendaPasos(colores, cortes, `Reportes GPS en un cuadro de ~${lado} m (rojo = pocos, verde = muchos)`),
-    resumen: `${D.desde} a ${D.hasta}: ${nf.format(D.filas)} filas -> ${nf.format(n)} puntos de `
-      + `${new Set(cam).size} camiones (${nf.format(D.filas - D.n)} sin coordenadas validas, `
-      + `${nf.format(D.n - n)} copias exactas de la ETL)\n`
-      + `Concentracion: mediana ${Math.round(mediana(Int32Array.from(concentracion).sort()))} reportes alrededor · maximo ${nf.format(maxConc)}`,
+    resumen: `${periodo(D)}: ${nf.format(n)} puntos GPS de ${new Set(cam).size} camiones. `
+      + `Mayor concentración: ${nf.format(maxConc)} reportes en un cuadro de ~${lado} m.`,
     encuadre: {limites: limitesDatos(lat, lon), opciones: {padding: [30, 30]}},
   };
 }

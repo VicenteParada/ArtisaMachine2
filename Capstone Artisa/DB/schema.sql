@@ -34,17 +34,6 @@ CREATE TABLE IF NOT EXISTS raw_gps_estado (
     ultima_revision DATETIME(6) NOT NULL,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE IF NOT EXISTS modelo_telemetria_estado (
-    id TINYINT NOT NULL,
-    dataset_version CHAR(64) NOT NULL,
-    algoritmo VARCHAR(80) NOT NULL,
-    metricas_json TEXT NOT NULL,
-    zonas_json MEDIUMTEXT NOT NULL,
-    entrenado_en DATETIME(6) NOT NULL,
-    ultima_revision DATETIME(6) NOT NULL,
-    PRIMARY KEY (id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS faenas (
     id INT NOT NULL AUTO_INCREMENT,
     external_id VARCHAR(32) NULL,

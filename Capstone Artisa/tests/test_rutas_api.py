@@ -100,6 +100,22 @@ class JourneyTests(unittest.TestCase):
         self.assertEqual(journey["geometry"]["type"], "MultiLineString")
         self.assertEqual(len(journey["geometry"]["coordinates"]), 2)
         self.assertTrue(all(-34 < lat < -33 for path in journey["geometry"]["coordinates"] for _, lat in path))
+        self.assertEqual(journey["cortes"], 0)  # un salto de GPS no es un corte de señal
+
+    def test_journey_counts_signal_gaps(self):
+        base = datetime(2026, 10, 6, 15)
+        minutos = [0, 1, 2, 20, 21, 50]  # dos cortes: 18 y 29 min sin reportes
+        rows = [{"report_id": f"r{m}", "asset_name": "Lampa-826", "report_date": base.replace(minute=m),
+                 "latitude": -33.4 + m * 0.0001, "longitude": -70.6, "driver_name": None, "driver_last_name": None}
+                for m in minutos]
+        cursor = FakeCursor([
+            ("MAX(report_date)", lambda p: [{"ultimo": base.replace(minute=50)}]),
+            ("FROM telemetria_api WHERE asset_id=%s AND report_date", rows),
+            ("FROM raw_gps WHERE asset_id=%s AND report_date", []),
+        ])
+        journey = rutas_api.truck_journey(cursor, "RJXS30")
+        self.assertEqual(journey["cortes"], 2)
+        self.assertEqual(journey["minutos_sin_senal"], 47.0)
 
 
 if __name__ == "__main__":

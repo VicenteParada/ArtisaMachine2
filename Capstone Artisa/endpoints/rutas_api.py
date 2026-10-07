@@ -229,10 +229,14 @@ def truck_journey(cursor, asset_id):
     complete = len(points) <= JOURNEY_LIMIT
     points = points[-JOURNEY_LIMIT:]
     paths, current, meters, moving_seconds = [], [], 0.0, 0.0
+    gaps, gap_seconds = 0, 0.0  # cortes de señal: más de MAX_GAP_MIN sin reportes
     for prev, row in zip([None] + points[:-1], points):
         coords = [round(row["longitude"], 6), round(row["latitude"], 6)]
         if prev is not None:
             hours = (row["report_date"] - prev["report_date"]).total_seconds() / 3600
+            if hours > MAX_GAP_MIN / 60:
+                gaps += 1
+                gap_seconds += hours * 3600
             d = _distance_m((prev["latitude"], prev["longitude"]), (row["latitude"], row["longitude"]))
             if 0 < hours <= MAX_GAP_MIN / 60 and d / 1000 <= VEL_MAX_KMH * hours:
                 meters += d
@@ -256,6 +260,7 @@ def truck_journey(cursor, asset_id):
         "distancia_km": round(meters / 1000, 2),
         "tiempo_movimiento_minutos": round(moving_seconds / 60, 1),
         "lecturas": len(points), "completo": complete,
+        "cortes": gaps, "minutos_sin_senal": round(gap_seconds / 60, 1),
         "nota": (f"Posiciones GPS del {day:%d-%m-%Y} (hora de Chile). Solo se unen reportes seguidos "
                  f"(hasta {MAX_GAP_MIN} min y {VEL_MAX_KMH} km/h); los saltos de GPS no se dibujan."),
         "geometry": {"type": "MultiLineString", "coordinates": paths},

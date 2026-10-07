@@ -49,16 +49,20 @@ def _utc_now():
 
 
 def primer_dia(cursor):
-    """Primer día a procesar: DIARIO_DESDE (para incluir el histórico) o el primer
-    día con datos de la API de la empresa."""
+    """Primer día a procesar: DIARIO_DESDE si está definido; si no, el primer día con
+    datos, sea del histórico (raw_gps) o de la API de la empresa (telemetria_api)."""
     if DESDE:
         return date.fromisoformat(DESDE)
-    try:
-        cursor.execute("SELECT MIN(report_date) AS primero FROM telemetria_api")
-    except Exception:
-        return None
-    fila = cursor.fetchone() or {}
-    return dias.dia_local(fila["primero"]) if fila.get("primero") else None
+    primeros = []
+    for tabla in ("telemetria_api", "raw_gps"):  # MIN por índice de fecha: inmediato
+        try:
+            cursor.execute(f"SELECT MIN(report_date) AS primero FROM {tabla}")
+        except Exception:
+            continue
+        fila = cursor.fetchone() or {}
+        if fila.get("primero"):
+            primeros.append(fila["primero"])
+    return dias.dia_local(min(primeros)) if primeros else None
 
 
 def estado_conector(cursor):

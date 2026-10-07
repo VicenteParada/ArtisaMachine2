@@ -26,6 +26,10 @@ if historico:
     servicios = ["mongodb", "etl"] + servicios
     perfil = ["--profile", "historico"]
 (ROOT / "respaldos").mkdir(exist_ok=True)
+# El servicio "machine" antiguo (DBSCAN) ya no existe: se quita su contenedor si quedó
+# de una versión anterior. No tiene datos propios ni volúmenes.
+subprocess.run(["docker", "rm", "--force", "artisa-machine"], cwd=ROOT,
+               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 print("Iniciando servicios de Artisa" + (" (con carga del JSON histórico)" if historico else "") + "...", flush=True)
 subprocess.run(
     ["docker", "compose", *perfil, "up", "--detach", "--build", "--wait", "--wait-timeout", "180", *servicios],

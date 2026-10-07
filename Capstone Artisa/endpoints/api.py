@@ -22,7 +22,6 @@ ETL_STALE_SECONDS = max(60, int(os.getenv("TELEMETRY_INTERVAL_SECONDS", "30")) *
 
 
 PENDING_RESPONSES = {
-    "/api/modelo/telemetria": {"status": "pending", "message": "Pendiente de integración Machine"},
     "/api/mapa": {
         "schema_version": 1, "source_mode": "PENDING_MACHINE", "snapshot_date": None,
         "routes": [], "trips": [], "vehicles": [], "readings": [],
@@ -60,9 +59,6 @@ COMPANY_API_STALE_SECONDS = max(90, COMPANY_API_INTERVAL * 3)
 # como último dato conocido.
 RECENT_REPORT_SECONDS = 15 * 60
 TELEMETRY_MAX_LIMIT = 200
-CONNECTION_ERRORS = {"sin_conexion", "error_origen", "respuesta_invalida", "error_interno"}
-
-
 def company_api_state(cursor):
     """Estado de la conexión con la API de la empresa, o None si no está configurada."""
     try:
@@ -234,7 +230,6 @@ def pipeline_state(cursor, detailed=True):
         "etl": ({k: v for k, v in etl.items() if k not in ("id", "rechazos_json")} | {
             "rechazos": json.loads(etl["rechazos_json"])
         }) if etl else None,
-        "modelo_telemetria": None,
         "telemetria_api": api_state,
         "catalogo_vehiculos": vehicle_catalog(cursor),
         "uptime_seconds": round(time.monotonic() - STARTED_AT, 2),

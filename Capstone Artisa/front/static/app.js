@@ -202,9 +202,6 @@ async function api(path, options = {}) {
 }
 
 function syncDatasetView() {
-  if (["#datos-simulados", "#viajes", "#simulador"].includes(window.location.hash)) {
-    history.replaceState(null, "", "#datos-reales");
-  }
   let view = "real";
   if (window.location.hash === "#mapa-calor") view = "heatmap";
   else if (window.location.hash === "#dashboard") view = "dashboard";
@@ -282,6 +279,8 @@ function setMapMode(mode, remember = false, pending = !currentMapData || machine
   // El explorador histórico no usa las listas de rutas y vehículos: ocupa todo el ancho.
   explorer.closest(".heatmap-layout").classList.toggle("is-historical", historical);
   document.querySelector(".heatmap-method").hidden = historical;
+  // Los filtros y capas solo aplican a las rutas clasificadas.
+  for (const panel of document.querySelectorAll(".route-filter-panel, .map-layer-panel")) panel.hidden = historical;
   explorer.hidden = !historical;
   $("heatmap-map").hidden = historical;
   $("classified-map-legend").hidden = historical;
@@ -290,8 +289,8 @@ function setMapMode(mode, remember = false, pending = !currentMapData || machine
     if (button.dataset.mapMode === "classified") button.disabled = pending;
   }
   $("map-view-description").textContent = historical
-    ? "GPS histórico de MariaDB; los filtros de rutas clasificadas estarán disponibles cuando Machine entregue resultados."
-    : "Rutas clasificadas por Machine; los filtros y vehículos corresponden a este mapa.";
+    ? "Reportes GPS guardados, día por día o en un rango de fechas. No cambia la clasificación de rutas."
+    : "Rutas completas clasificadas por uso y última posición de cada camión.";
   for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer], [data-monitor-tab], #monitor-search, #reset-map-view")) {
     control.disabled = pending || historical;
   }
@@ -886,7 +885,10 @@ async function showVehicleJourney(vehicle) {
     $("journey-end").textContent = journey.termino_observado.replace("T", " ");
     $("journey-distance").textContent = format(journey.distancia_km, 1) + " km";
     $("journey-moving").textContent = format(journey.tiempo_movimiento_minutos || 0, 1) + " min estimados";
-    $("journey-chains").textContent = "No determinados";
+    $("journey-gaps").textContent = journey.cortes
+      ? format(journey.cortes) + (journey.cortes === 1 ? " corte" : " cortes") +
+        " · " + format(journey.minutos_sin_senal || 0, 0) + " min sin reportes"
+      : "Sin cortes";
     $("journey-route").textContent = category;
     $("journey-note").textContent = journey.nota +
       (journey.completo ? "" : " Hay más registros ese día; se muestran los últimos 20.000.");
@@ -1007,25 +1009,12 @@ function renderFleetMap(data) {
   applyMapLayerVisibility();
   if (reopenPopup) openTruckPopup(reopenPopup);
 
-  const sourceLabel = data.sourceMode === "HISTORICAL_GPS_CATALOG"
-    ? "Rutas históricas completas"
-    : data.sourceMode === "HISTORICAL_GPS_PILOT"
-      ? "Ensayo histórico parcial"
-      : data.sourceMode === "SIMULATION_PROCESSED"
-        ? "Simulación aislada"
-        : "Muestra GPS reciente";
   const minutes = Math.max(1, Math.round(Number(data.metadata.refresh_seconds || 300) / 60));
-  const isHistorical = data.sourceMode === "HISTORICAL_GPS_CATALOG" ||
-    data.sourceMode === "HISTORICAL_GPS_PILOT";
-  $("map-last-update").textContent = sourceLabel +
-    (isHistorical ? " · catálogo " : " · muestra ") +
-    formatDataDay(data.snapshotDate) +
-    " · posiciones cada " + minutes + " min";
-  $("heatmap-source-status").textContent = sourceLabel;
+  $("map-last-update").textContent = "Clasificación al " + formatDataDay(data.snapshotDate) +
+    " · se actualiza cada " + minutes + " min";
+  $("heatmap-source-status").textContent = "Rutas clasificadas";
   $("heatmap-intro").textContent =
-    (isHistorical
-      ? " Verde, naranja y rojo representan recorridos históricos agrupados. El camión muestra su última lectura disponible."
-      : " Los colores pertenecen a las rutas de esta vista; el camión muestra su última lectura disponible.");
+    "Verde: rutas más usadas · naranja: uso medio · rojo: poco usadas. Cada camión aparece en su última posición recibida.";
 
   const visibleBounds = L.latLngBounds([]);
   for (const route of data.routes) {
@@ -1038,7 +1027,7 @@ function renderFleetMap(data) {
       }
     }
   }
-  if (data.sourceMode !== "HISTORICAL_GPS_PILOT" || !visibleBounds.isValid()) {
+  {
     for (const vehicle of data.vehicles) {
       const latitude = Number(vehicle.latitude);
       const longitude = Number(vehicle.longitude);
@@ -1117,13 +1106,8 @@ function renderHeatmap(data) {
   $("heatmap-trips").textContent = format(summary.trip_count || 0);
   $("heatmap-vehicles").textContent = format(summary.vehicle_count || 0);
   $("heatmap-routes").textContent = format(summary.route_count || 0);
-  $("heatmap-zones").textContent = data.metadata.processed_report_count
-    ? format(data.metadata.processed_report_count) + " de " +
-      format(data.metadata.source_report_count) + " reportes históricos procesados · " +
-      format(summary.vehicle_count || 0) + " vehículos con posición en la ventana"
-    : format(summary.window_report_count || 0) + " registros recientes · " +
-      format(summary.reading_count || 0) + " posiciones únicas · " +
-      format(summary.available_report_count || 0) + " reportes conservados";
+  $("heatmap-zones").textContent = format(summary.trip_count || 0) + " viajes en " +
+    format(summary.route_count || 0) + " rutas · " + format(data.vehicles.length) + " camiones con posición";
 
   const most = data.ranking.mostUsed;
   const least = data.ranking.leastUsed;
@@ -1138,7 +1122,10 @@ function renderHeatmap(data) {
     metadata.data_retention
   ].filter(Boolean).join(" ");
 
-  $("geo-model-zones").textContent = "Contrato procesado v" + (data.schemaVersion || "1");
+  const window_ = metadata.window || {};
+  $("geo-model-zones").textContent = window_.desde
+    ? "Viajes del " + formatDataDay(window_.desde) + " al " + formatDataDay(window_.hasta)
+    : "Clasificación vigente";
   $("geo-model-detail").textContent = metadata.road_matching ||
     "Rutas calculadas con la telemetría disponible.";
   renderFleetMap(data);
@@ -1362,8 +1349,8 @@ function renderDashboard(data, metrics = {}) {
     ? `${format(mostRouteZone.value)} recorridos en ${format(mostRouteZone.count)} rutas`
     : "No hay rutas suficientes en el bloque.";
   $("dashboard-method").textContent =
-    "Las coordenadas se dividen en cinco zonas relativas al centro del área observada: norte, centro, sur, oeste y este. " +
-    "Cada ruta conserva una sola clasificación y se cuenta en la zona de su centro geométrico. Actualización automática con el mismo bloque del mapa.";
+    "Cada ruta se cuenta en una zona (norte, centro, sur, oeste o este) según dónde queda su punto central " +
+    "respecto del centro de todas las rutas. Se actualiza junto con el mapa.";
 }
 function formatAge(seconds) {
   const value = Math.max(0, Math.round(seconds));

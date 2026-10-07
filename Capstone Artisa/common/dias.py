@@ -6,7 +6,7 @@ que el corte de medianoche no pierde ni duplica reportes. Los cambios de horario
 de verano (días de 23 o 25 horas) quedan resueltos por zoneinfo.
 """
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 import os
 from zoneinfo import ZoneInfo
 
@@ -37,7 +37,3 @@ def dia_local(utc_naive):
 
 def hoy(utc_now=None):
     return dia_local(utc_now or datetime.now(timezone.utc).replace(tzinfo=None))
-
-
-def parse_dia(texto):
-    return date.fromisoformat(texto)

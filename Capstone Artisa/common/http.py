@@ -15,12 +15,6 @@ def serialize(value):
     raise TypeError(type(value).__name__)
 
 
-class RequestError(Exception):
-    def __init__(self, status, message):
-        self.status = status
-        self.message = message
-
-
 class JsonHandler(BaseHTTPRequestHandler):
     # Los chequeos de salud de Docker (cada 5 s) no se registran si responden bien;
     # así los registros muestran solo lo útil. Los errores siempre se registran.
@@ -45,26 +39,6 @@ class JsonHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
-
-    def read_json(self):
-        if self.headers.get("Transfer-Encoding"):
-            raise RequestError(400, "Transfer-Encoding no soportado")
-        if self.headers.get_content_type() != "application/json":
-            raise RequestError(415, "Usa Content-Type: application/json")
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0:
-                raise ValueError
-            if length > 4096:
-                raise RequestError(413, "El cuerpo supera 4096 bytes")
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
-            if not isinstance(payload, dict):
-                raise ValueError
-            return payload
-        except (ValueError, UnicodeError):
-            raise RequestError(400, "Envia un objeto JSON valido") from None
-        except TimeoutError:
-            raise RequestError(408, "Tiempo de espera agotado") from None
 
 
 def serve(handler, name, port=8000):

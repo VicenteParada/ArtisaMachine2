@@ -5,6 +5,7 @@
 !DB/
 !DB/schema.sql
 !DB/vehiculos_data.sql
+!DB/faenas_data.sql
 !ETLs/
 !ETLs/**
 !telemetria_api/

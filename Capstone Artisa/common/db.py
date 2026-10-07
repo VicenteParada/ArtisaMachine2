@@ -31,10 +31,10 @@ def _statements(path):
 
 def initialize_db():
     # El esquema contiene únicamente CREATE TABLE IF NOT EXISTS, sin borrar datos.
-    # El catálogo de vehículos solo agrega filas faltantes (INSERT IGNORE / NOT EXISTS).
+    # Los catálogos de vehículos y faenas solo agregan filas faltantes (INSERT IGNORE).
     db_dir = Path(__file__).resolve().parent.parent / "DB"
     with connect_db() as connection, connection.cursor() as cursor:
-        for name in ("schema.sql", "vehiculos_data.sql"):
+        for name in ("schema.sql", "vehiculos_data.sql", "faenas_data.sql"):
             path = db_dir / name
             if path.exists():
                 for statement in _statements(path):

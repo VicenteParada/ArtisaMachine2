@@ -1,4 +1,4 @@
-"""Cierre diario: el mismo trabajo de guias_ml/telemetria_colab.ipynb, día por día.
+"""Cierre diario: el mismo trabajo del cuaderno de telemetría del equipo (Colab), día por día.
 
 Fuente: telemetria_api (API de la empresa, en vivo) + raw_gps (histórico), solo
 camiones según el catálogo. Mismas reglas que el cuaderno:

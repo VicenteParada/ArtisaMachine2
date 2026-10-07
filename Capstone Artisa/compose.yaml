@@ -135,24 +135,6 @@ services:
     restart: unless-stopped
     init: true
 
-  machine:
-    build:
-      context: .
-      dockerfile: machine_learning/Dockerfile
-    container_name: artisa-machine
-    environment:
-      <<: *db-environment
-      TELEMETRY_MODEL_MAX_ROWS: ${TELEMETRY_MODEL_MAX_ROWS:-20000}
-      TELEMETRY_MODEL_RADIUS_KM: ${TELEMETRY_MODEL_RADIUS_KM:-0.8}
-      TELEMETRY_MODEL_MIN_SAMPLES: ${TELEMETRY_MODEL_MIN_SAMPLES:-5}
-      TELEMETRY_MODEL_INTERVAL_SECONDS: ${TELEMETRY_MODEL_INTERVAL_SECONDS:-30}
-    depends_on:
-      mariadb:
-        condition: service_healthy
-    healthcheck: *python-health
-    restart: unless-stopped
-    init: true
-
   endpoints:
     build:
       context: .
