@@ -9,6 +9,7 @@
     python3 scripts/artisa.py respaldo                respaldo de MariaDB ahora (carpeta respaldos/)
     python3 scripts/artisa.py logs [servicio]         registros en vivo (Ctrl+C para salir)
     python3 scripts/artisa.py contrasena              cambia la contraseña de la web
+    python3 scripts/artisa.py acceso-red si|no        permite (o no) entrar desde otros equipos de la red
     python3 scripts/artisa.py detener                 detiene los servicios SIN borrar datos
 
 Ningún comando borra datos ni volúmenes.
@@ -101,8 +102,16 @@ def logs(args):
 def contrasena(_):
     code = run(sys.executable, str(ROOT / "scripts" / "setup_auth.py"), "--rotate", "--manual", check=False)
     if code == 0:
-        compose("up", "--detach", "--wait", "auth")
+        compose("up", "--detach", "--force-recreate", "--wait", "auth")
     return code
+
+
+def acceso_red(args):
+    bind = "0.0.0.0" if args.opcion == "si" else "127.0.0.1"
+    set_env({"ARTISA_BIND": bind})
+    compose("up", "--detach", "--force-recreate", "--wait", "nginx")
+    print("Acceso desde la red activado." if bind == "0.0.0.0" else "Acceso solo desde este equipo.")
+    return 0
 
 
 def detener(_):
@@ -121,6 +130,9 @@ def main():
     for name, fn in (("estado", estado), ("cierre", cierre), ("rutas", rutas), ("respaldo", respaldo),
                      ("contrasena", contrasena), ("detener", detener)):
         sub.add_parser(name).set_defaults(fn=fn)
+    red = sub.add_parser("acceso-red")
+    red.add_argument("opcion", choices=["si", "no"])
+    red.set_defaults(fn=acceso_red)
     log = sub.add_parser("logs")
     log.add_argument("servicio", nargs="?")
     log.set_defaults(fn=logs)
