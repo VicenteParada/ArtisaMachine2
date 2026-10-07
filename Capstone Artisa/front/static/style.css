@@ -415,3 +415,16 @@
 @media(max-width:690px){.history-panel .history-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .no-ignition .col-ignition{display:none}
 .leaflet-tooltip.route-endpoint{font-size:11px;font-weight:700;color:#0b1f1a;background:#fff;border:2px solid #0b1f1a;border-radius:6px;padding:3px 7px;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+
+/* Mapa de rutas: más alto para que la ficha del camión no quede tapada */
+#heatmap-map.leaflet-container{height:700px;min-height:700px}
+@media(max-width:690px){#heatmap-map.leaflet-container{height:520px;min-height:520px}}
+/* Explorador histórico a todo el ancho, sin listas de rutas y vehículos */
+.heatmap-layout.is-historical{grid-template-columns:minmax(0,1fr)}
+.heatmap-layout.is-historical .route-insights{display:none}
+.heatmap-method[hidden]{display:none}
+/* Capas del mapa clasificado */
+.faena-pin{width:14px;height:14px;border-radius:50%;background:#2e7d32;border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.5)}
+.map-overlay-note{top:auto;bottom:28px}
+.map-overlay-note[hidden]{display:none}
+#heatmap-map .leaflet-control-layers{font-size:11px;line-height:1.5}

@@ -268,6 +268,10 @@ let selectedRouteId = null;
 let selectedVehicleId = null;
 const truckMarkers = new Map();
 const routeMapLayers = new Map();
+let openPopupVehicleId = null;   // ficha de camión abierta (se reabre tras actualizar el mapa)
+let faenaLayer = null;
+let densityLayer = null;
+let densityDay = null;
 
 function setMapMode(mode, remember = false, pending = !currentMapData || machinePending(currentMapData)) {
   activeMapMode = mode === "classified" && !pending ? "classified" : "historical";
@@ -275,6 +279,9 @@ function setMapMode(mode, remember = false, pending = !currentMapData || machine
   const historical = activeMapMode === "historical";
   const explorer = $("explorer-routes");
   explorer.closest(".map-card").classList.toggle("showing-history", historical);
+  // El explorador histórico no usa las listas de rutas y vehículos: ocupa todo el ancho.
+  explorer.closest(".heatmap-layout").classList.toggle("is-historical", historical);
+  document.querySelector(".heatmap-method").hidden = historical;
   explorer.hidden = !historical;
   $("heatmap-map").hidden = historical;
   $("classified-map-legend").hidden = historical;
@@ -578,10 +585,33 @@ function initializeFleetMap() {
   container.replaceChildren();
   fleetMap = L.map(container, {preferCanvas: true, zoomControl: true})
     .setView([-33.45, -70.66], 5);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  const streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors"
   }).addTo(fleetMap);
+  const satellite = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    {maxNativeZoom: 18, maxZoom: 19,
+     attribution: "Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, GIS User Community"});
+  fleetMap.createPane("satelliteLabelsPane").style.zIndex = "350";
+  fleetMap.getPane("satelliteLabelsPane").style.pointerEvents = "none";
+  const satelliteLabels = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    {pane: "satelliteLabelsPane", maxNativeZoom: 18, maxZoom: 19,
+     attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, OpenStreetMap contributors"});
+  satellite.on("add", () => satelliteLabels.addTo(fleetMap));
+  satellite.on("remove", () => satelliteLabels.remove());
+  fleetMap.createPane("faenaPane").style.zIndex = "405";
+  faenaLayer = L.featureGroup();
+  densityLayer = L.layerGroup();
+  faenaLayer.on("add", loadFaenas);
+  densityLayer.on("add", loadDensity);
+  L.control.layers(
+    {"Calles y lugares (OpenStreetMap)": streets, "Satélite (Esri)": satellite},
+    {"Faenas": faenaLayer, "Densidad GPS (día anterior)": densityLayer},
+    {collapsed: false, position: "topright"}
+  ).addTo(fleetMap);
+  faenaLayer.addTo(fleetMap);
   const pendingNote = document.createElement("div");
   pendingNote.id = "map-pending-note";
   pendingNote.className = "map-pending-note";
@@ -602,6 +632,82 @@ function initializeFleetMap() {
   selectedRouteLayer = L.featureGroup().addTo(fleetMap);
   $("journey-hide").addEventListener("click", resetMapSelection);
   applyMapLayerVisibility();
+}
+
+function mapOverlayNote(text) {
+  let note = $("map-overlay-note");
+  if (!note) {
+    note = document.createElement("div");
+    note.id = "map-overlay-note";
+    note.className = "map-pending-note map-overlay-note";
+    $("heatmap-map").append(note);
+  }
+  note.textContent = text || "";
+  note.hidden = !text;
+}
+
+async function loadFaenas() {
+  if (faenaLayer.getLayers().length) return;
+  try {
+    const payload = await api("/api/faenas", {timeoutMs: 30000});
+    for (const faena of payload.faenas || []) {
+      if (!faena.geocerca) continue;
+      const geometry = typeof faena.geocerca === "string" ? JSON.parse(faena.geocerca) : faena.geocerca;
+      const area = faena.area_m2 != null ? format(Math.round(faena.area_m2)) + " m²" : "sin dato";
+      const polygon = L.geoJSON(geometry, {
+        pane: "faenaPane", style: {color: "#2e7d32", weight: 2, fillOpacity: 0.18}
+      }).bindTooltip(textTooltip(faena.nombre), {sticky: true}).addTo(faenaLayer);
+      L.marker(polygon.getBounds().getCenter(), {
+        icon: L.divIcon({className: "", html: '<div class="faena-pin"></div>', iconSize: [14, 14]})
+      }).bindTooltip(textTooltip(faena.nombre + " · área " + area)).addTo(faenaLayer);
+    }
+  } catch (error) {
+    mapOverlayNote("No se pudieron cargar las faenas: " + error.message);
+  }
+}
+
+function previousChileDay() {
+  const today = new Intl.DateTimeFormat("en-CA", {timeZone: HISTORY_ZONE}).format(new Date());
+  return new Date(Date.parse(today) - 86400000).toISOString().slice(0, 10);
+}
+
+async function loadDensity() {
+  const day = previousChileDay();
+  if (densityDay === day && densityLayer.getLayers().length) return;
+  if (!L.heatLayer) {
+    mapOverlayNote("No se pudo cargar la librería del mapa de calor.");
+    return;
+  }
+  densityLayer.clearLayers();
+  densityDay = day;
+  mapOverlayNote("Cargando densidad GPS del " + day.split("-").reverse().join("-") + "…");
+  try {
+    const gps = await api(`/api/gps?desde=${day}&hasta=${day}`, {timeoutMs: 120000});
+    if (densityDay !== day) return;
+    // Celdas de ~100 m (lat/lon x 1e5 -> 1e3), igual que el explorador de telemetría.
+    const cells = new Map();
+    for (let i = 0; i < gps.lat.length; i++) {
+      const key = Math.round(gps.lat[i] / 100) + "," + Math.round(gps.lon[i] / 100);
+      cells.set(key, (cells.get(key) || 0) + 1);
+    }
+    let max = 1;
+    for (const value of cells.values()) max = Math.max(max, value);
+    const points = [];
+    for (const [key, value] of cells) {
+      const [lat, lon] = key.split(",").map(Number);
+      points.push([lat / 1000, lon / 1000, Math.log1p(value) / Math.log1p(max)]);
+    }
+    L.heatLayer(points, {radius: 8, blur: 10, minOpacity: 0.3, max: 1, maxZoom: 18}).addTo(densityLayer);
+    mapOverlayNote(points.length ? "" : "Sin reportes GPS el " + day + ".");
+  } catch (error) {
+    densityDay = null;
+    mapOverlayNote("No se pudo cargar la densidad GPS: " + error.message);
+  }
+}
+
+function openTruckPopup(vehicleId) {
+  const marker = truckMarkers.get(vehicleId);
+  if (marker && fleetMap && truckLayer.hasLayer(marker)) marker.openPopup();
 }
 
 function fitPendingMap(force = false) {
@@ -719,10 +825,17 @@ function selectVehicle(vehicle, focus = true) {
     `${Number(vehicle.latitude).toFixed(6)}, ${Number(vehicle.longitude).toFixed(6)} · ${formatUtc(vehicle.timestamp)}`
   );
   if (focus) {
-    fleetMap.setView(marker.getLatLng(), Math.max(fleetMap.getZoom(), 15));
-    // Al elegir un vehículo se muestra directamente su recorrido del día.
+    // Al elegir un vehículo se muestra directamente su recorrido del día; el mapa se encuadra
+    // una sola vez, cuando el recorrido llega, y deja espacio arriba para su ficha.
     showVehicleJourney(vehicle);
   }
+}
+
+function focusTruck(vehicleId) {
+  const marker = truckMarkers.get(vehicleId);
+  if (!marker || !fleetMap) return;
+  fleetMap.setView(marker.getLatLng(), Math.max(fleetMap.getZoom(), 11));
+  openTruckPopup(vehicleId);
 }
 
 function hideJourney() {
@@ -736,6 +849,7 @@ function hideJourney() {
 
 async function showVehicleJourney(vehicle) {
   if (!currentMapData || machinePending(currentMapData)) {
+    focusTruck(vehicle.vehicle_id);
     $("journey-detail").hidden = false;
     $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
     return;
@@ -783,15 +897,22 @@ async function showVehicleJourney(vehicle) {
       "Última posición: " + journey.termino_observado.replace("T", " ") +
         " · " + category
     );
-    // La ficha del camión queda abierta mientras se dibuja su recorrido.
+    // Se deja espacio arriba para que la ficha del camión no quede tapada.
     if (journeyLayer.getLayers().length && journeyLayer.getBounds().isValid()) {
-      fleetMap.fitBounds(journeyLayer.getBounds(), {padding: [45, 45], maxZoom: 13});
+      fleetMap.once("moveend", () => openTruckPopup(vehicle.vehicle_id));
+      fleetMap.fitBounds(journeyLayer.getBounds(), {
+        paddingTopLeft: [45, 250], paddingBottomRight: [45, 45], maxZoom: 13
+      });
+      window.setTimeout(() => openTruckPopup(vehicle.vehicle_id), 700);
+    } else {
+      focusTruck(vehicle.vehicle_id);
     }
   } catch (error) {
     if (request === journeyRequest) {
       activeJourneyVehicleId = null;
       applyMapLayerVisibility();
       $("journey-note").textContent = "No se pudo consultar el recorrido: " + error.message;
+      focusTruck(vehicle.vehicle_id);
     }
   }
 }
@@ -822,6 +943,7 @@ function renderFleetMap(data) {
   initializeFleetMap();
   if (!fleetMap) return;
   currentMapData = data;
+  const reopenPopup = openPopupVehicleId;
   for (const level of ROUTE_DRAW_ORDER) routeLayers[level].clearLayers();
   truckLayer.clearLayers();
   truckMarkers.clear();
@@ -874,11 +996,16 @@ function renderFleetMap(data) {
       pane: "truckPane", icon: truckIcon(vehicle), zIndexOffset: 1000
     }).bindPopup(truckPopup(vehicle));
     marker.on("click", () => selectVehicle(vehicle, true));
+    marker.on("popupopen", () => { openPopupVehicleId = vehicle.vehicle_id; });
+    marker.on("popupclose", () => {
+      if (openPopupVehicleId === vehicle.vehicle_id) openPopupVehicleId = null;
+    });
     marker.addTo(truckLayer);
     truckMarkers.set(vehicle.vehicle_id, marker);
   }
   renderMonitorLists();
   applyMapLayerVisibility();
+  if (reopenPopup) openTruckPopup(reopenPopup);
 
   const sourceLabel = data.sourceMode === "HISTORICAL_GPS_CATALOG"
     ? "Rutas históricas completas"
