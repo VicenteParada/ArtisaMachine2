@@ -80,8 +80,8 @@
 <header class="barra">
   <h1>Mapas de telemetría</h1>
   <span class="etiqueta">DATOS HISTÓRICOS</span>
-  <label class="campo">Día histórico <input type="date" id="desde" value="2026-09-08"></label>
-  <input type="hidden" id="hasta" value="2026-09-08">
+  <label class="campo">Día histórico <input type="date" id="desde"></label>
+  <input type="hidden" id="hasta">
   <button id="cargar">Cargar</button>
   <nav class="pestanas" role="tablist">
     <button role="tab" data-vista="calor" aria-selected="true">Mapa de calor</button>
@@ -847,6 +847,11 @@ async function mostrarVista(nombre) {
 const campoDesde = document.getElementById("desde"), campoHasta = document.getElementById("hasta");
 const sumarDias = (iso, n) => new Date(Date.parse(iso) + n * 86400000).toISOString().slice(0, 10);
 const diasRango = () => Math.round((Date.parse(campoHasta.value) - Date.parse(campoDesde.value)) / 86400000) + 1;
+
+// Por defecto se muestra el día anterior completo (00:00 a 00:00 hora de Chile).
+const hoyChile = new Intl.DateTimeFormat("en-CA", {timeZone: "America/Santiago"}).format(new Date());
+campoDesde.max = hoyChile;
+campoDesde.value = campoHasta.value = sumarDias(hoyChile, -1);
 
 function actualizarRango() {
   if (!campoDesde.value) return;
