@@ -662,12 +662,7 @@ function truckPopup(vehicle) {
   date.textContent = "Última posición: " + formatUtc(vehicle.timestamp);
   const plate = document.createElement("small");
   plate.textContent = "Patente: " + (vehiclePlate(vehicle) || "No informada");
-  const viewJourney = document.createElement("button");
-  viewJourney.type = "button";
-  viewJourney.className = "popup-journey-button";
-  viewJourney.textContent = "Ver recorrido completo";
-  viewJourney.addEventListener("click", () => showVehicleJourney(vehicle));
-  wrapper.append(title, identifier, state, details, plate, driver, route, date, viewJourney);
+  wrapper.append(title, identifier, state, details, plate, driver, route, date);
   return wrapper;
 }
 
@@ -788,7 +783,7 @@ async function showVehicleJourney(vehicle) {
       "Última posición: " + journey.termino_observado.replace("T", " ") +
         " · " + category
     );
-    fleetMap.closePopup();
+    // La ficha del camión queda abierta mientras se dibuja su recorrido.
     if (journeyLayer.getLayers().length && journeyLayer.getBounds().isValid()) {
       fleetMap.fitBounds(journeyLayer.getBounds(), {padding: [45, 45], maxZoom: 13});
     }

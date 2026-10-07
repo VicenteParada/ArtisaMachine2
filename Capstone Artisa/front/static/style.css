@@ -369,19 +369,6 @@
 
 .journey-detail{display:grid;gap:10px;margin-top:10px;padding:13px;border:1px solid #bed1d4;border-radius:8px;background:#f3f9fb;color:#17353d}.journey-detail[hidden]{display:none}.journey-detail>strong{font-size:11px}.journey-detail dl{display:grid;gap:7px;margin:0}.journey-detail dl>div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #dce8ea;padding-bottom:5px}.journey-detail dt{color:#637a7e;font-size:9px}.journey-detail dd{margin:0;text-align:right;font-size:9px;font-weight:700}.journey-detail small{font-size:8px;line-height:1.45;color:#667f82}.journey-detail button{border:1px solid #aac4cb;border-radius:5px;padding:7px;background:#fff;color:#205069;font-size:9px;font-weight:700;cursor:pointer}
 
-.popup-journey-button {
-  margin-top: .6rem;
-  padding: .45rem .7rem;
-  border: 0;
-  border-radius: .55rem;
-  color: #fff;
-  background: #1964b5;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 700;
-}
-.popup-journey-button:hover { background: #124b89; }
-
 /* Conservar el detalle y los nombres del mapa base sin desaturar sus teselas. */
 #heatmap-map .leaflet-tile-pane { filter: none; }
 .vehicle-list-icon .truck-glyph { width:19px; height:19px; }
