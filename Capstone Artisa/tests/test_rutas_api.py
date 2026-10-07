@@ -56,6 +56,7 @@ class MapContractTests(unittest.TestCase):
                                                       "longitude": -70.6, "speed": 40.0, "heading": 5,
                                                       "ignition": 1, "event_name": "Reporte"}]),
             ("FROM raw_gps WHERE asset_id", []),
+            ("driver_name IS NOT NULL", [{"driver_name": "JULIO", "driver_last_name": "PÉREZ"}]),
             ("validos", [{"n": 500}]),
         ])
         payload = rutas_api.classified_map(cursor)
@@ -68,6 +69,9 @@ class MapContractTests(unittest.TestCase):
         self.assertFalse(route["map_matching"])
         vehicle = payload["vehicles"][0]
         self.assertEqual((vehicle["vehicle_id"], vehicle["route_id"], vehicle["fuente"]), ("RJXS30", "R-ABC123", "api"))
+        # El último reporte no trae conductor: se usa el último informado en las 24 h previas.
+        self.assertEqual((vehicle["patente"], vehicle["driver_name"], vehicle["driver_last_name"]),
+                         ("RJXS30", "JULIO", "PÉREZ"))
         self.assertEqual(payload["ranking"]["most_used"]["route_id"], "R-ABC123")
         self.assertIn("6.7", payload["metadata"]["classification"])
 

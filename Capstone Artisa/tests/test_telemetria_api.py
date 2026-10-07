@@ -208,7 +208,8 @@ class NormalizationTests(unittest.TestCase):
         value = {"report_id": "R1", "asset_id": "RJXS30", "asset_name": "Lampa-826",
                  "report_date_origen": "2026-10-06 09:00:00.000000", "latitude": -33.4,
                  "longitude": -70.6, "speed": 50, "heading": 10, "ignition": "1",
-                 "event_name": "Reporte", "ahora_origen": "2026-10-06 09:01:00.000000"}
+                 "event_name": "Reporte", "ahora_origen": "2026-10-06 09:01:00.000000",
+                 "driver_name": "JULIO", "driver_last_name": "SOTO", "driver_document_number": "1-9"}
         value.update(changes)
         return value
 
@@ -219,6 +220,8 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(rejected, [])
         self.assertEqual(accepted[0]["report_date"], datetime(2026, 10, 6, 12, 0))
         self.assertIs(accepted[0]["ignition"], True)
+        self.assertEqual((accepted[0]["driver_name"], accepted[0]["driver_last_name"]), ("JULIO", "SOTO"))
+        self.assertNotIn("driver_document_number", accepted[0])
 
     def test_bad_positions_are_rejected_but_keep_their_key(self):
         accepted, rejected = transform_rows([

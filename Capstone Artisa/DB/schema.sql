@@ -230,3 +230,7 @@ CREATE TABLE IF NOT EXISTS rutas_vehiculo (
 -- total detenido por camión: base para revisar tiempos de carga.
 ALTER TABLE reporte_diario ADD COLUMN IF NOT EXISTS paradas INT UNSIGNED NOT NULL DEFAULT 0;
 ALTER TABLE reporte_diario ADD COLUMN IF NOT EXISTS minutos_detenido DOUBLE NOT NULL DEFAULT 0;
+
+-- Conductor informado por la API de la empresa (el RUT no se guarda).
+ALTER TABLE telemetria_api ADD COLUMN IF NOT EXISTS driver_name VARCHAR(64) NULL;
+ALTER TABLE telemetria_api ADD COLUMN IF NOT EXISTS driver_last_name VARCHAR(128) NULL;

@@ -4,7 +4,7 @@ Leen la versión activa de la clasificación de rutas (machine_learning/rutas_jo
 Si todavía no hay una, devuelven None y la API mantiene la respuesta "pendiente".
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import math
 
@@ -46,8 +46,32 @@ def _iso(value):
     return value.isoformat() + "Z" if isinstance(value, datetime) else value
 
 
+DRIVER_LOOKBACK = timedelta(hours=24)
+
+
+def last_driver(cursor, asset_id, until):
+    """Último conductor informado para el camión en las 24 h previas a `until`.
+    Algunos reportes llegan sin conductor; se usa el más reciente que sí lo trae."""
+    for table in ("telemetria_api", "raw_gps"):
+        try:
+            cursor.execute(
+                f"""SELECT driver_name, driver_last_name FROM {table}
+                    WHERE asset_id=%s AND report_date <= %s AND report_date >= %s
+                      AND driver_name IS NOT NULL AND driver_name <> ''
+                    ORDER BY report_date DESC LIMIT 1""",
+                (asset_id, until, until - DRIVER_LOOKBACK),
+            )
+        except pymysql.err.ProgrammingError:
+            continue
+        row = cursor.fetchone()
+        if row:
+            return row
+    return {}
+
+
 def latest_positions(cursor, route_by_asset):
-    """Última posición conocida de cada camión (API en vivo o histórico, la más reciente)."""
+    """Última posición conocida de cada camión (API en vivo o histórico, la más reciente),
+    con su patente (asset_id) y el último conductor informado."""
     cursor.execute(
         """SELECT v.asset_id FROM vehiculos AS v INNER JOIN tipos_vehiculo AS t ON t.id_tipo = v.id_tipo
            WHERE t.nombre = 'camion' ORDER BY v.asset_id"""
@@ -56,8 +80,8 @@ def latest_positions(cursor, route_by_asset):
     vehicles = []
     for asset_id in trucks:
         best = None
-        for table, extra in (("telemetria_api", "speed, heading, ignition, event_name"),
-                             ("raw_gps", "speed, NULL AS heading, NULL AS ignition, event_name")):
+        for table, extra in (("telemetria_api", "speed, heading, ignition, event_name, driver_name, driver_last_name"),
+                             ("raw_gps", "speed, NULL AS heading, NULL AS ignition, event_name, driver_name, driver_last_name")):
             try:
                 cursor.execute(
                     f"""SELECT asset_id, asset_name, report_date, latitude, longitude, {extra}
@@ -70,8 +94,11 @@ def latest_positions(cursor, route_by_asset):
             if row and (best is None or row["report_date"] > best["report_date"]):
                 best = dict(row, fuente="api" if table == "telemetria_api" else "historico")
         if best:
+            driver = best if best.get("driver_name") else last_driver(cursor, asset_id, best["report_date"])
             vehicles.append({
                 "vehicle_id": asset_id, "vehicle_name": best["asset_name"] or asset_id,
+                "patente": asset_id,
+                "driver_name": driver.get("driver_name"), "driver_last_name": driver.get("driver_last_name"),
                 "latitude": best["latitude"], "longitude": best["longitude"],
                 "timestamp": _iso(best["report_date"]), "speed_kmh": best["speed"],
                 "heading": best["heading"], "ignition": best["ignition"], "event": best["event_name"],
@@ -179,7 +206,7 @@ def truck_journey(cursor, asset_id):
     day = dias.dia_local(latest)
     start, end = dias.limites_utc(day)
     rows = []
-    for table, extra in (("telemetria_api", "NULL AS driver_name, NULL AS driver_last_name"),
+    for table, extra in (("telemetria_api", "driver_name, driver_last_name"),
                          ("raw_gps", "driver_name, driver_last_name")):
         try:
             cursor.execute(

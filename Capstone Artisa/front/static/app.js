@@ -1340,7 +1340,8 @@ function renderTelemetry(summary, dataset, state) {
     const vehicle = document.createElement("td");
     vehicle.textContent = report.asset_name || "Vehículo sin nombre";
     const assetId = document.createElement("small");
-    assetId.textContent = report.asset_id || "Sin asset_id";
+    const driver = [report.driver_name, report.driver_last_name].filter(hasValue).join(" ");
+    assetId.textContent = `Patente ${report.asset_id || "—"} · ${driver ? "Conductor: " + driver : "Conductor no informado"}`;
     vehicle.append(assetId);
     tr.append(vehicle);
 

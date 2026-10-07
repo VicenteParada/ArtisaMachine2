@@ -103,6 +103,7 @@ def save_page(accepted, rejected, raw_count, new_cursor, advertencia, estado="co
         row["report_id"], row["asset_id"], row["asset_name"], row["report_date"],
         row["latitude"], row["longitude"], row["speed"], row["heading"],
         None if row["ignition"] is None else int(row["ignition"]), row["event_name"],
+        row.get("driver_name"), row.get("driver_last_name"),
     ) for row in accepted]
     with connect_db(autocommit=False) as connection, connection.cursor() as cursor:
         cursor.execute("SELECT cursor_fecha, cursor_id, rechazos_json FROM telemetria_api_estado WHERE id=1 FOR UPDATE")
@@ -112,8 +113,8 @@ def save_page(accepted, rejected, raw_count, new_cursor, advertencia, estado="co
             inserted = cursor.executemany(
                 """INSERT IGNORE INTO telemetria_api
                 (report_id,asset_id,asset_name,report_date,latitude,longitude,speed,heading,
-                 ignition,event_name,recibido_en)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(6))""",
+                 ignition,event_name,driver_name,driver_last_name,recibido_en)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(6))""",
                 values,
             ) or 0
             registrar_nuevos(cursor, {row["asset_id"]: row["asset_name"] for row in accepted})

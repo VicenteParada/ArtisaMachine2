@@ -136,7 +136,7 @@ def latest_telemetry(cursor, limit):
         condition = "WHERE report_date < %s" if before else ""
         cursor.execute(
             f"""SELECT report_id, asset_id, asset_name, report_date, latitude, longitude, speed,
-                      heading, ignition, event_name,
+                      heading, ignition, event_name, driver_name, driver_last_name,
                       TIMESTAMPDIFF(SECOND, report_date, UTC_TIMESTAMP(6)) AS edad_segundos
                FROM telemetria_api FORCE INDEX (idx_telemetria_api_fecha_recibido) {condition}
                ORDER BY report_date DESC LIMIT %s""",
