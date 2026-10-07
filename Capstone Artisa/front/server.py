@@ -69,7 +69,8 @@ class Handler(BaseHTTPRequestHandler):
                 request.add_header("Content-Type", self.headers.get("Content-Type", "application/octet-stream"))
             try:
                 # Un día GPS puede tardar más que las respuestas pequeñas del panel.
-                timeout = 120 if urlsplit(self.path).path == "/api/gps" else 20
+                slow = {"/api/gps": 120, "/api/mapa": 90, "/api/dashboard": 60}
+                timeout = slow.get(urlsplit(self.path).path, 20)
                 upstream = urlopen(request, timeout=timeout)
             except HTTPError as error:
                 upstream = error

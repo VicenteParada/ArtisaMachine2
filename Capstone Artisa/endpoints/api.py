@@ -4,6 +4,7 @@ import json
 import os
 import re
 import socket
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlsplit
@@ -416,6 +417,37 @@ def history_request(path, query):
     return truck_day, (asset_id, dia, limit, after)
 
 
+# --- Caché de /api/mapa y /api/dashboard -----------------------------------------
+# El mapa recorre la última posición de cada camión: con MariaDB ocupada (cierre diario)
+# puede tardar. Se calcula como máximo una vez por minuto, una sola consulta a la vez, y si
+# un cálculo falla se entrega el último resultado bueno.
+CACHE_SECONDS = 60
+_cache = {}
+_cache_lock = threading.Lock()
+
+
+def cached_result(path):
+    now = time.monotonic()
+    entry = _cache.get(path)
+    if entry and now - entry[0] < CACHE_SECONDS:
+        return entry[1]
+    with _cache_lock:
+        entry = _cache.get(path)
+        if entry and time.monotonic() - entry[0] < CACHE_SECONDS:
+            return entry[1]  # otra petición lo calculó mientras esperábamos
+        try:
+            with connect_db(read_timeout=80) as connection, connection.cursor() as cursor:
+                build = rutas_api.classified_map if path == "/api/mapa" else rutas_api.classified_dashboard
+                result = build(cursor)
+        except pymysql.MySQLError as error:
+            print(f"Endpoints: no se pudo calcular {path} ({type(error).__name__}); se usa el último resultado",
+                  flush=True)
+            return entry[1] if entry else None
+        result = result if result is not None else PENDING_RESPONSES[path]
+        _cache[path] = (time.monotonic(), result)
+        return result
+
+
 class Handler(JsonHandler):
     def database_error(self, error):
         self.log_error("Error de MariaDB: %s", type(error).__name__)
@@ -444,13 +476,11 @@ class Handler(JsonHandler):
             return
         if path in ("/api/mapa", "/api/dashboard"):
             # Resultados de Machine si existe una clasificación activa; si no, "pendiente".
-            try:
-                with connect_db(read_timeout=60) as connection, connection.cursor() as cursor:
-                    result = (rutas_api.classified_map if path == "/api/mapa" else rutas_api.classified_dashboard)(cursor)
-            except pymysql.MySQLError as error:
-                self.database_error(error)
+            result = cached_result(path)
+            if result is None:
+                self.respond(503, {"status": "error", "error": "No se pudo calcular el mapa; se reintentará."})
                 return
-            self.respond(200, result if result is not None else PENDING_RESPONSES[path])
+            self.respond(200, result)
             return
         journey = JOURNEY_RE.fullmatch(path)
         if journey:

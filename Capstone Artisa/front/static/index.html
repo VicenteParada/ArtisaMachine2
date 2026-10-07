@@ -75,13 +75,13 @@
       </div>
     </header>
     <section class="heading">
-      <div><div class="eyebrow">INTELIGENCIA PARA EL TRANSPORTE</div><h1>De los datos a la decisión.</h1><p>Sistema base operativo, telemetría pendiente de API empresa y análisis Machine pendiente de integración.</p></div>
+      <div><div class="eyebrow">INTELIGENCIA PARA EL TRANSPORTE</div><h1>De los datos a la decisión.</h1><p id="overview-summary">Consultando el estado del sistema…</p></div>
       <button class="button secondary" id="refresh" type="button">↻ Actualizar</button>
     </section>
     <div id="notice" class="notice" role="status" hidden></div>
     <section id="flujo" class="panel pipeline">
       <div class="section-top"><div><span class="eyebrow">01 / ARQUITECTURA</span><h2>Todo conectado.</h2></div><span id="system-status" class="status neutral">Consultando servicios…</span></div>
-      <div class="origin"><span>ORIGEN GPS</span><strong>MongoDB · raw_gps</strong><span>→</span><small>Lotes controlados e idempotentes</small></div>
+      <div class="origin"><span>ORIGEN GPS</span><strong id="origin-source">API de la empresa</strong><span>→</span><small>Lotes controlados e idempotentes</small></div>
       <div class="flow">
         <article class="node etl" data-service="etl"><span class="node-number">01</span><h3>ETL</h3><p>Extrae, limpia y carga</p><span class="node-status">Consultando…</span></article>
         <div class="flow-arrow arrow-a" aria-hidden="true">→</div>
@@ -91,8 +91,8 @@
         <div class="flow-arrow arrow-c" aria-hidden="true">→</div>
         <article class="node front" data-service="front"><span class="node-number">05</span><h3>Frontend</h3><p>Visualiza y explora</p><span class="node-status">Consultando…</span></article>
         <div class="machine-link">↕ <span>Lee datos · guarda resultados</span></div>
-        <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Identifica zonas GPS</p><span class="node-status">Consultando…</span></article>
-        <div class="flow-explanation"><strong>Servicios conectados.</strong><p>El ETL carga la telemetría en MariaDB. El modelo analiza zonas GPS y los endpoints entregan los resultados a esta pantalla.</p></div>
+        <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Cierre diario y clasificación de rutas</p><span class="node-status">Consultando…</span></article>
+        <div class="flow-explanation"><strong>Servicios conectados.</strong><p>El ETL trae la telemetría de la API de la empresa a MariaDB. Machine cierra cada día y clasifica las rutas, y los endpoints entregan los resultados a esta pantalla.</p></div>
       </div>
       <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada 5 min</span></div>
     </section>

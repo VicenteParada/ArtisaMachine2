@@ -193,11 +193,18 @@ async function api(path, options = {}) {
   const version = sessionVersion;
   const controller = new AbortController();
   pendingRequests.add(controller);
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs || 20000);
   try {
     const headers = new Headers(options.headers || {});
     headers.set("Authorization", `Bearer ${currentToken}`);
-    const response = await fetch(path, {...options, headers, signal: controller.signal});
+    const {timeoutMs, ...fetchOptions} = options;
+    let response;
+    try {
+      response = await fetch(path, {...fetchOptions, headers, signal: controller.signal});
+    } catch (error) {
+      if (error.name === "AbortError") throw new Error("El servidor tardó demasiado en responder.");
+      throw error;
+    }
     if (version !== sessionVersion) throw new Error("Petición de una sesión anterior cancelada.");
     // Nginx puede devolver HTML en un 401: comprobarlo antes de leer JSON.
     if (response.status === 401) {
@@ -1387,14 +1394,29 @@ function renderTelemetry(summary, dataset, state) {
   }
 }
 
+function updateOverviewTexts(state) {
+  const components = state.componentes || {};
+  const company = components.telemetria_api === "ok";
+  const machine = components.machine === "ok";
+  $("overview-summary").textContent = [
+    company ? "Telemetría en vivo desde la API de la empresa" : "Telemetría pendiente de la API de la empresa",
+    machine ? "rutas clasificadas por Machine" : "Machine preparando la primera clasificación de rutas",
+    "cierre diario a las 00:00 (hora de Chile)"
+  ].join(" · ") + ".";
+  $("origin-source").textContent = state.etl_historico === false ? "API de la empresa" : "API de la empresa + histórico MongoDB";
+}
+
 function renderState(state) {
   const components = state.componentes || {};
-  // Una etapa "pending" (p. ej. API de la empresa aún sin configurar) no cuenta como falla.
-  const required = ["etl", "mariadb", "endpoints", "front"].filter((name) => components[name] !== "pending");
+  // Las 5 etapas del diagrama. Una etapa "pending" (p. ej. Machine sin su primera
+  // clasificación) no está operativa, pero tampoco es una falla.
+  const services = ["etl", "mariadb", "machine", "endpoints", "front"];
   const nodes = [...document.querySelectorAll("[data-service]")];
-  const count = required.filter((name) => components[name] === "ok").length;
-  $("system-status").textContent = format(count) + " de " + format(required.length) + " servicios operativos";
-  $("system-status").className = "status " + (required.every((name) => components[name] === "ok") ? "" : "warning");
+  const count = services.filter((name) => components[name] === "ok").length;
+  const failing = services.some((name) => !["ok", "pending"].includes(components[name]));
+  $("system-status").textContent = format(count) + " de " + format(services.length) + " servicios operativos";
+  $("system-status").className = "status " + (failing ? "warning" : count === services.length ? "" : "neutral");
+  updateOverviewTexts(state);
   for (const node of nodes) {
     const okay = components[node.dataset.service] === "ok";
     const label = node.querySelector(".node-status");
@@ -1419,32 +1441,46 @@ async function refresh() {
   if (refreshing) return;
   const version = sessionVersion;
   refreshing = true; $("refresh").disabled = true;
+  // Cada sección se actualiza por separado: si una consulta falla o tarda, las demás
+  // siguen funcionando y esa sección conserva lo último que mostró.
+  const [stateResult, summaryResult, datasetResult, mapResult, dashboardResult] = await Promise.allSettled([
+    api("/api/estado"),
+    api("/api/telemetria/resumen"),
+    api("/api/telemetria?limite=30"),
+    api("/api/mapa", {timeoutMs: 90000}),
+    api("/api/dashboard", {timeoutMs: 60000})
+  ]);
   try {
-    const [state, telemetrySummary, telemetryDataset, mapPayload, dashboard] = await Promise.all([
-      api("/api/estado"),
-      api("/api/telemetria/resumen"),
-      api("/api/telemetria?limite=30"),
-      api("/api/mapa"),
-      api("/api/dashboard")
-    ]);
     if (version !== sessionVersion || !token()) return;
-    if (!window.ArtisaMapData) throw new Error("No se cargó el adaptador del mapa.");
-    const mapData = window.ArtisaMapData.adaptMapPayload(mapPayload);
-    renderState(state);
-    renderTelemetry(telemetrySummary, telemetryDataset, state);
-    refreshHistory();
-    renderHeatmap(mapData);
-    renderDashboard(mapData, dashboard);
-    $("notice").hidden = state.status === "ok";
-    $("notice").textContent = "Una etapa no ha respondido recientemente o está preparando datos nuevos. Los datos mostrados corresponden a la última carga disponible.";
-  } catch (error) {
-    if (version !== sessionVersion || !token()) return;
-    $("notice").hidden = false;
-    $("notice").textContent = "No se pudo actualizar el sistema. Los datos que ya ves pueden estar desactualizados. " + error.message;
-    $("system-status").textContent = "Sin conexión con el sistema";
-    $("system-status").className = "status warning";
-    for (const label of document.querySelectorAll(".node-status")) {
-      label.textContent = "Estado sin verificar"; label.className = "node-status bad";
+    const problems = [];
+    const state = stateResult.status === "fulfilled" ? stateResult.value : null;
+    if (state) renderState(state); else problems.push("estado del sistema");
+    if (summaryResult.status === "fulfilled" && datasetResult.status === "fulfilled") {
+      renderTelemetry(summaryResult.value, datasetResult.value, state || {});
+      refreshHistory();
+    } else problems.push("reportes");
+    if (mapResult.status === "fulfilled" && window.ArtisaMapData) {
+      const mapData = window.ArtisaMapData.adaptMapPayload(mapResult.value);
+      renderHeatmap(mapData);
+      if (dashboardResult.status === "fulfilled") renderDashboard(mapData, dashboardResult.value);
+      else problems.push("dashboard");
+    } else problems.push("mapa y dashboard");
+
+    if (!state) {
+      $("system-status").textContent = "Sin conexión con el sistema";
+      $("system-status").className = "status warning";
+      for (const label of document.querySelectorAll(".node-status")) {
+        label.textContent = "Estado sin verificar"; label.className = "node-status bad";
+      }
+    }
+    if (problems.length) {
+      const reason = [stateResult, summaryResult, datasetResult, mapResult, dashboardResult]
+        .find((result) => result.status === "rejected")?.reason?.message || "";
+      $("notice").hidden = false;
+      $("notice").textContent = `No se pudo actualizar: ${problems.join(", ")}. Se muestran los últimos datos disponibles y se reintentará automáticamente. ${reason}`;
+    } else {
+      $("notice").hidden = state.status === "ok";
+      $("notice").textContent = "Una etapa no ha respondido recientemente o está preparando datos nuevos. Los datos mostrados corresponden a la última carga disponible.";
     }
   } finally {
     if (version === sessionVersion) { refreshing = false; $("refresh").disabled = false; }
