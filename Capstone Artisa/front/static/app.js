@@ -558,7 +558,7 @@ function setMonitorTab(tab) {
 function applyRouteFilter() {
   if (!fleetMap) return;
   for (const level of ROUTE_DRAW_ORDER) {
-    const visible = mapLayerVisibility.routes && !activeJourneyVehicleId &&
+    const visible = mapLayerVisibility.routes && !activeJourneyVehicleId && !selectedRouteId &&
       (activeRouteFilter === "ALL" || activeRouteFilter === level);
     setLayerVisibility(routeLayers[level], visible);
   }
@@ -573,8 +573,13 @@ function applyRouteFilter() {
 
 function applyMapLayerVisibility() {
   if (!fleetMap) return;
+  // Con un vehículo seleccionado se ve solo él y su recorrido; con una ruta seleccionada,
+  // solo esa ruta y los camiones cuyo último viaje fue por ella. "Vista general" muestra todo.
+  const routeOf = new Map((currentMapData ? currentMapData.vehicles : []).map((v) => [v.vehicle_id, v.route_id]));
   for (const [vehicleId, marker] of truckMarkers) {
-    const visible = !activeJourneyVehicleId || vehicleId === activeJourneyVehicleId;
+    const visible = activeJourneyVehicleId
+      ? vehicleId === activeJourneyVehicleId
+      : selectedRouteId ? routeOf.get(vehicleId) === selectedRouteId : true;
     if (visible && !truckLayer.hasLayer(marker)) truckLayer.addLayer(marker);
     if (!visible && truckLayer.hasLayer(marker)) truckLayer.removeLayer(marker);
   }
@@ -737,7 +742,8 @@ function selectVehicle(vehicle, focus = true) {
   );
   if (focus) {
     fleetMap.setView(marker.getLatLng(), Math.max(fleetMap.getZoom(), 15));
-    marker.openPopup();
+    // Al elegir un vehículo se muestra directamente su recorrido del día.
+    showVehicleJourney(vehicle);
   }
 }
 
@@ -818,6 +824,7 @@ function resetMapSelection() {
   for (const record of routeMapLayers.values()) record.line.closeTooltip();
   selectedRouteId = null;
   selectedVehicleId = null;
+  applyMapLayerVisibility();
   refreshSelectionStyles();
   setSelectionDetail(
     "SELECCIÓN DEL MAPA",
@@ -888,7 +895,7 @@ function renderFleetMap(data) {
     const marker = L.marker([vehicle.latitude, vehicle.longitude], {
       pane: "truckPane", icon: truckIcon(vehicle), zIndexOffset: 1000
     }).bindPopup(truckPopup(vehicle));
-    marker.on("click", () => selectVehicle(vehicle, false));
+    marker.on("click", () => selectVehicle(vehicle, true));
     marker.addTo(truckLayer);
     truckMarkers.set(vehicle.vehicle_id, marker);
   }
@@ -1732,6 +1739,7 @@ for (const button of document.querySelectorAll("[data-map-mode]")) {
 for (const button of document.querySelectorAll("[data-route-filter]")) {
   button.addEventListener("click", () => {
     activeRouteFilter = button.dataset.routeFilter || "ALL";
+    if (selectedRouteId) resetMapSelection();
     applyRouteFilter();
   });
 }
