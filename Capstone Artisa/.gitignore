@@ -9,3 +9,5 @@ __pycache__/
 sorpresa-para-antito.html
 exports/
 .venv/
+# Respaldos de MariaDB (contienen datos de la empresa)
+respaldos/

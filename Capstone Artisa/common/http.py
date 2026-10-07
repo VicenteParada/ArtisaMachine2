@@ -22,6 +22,16 @@ class RequestError(Exception):
 
 
 class JsonHandler(BaseHTTPRequestHandler):
+    # Los chequeos de salud de Docker (cada 5 s) no se registran si responden bien;
+    # así los registros muestran solo lo útil. Los errores siempre se registran.
+    QUIET_PATHS = {"/health", "/"}
+
+    def log_request(self, code="-", size="-"):
+        path = getattr(self, "path", "").split("?", 1)[0]
+        if path in self.QUIET_PATHS and isinstance(code, int) and 200 <= code < 300:
+            return
+        super().log_request(code, size)
+
     def setup(self):
         super().setup()
         self.connection.settimeout(5)

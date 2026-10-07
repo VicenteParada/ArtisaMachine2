@@ -13,7 +13,6 @@ import pymysql
 from common import dias
 from common.db import connect_db
 from common.http import JsonHandler, serve
-from common.vehiculos import sql_es_camion
 from endpoints import rutas_api
 
 
@@ -187,33 +186,47 @@ def vehicle_catalog(cursor):
     return {row["tipo"]: row["vehiculos"] for row in cursor.fetchall()}
 
 
+ETL_HISTORICO = os.getenv("ETL_HISTORICO", "1").strip() != "0"
+
+
 def pipeline_state(cursor, detailed=True):
-    etl_columns = "*" if detailed else "estado"
-    cursor.execute(
-        f"SELECT {etl_columns}, TIMESTAMPDIFF(SECOND,ultima_revision,UTC_TIMESTAMP()) AS hace_segundos "
-        "FROM raw_gps_estado WHERE id=1"
-    )
-    etl = cursor.fetchone()
-    etl_ready = bool(etl and etl["estado"] != "error"
-                     and etl["hace_segundos"] is not None and 0 <= etl["hace_segundos"] < ETL_STALE_SECONDS)
+    """Estado de las etapas. Con ETL_HISTORICO=0 (instalación de la empresa, sin MongoDB ni
+    el JSON histórico) la etapa ETL es el conector de la API de la empresa."""
+    etl = None
+    if ETL_HISTORICO:
+        etl_columns = "*" if detailed else "estado"
+        cursor.execute(
+            f"SELECT {etl_columns}, TIMESTAMPDIFF(SECOND,ultima_revision,UTC_TIMESTAMP()) AS hace_segundos "
+            "FROM raw_gps_estado WHERE id=1"
+        )
+        etl = cursor.fetchone()
+    api_state = company_api_state(cursor)
+    if api_state is None:
+        api_component = "pending"
+    elif api_state["conexion"] in ("en_vivo", "sin_reportes_recientes", "sincronizando"):
+        api_component = "ok"
+    else:
+        api_component = "unavailable"
+    if ETL_HISTORICO:
+        etl_ready = bool(etl and etl["estado"] != "error"
+                         and etl["hace_segundos"] is not None and 0 <= etl["hace_segundos"] < ETL_STALE_SECONDS)
+        etl_component = "ok" if etl_ready else "unavailable"
+    else:
+        etl_component = api_component
+    healthy = etl_component in ("ok", "pending") and api_component != "unavailable"
     state = {
-        "status": "ok" if etl_ready else "degraded",
+        "status": "ok" if healthy else "degraded",
         "servicio": "artisa-api",
         "database": {"engine": "MariaDB", "status": "ok"},
         "componentes": {
-            "etl": "ok" if etl_ready else "unavailable",
+            "etl": etl_component,
             "mariadb": "ok",
-            "machine": "pending",
+            "machine": "ok" if rutas_api.active_version(cursor) else "pending",
             "endpoints": "ok",
-            "telemetria_api": "pending",
+            "telemetria_api": api_component,
         },
+        "etl_historico": ETL_HISTORICO,
     }
-    if rutas_api.active_version(cursor):
-        state["componentes"]["machine"] = "ok"
-    api_state = company_api_state(cursor)
-    if api_state is not None:
-        live = api_state["conexion"] in ("en_vivo", "sin_reportes_recientes", "sincronizando")
-        state["componentes"]["telemetria_api"] = "ok" if live else "unavailable"
     if not detailed:
         return {key: state[key] for key in ("status", "servicio", "componentes")}
     state.update({
@@ -250,24 +263,26 @@ def gps_range(query):
 def gps_points(cursor, desde, hasta):
     """Reportes GPS de camiones del rango, en columnas compactas para el mapa del navegador.
     Las camionetas, furgones y demás vehículos siguen guardados en raw_gps, pero no se muestran.
-    t = segundos desde 'desde' 00:00 (hora tal cual viene en report_date); lat/lon x 1e5."""
+    Los días van de 00:00 a 00:00 hora de Chile, igual que el cierre diario.
+    t = segundos transcurridos desde las 00:00 (Chile) de 'desde'; lat/lon x 1e5."""
     # Leer por el índice de fecha evita ordenar millones de filas en MariaDB.
     # La misma deduplicación y el orden por camión/hora se completan en memoria.
     # Histórico (raw_gps) + telemetría en vivo (telemetria_api): los mapas del cuaderno
     # se calculan igual sobre ambos. Un reporte presente en las dos tablas se cuenta una vez.
+    inicio, fin = dias.limites_utc(desde)[0], dias.limites_utc(hasta)[1]
     rows = []
     for table in ("raw_gps", "telemetria_api"):
         try:
             cursor.execute(
                 f"""SELECT asset_id, report_date, latitude, longitude
-                   FROM {table}
-                   WHERE report_date >= %s AND report_date < %s AND {sql_es_camion("asset_id")}""",
-                (desde, hasta + timedelta(days=1)),
+                   FROM {table} WHERE report_date >= %s AND report_date < %s""",
+                (inicio, fin),
             )
         except pymysql.err.ProgrammingError:
             continue  # telemetria_api aún no creada
         rows.extend(cursor.fetchall())
-    inicio = datetime(desde.year, desde.month, desde.day)
+    trucks = truck_ids(cursor)  # filtrar en Python evita un plan lento con IN (subconsulta)
+    rows = [row for row in rows if row["asset_id"] in trucks]
     indices, cam, t, lat, lon = {}, [], [], [], []
     rows.sort(key=lambda row: (row["asset_id"], row["report_date"]))
     seen = set()
@@ -280,7 +295,7 @@ def gps_points(cursor, desde, hasta):
         t.append(round((row["report_date"] - inicio).total_seconds()))
         lat.append(round(row["latitude"] * 1e5))
         lon.append(round(row["longitude"] * 1e5))
-    return {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "camiones": list(indices),
+    return {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "zona": dias.ZONA, "camiones": list(indices),
             "cam": cam, "t": t, "lat": lat, "lon": lon}
 
 

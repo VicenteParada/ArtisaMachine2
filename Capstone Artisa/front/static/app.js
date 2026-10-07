@@ -1388,7 +1388,8 @@ function renderTelemetry(summary, dataset, state) {
 
 function renderState(state) {
   const components = state.componentes || {};
-  const required = ["etl", "mariadb", "endpoints", "front"];
+  // Una etapa "pending" (p. ej. API de la empresa aún sin configurar) no cuenta como falla.
+  const required = ["etl", "mariadb", "endpoints", "front"].filter((name) => components[name] !== "pending");
   const nodes = [...document.querySelectorAll("[data-service]")];
   const count = required.filter((name) => components[name] === "ok").length;
   $("system-status").textContent = format(count) + " de " + format(required.length) + " servicios operativos";
@@ -1396,12 +1397,16 @@ function renderState(state) {
   for (const node of nodes) {
     const okay = components[node.dataset.service] === "ok";
     const label = node.querySelector(".node-status");
-    const pending = node.dataset.service === "machine" && !okay;
-    label.textContent = okay ? "En funcionamiento" : pending ? "Pendiente de integración" : "Sin respuesta reciente";
+    const pending = components[node.dataset.service] === "pending";
+    const pendingText = node.dataset.service === "machine" ? "Esperando la primera clasificación" : "Pendiente de configuración";
+    label.textContent = okay ? "En funcionamiento" : pending ? pendingText : "Sin respuesta reciente";
     label.className = "node-status " + (okay ? "ok" : pending ? "neutral" : "bad");
   }
   const etl = state.etl;
-  if (etl) {
+  const company = state.telemetria_api;
+  if (company && company.ultimo_exito) {
+    $("last-sync").textContent = "Último dato de la API: " + formatLocal(company.ultimo_exito) + " (hora de Chile)";
+  } else if (etl) {
     $("last-sync").textContent = etl.ultima_carga
       ? "Última carga: " + formatUtc(etl.ultima_carga)
       : "ETL aún sin primera carga";

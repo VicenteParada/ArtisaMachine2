@@ -14,9 +14,12 @@ x-python-health: &python-health
   retries: 12
 
 services:
+  # MongoDB y el ETL del JSON histórico son opcionales (perfil "historico"): solo se usan
+  # para cargar el archivo histórico. La instalación de la empresa trabaja solo con la API.
   mongodb:
     image: mongo:8.0
     container_name: artisa-mongodb
+    profiles: ["historico"]
     volumes:
       - mongodb_data:/data/db
     healthcheck:
@@ -52,6 +55,7 @@ services:
       context: .
       dockerfile: ETLs/Dockerfile
     container_name: artisa-etl
+    profiles: ["historico"]
     environment:
       <<: *db-environment
       MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
@@ -159,6 +163,7 @@ services:
       TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
       COMPANY_API_INTERVAL_SECONDS: ${COMPANY_API_INTERVAL_SECONDS:-30}
       ARTISA_TIMEZONE: ${ARTISA_TIMEZONE:-America/Santiago}
+      ETL_HISTORICO: ${ETL_HISTORICO:-1}
     depends_on:
       mariadb:
         condition: service_healthy
@@ -215,8 +220,10 @@ services:
       context: .
       dockerfile: nginx/Dockerfile
     container_name: artisa-nginx
+    # ARTISA_BIND=0.0.0.0 permite entrar desde otros equipos de la red (servidor de la
+    # empresa). Por defecto solo desde este equipo.
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${ARTISA_BIND:-127.0.0.1}:${ARTISA_PORT:-8080}:8080"
     depends_on:
       auth:
         condition: service_healthy
@@ -228,6 +235,26 @@ services:
       timeout: 5s
       start_period: 5s
       retries: 12
+    restart: unless-stopped
+    init: true
+
+  # Respaldo diario de MariaDB en la carpeta respaldos/ (scripts/respaldo.sh).
+  respaldo:
+    image: mariadb:11.8
+    container_name: artisa-respaldo
+    entrypoint: ["bash", "/scripts/respaldo.sh"]
+    environment:
+      TZ: ${ARTISA_TIMEZONE:-America/Santiago}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:?Ejecuta python3 scripts/prepare_env.py}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Ejecuta python3 scripts/prepare_env.py}
+      RESPALDO_HORA: ${RESPALDO_HORA:-03:00}
+      RESPALDO_DIAS: ${RESPALDO_DIAS:-3}
+    volumes:
+      - ./scripts/respaldo.sh:/scripts/respaldo.sh:ro
+      - ./respaldos:/respaldos
+    depends_on:
+      mariadb:
+        condition: service_healthy
     restart: unless-stopped
     init: true
 

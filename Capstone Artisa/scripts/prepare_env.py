@@ -38,6 +38,14 @@ else:
             "MONGO_TIMEOUT_SECONDS=10\n"
             "TELEMETRY_BATCH_SIZE=2000\n"
             "TELEMETRY_INTERVAL_SECONDS=30\n"
+            "# Instalación nueva: solo API de la empresa (sin MongoDB ni JSON histórico).\n"
+            "ETL_HISTORICO=0\n"
+            "COMPANY_API_URL=\n"
+            "COMPANY_API_START=\n"
+            "DIARIO_HORA=00:30\n"
+            "RESPALDO_HORA=03:00\n"
+            "RESPALDO_DIAS=3\n"
+            "ARTISA_BIND=127.0.0.1\n"
         )
     print("Archivo .env creado con credenciales locales aleatorias.")
 
