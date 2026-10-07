@@ -5,7 +5,7 @@ import os
 import re
 import socket
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlsplit
 
 import pymysql
@@ -156,13 +156,20 @@ def telemetry_summary(cursor):
     api_state = company_api_state(cursor)
     if api_state is None:
         return TELEMETRY_SUMMARY_PENDING
-    cursor.execute("SELECT MIN(report_date) AS desde, MAX(report_date) AS hasta FROM telemetria_api")
-    span = cursor.fetchone() or {}
     cursor.execute(
-        """SELECT DISTINCT asset_id FROM telemetria_api FORCE INDEX (idx_telemetria_api_fecha_recibido)
-           WHERE report_date >= UTC_TIMESTAMP(6) - INTERVAL 24 HOUR"""
+        """SELECT MIN(report_date) AS desde, MAX(report_date) AS hasta
+           FROM telemetria_api FORCE INDEX (idx_telemetria_api_fecha_recibido)"""
     )
-    vehicles = len({row["asset_id"] for row in cursor.fetchall()} & truck_ids(cursor))
+    span = cursor.fetchone() or {}
+    # Último reporte de cada vehículo con el índice (asset_id, report_date): MariaDB lee una
+    # entrada por vehículo (loose index scan) en vez de recorrer 24 h de reportes.
+    cursor.execute(
+        """SELECT asset_id, MAX(report_date) AS ultimo FROM telemetria_api
+           FORCE INDEX (idx_telemetria_api_asset_fecha) GROUP BY asset_id"""
+    )
+    limite = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
+    activos = {row["asset_id"] for row in cursor.fetchall() if row["ultimo"] and row["ultimo"] >= limite}
+    vehicles = len(activos & truck_ids(cursor))
     return {"status": "ok", "source": "company_api", "conexion": api_state,
             "reportes": api_state["guardados"], "vehiculos": vehicles,
             "vehiculos_ventana_horas": 24, "desde": span.get("desde"), "hasta": span.get("hasta")}
