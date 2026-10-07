@@ -13,7 +13,7 @@ Método (todo no supervisado y auditable):
 4. Geometría: el viaje medoide (el más parecido a todos los demás de la ruta). Es un
    recorrido real observado: no se promedian ni inventan líneas.
 5. Nivel de uso: por cantidad de recorridos, con percentiles sobre todas las rutas:
-   HIGH (más usadas) sobre la mediana y LOW (menos usadas) hasta la mediana. Los umbrales
+   HIGH sobre el percentil 66,7, LOW hasta el 33,3, MEDIUM entre ambos. Los umbrales
    quedan guardados en cada versión.
 
 Los viajes sin origen o destino conocido (cortados por falta de reportes) no se
@@ -37,7 +37,7 @@ MAX_GRUPO = 2500
 MIN_RECORRIDOS = 5   # una ruta de la operación se repite...
 MIN_VEHICULOS = 2    # ...y la usa más de un camión
 METROS_POR_GRADO = 111_000
-NIVELES = {"HIGH": ("Más usada", "#14532d"), "LOW": ("Menos usada", "#dc2626")}
+NIVELES = {"HIGH": ("Más usada", "#14532d"), "MEDIUM": ("Uso medio", "#f97316"), "LOW": ("Poco usada", "#dc2626")}
 
 
 @dataclass
@@ -180,17 +180,21 @@ def _route_id(lugar_a, lugar_b, medoide):
 
 
 def clasificar_niveles(conteos):
-    """Dos niveles según la mediana de recorridos por ruta: HIGH (más usadas) sobre la
-    mediana y LOW (menos usadas) hasta la mediana. Si todas tienen el mismo uso, todas HIGH."""
+    """Umbrales por percentiles sobre la cantidad de recorridos de cada ruta."""
     valores = np.array(conteos, dtype=float)
     if len(valores) == 0:
-        return [], {"mediana": None}
-    mediana = float(np.median(valores))
-    niveles = ["HIGH" if c > mediana else "LOW" for c in valores]
-    if "HIGH" not in niveles:
-        niveles = ["HIGH"] * len(valores)
-    return niveles, {"mediana": mediana,
-                     "regla": "HIGH > mediana, LOW <= mediana (recorridos por ruta)"}
+        return {}, {"percentil_33": None, "percentil_67": None}
+    p33, p67 = np.percentile(valores, [100 / 3, 200 / 3])
+    if valores.max() == valores.min():
+        niveles = ["MEDIUM"] * len(valores)
+    else:
+        niveles = ["HIGH" if c > p67 else "LOW" if c <= p33 else "MEDIUM" for c in valores]
+        if "MEDIUM" not in niveles and p33 == p67:
+            # Empate en el corte (p. ej. muchas rutas con el mismo conteo): el empate queda
+            # como uso medio, así no desaparece el nivel intermedio.
+            niveles = ["HIGH" if c > p67 else "MEDIUM" if c == p67 else "LOW" for c in valores]
+    return niveles, {"percentil_33": float(p33), "percentil_67": float(p67),
+                     "regla": "HIGH > p67, LOW <= p33, MEDIUM entre ambos (recorridos por ruta)"}
 
 
 def nombres_unicos(lugares):

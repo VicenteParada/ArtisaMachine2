@@ -167,7 +167,7 @@
           </article>
           <article class="dashboard-card dashboard-donut-card">
             <div class="dashboard-card-heading"><div><span class="eyebrow">CLASIFICACIÓN</span><h3>Nivel de uso de rutas</h3></div></div>
-            <p>Verde para las rutas más usadas y rojo para las menos usadas.</p>
+            <p>Verde para las más usadas, naranja para uso medio y rojo para poco uso.</p>
             <div id="dashboard-route-levels" class="dashboard-donut-wrap" aria-label="Distribución de rutas por nivel de uso"></div>
           </article>
           <article class="dashboard-card dashboard-donut-card">
@@ -214,7 +214,8 @@
           <div class="route-filter-actions" role="group" aria-label="Filtrar rutas por nivel de uso">
             <button type="button" class="route-filter is-active" data-route-filter="ALL" aria-pressed="true">Todas <b data-route-count="ALL">—</b></button>
             <button type="button" class="route-filter" data-route-filter="HIGH" aria-pressed="false">Más usadas <b data-route-count="HIGH">—</b></button>
-            <button type="button" class="route-filter" data-route-filter="LOW" aria-pressed="false">Menos usadas <b data-route-count="LOW">—</b></button>
+            <button type="button" class="route-filter" data-route-filter="MEDIUM" aria-pressed="false">Uso medio <b data-route-count="MEDIUM">—</b></button>
+            <button type="button" class="route-filter" data-route-filter="LOW" aria-pressed="false">Poco usadas <b data-route-count="LOW">—</b></button>
           </div>
         </div>
         <div class="map-layer-panel">
@@ -243,7 +244,7 @@
               </div>
               <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa interactivo de rutas históricas y camiones" hidden><span class="map-loading">Cargando cartografía…</span></div>
             </div>
-            <div class="heat-legend" id="classified-map-legend" hidden><span>Menos usadas</span><i></i><span>Más usadas</span><i></i><b class="legend-truck">🚚 Camión</b><small>Trazos representativos de GPS; sin ajuste vial exacto</small></div>
+            <div class="heat-legend" id="classified-map-legend" hidden><span>Uso bajo</span><i></i><span>Uso medio</span><i></i><span>Uso alto</span><i></i><b class="legend-truck">🚚 Camión</b><small>Trazos representativos de GPS; sin ajuste vial exacto</small></div>
           </article>
           <aside class="route-insights" aria-label="Explorador de rutas y vehículos">
             <article class="monitor-panel">
