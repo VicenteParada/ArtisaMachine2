@@ -6,7 +6,7 @@ from pathlib import Path
 import pymysql
 
 
-def connect_db(autocommit=True):
+def connect_db(autocommit=True, read_timeout=15):
     return pymysql.connect(
         host=os.environ.get("DB_HOST", "mariadb"),
         user=os.environ.get("DB_USER", "artisa_app"),
@@ -16,16 +16,27 @@ def connect_db(autocommit=True):
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=autocommit,
         connect_timeout=3,
-        read_timeout=15,
+        read_timeout=read_timeout,
         write_timeout=5,
     )
 
 
+def _statements(path):
+    # Los archivos no usan ";" dentro de comentarios ni de textos.
+    for statement in path.read_text(encoding="utf-8").split(";"):
+        code = "\n".join(line for line in statement.splitlines() if not line.strip().startswith("--"))
+        if code.strip():
+            yield statement
+
+
 def initialize_db():
     # El esquema contiene únicamente CREATE TABLE IF NOT EXISTS, sin borrar datos.
-    schema = Path(__file__).resolve().parent.parent / "DB" / "schema.sql"
+    # Los catálogos de vehículos y faenas solo agregan filas faltantes (INSERT IGNORE).
+    db_dir = Path(__file__).resolve().parent.parent / "DB"
     with connect_db() as connection, connection.cursor() as cursor:
-        for statement in schema.read_text(encoding="utf-8").split(";"):
-            if statement.strip():
-                cursor.execute(statement)
+        for name in ("schema.sql", "vehiculos_data.sql", "faenas_data.sql"):
+            path = db_dir / name
+            if path.exists():
+                for statement in _statements(path):
+                    cursor.execute(statement)
 

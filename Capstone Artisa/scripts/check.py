@@ -38,11 +38,14 @@ def request(base_url, path, token=None, html=False):
 
 
 def check_state(state, path):
-    required = ("mariadb", "etl", "endpoints", "front")
+    # MariaDB y endpoints deben estar operativos; la API de la empresa y Machine pueden
+    # estar "pending" (sin configurar o sin la primera clasificación todavía).
     components = state.get("componentes")
-    if (state.get("status") != "ok" or not isinstance(components, dict)
-            or any(components.get(name) != "ok" for name in required)):
+    if not isinstance(components, dict) or state.get("status") != "ok":
         raise RuntimeError(f"GET {path}: los servicios base no están operativos")
+    if any(components.get(name) != "ok" for name in ("mariadb", "endpoints")):
+        raise RuntimeError(f"GET {path}: MariaDB o endpoints no están operativos")
+    return components
 
 
 def main():
@@ -57,8 +60,11 @@ def main():
     try:
         request(base_url, "/", html=True)
         print("OK: frontend disponible.")
-        check_state(request(base_url, "/health"), "/health")
-        print("OK: servicios base operativos; Machine es opcional.")
+        components = check_state(request(base_url, "/health"), "/health")
+        print("OK: servicios base operativos.")
+        nombres = {"telemetria_api": "API de la empresa", "machine": "Clasificación de rutas"}
+        for key, label in nombres.items():
+            print(f"   {label}: {components.get(key, 'sin dato')}")
         token = os.environ.get("ARTISA_TEST_TOKEN")
         if token:
             check_state(request(base_url, "/api/estado", token=token), "/api/estado")

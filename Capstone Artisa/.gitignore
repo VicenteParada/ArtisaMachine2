@@ -5,7 +5,7 @@ __pycache__/
 .env.*
 !.env.example
 
-# Archivo personal local, ajeno al proyecto Artisa
-sorpresa-para-antito.html
 exports/
 .venv/
+# Respaldos de MariaDB (contienen datos de la empresa)
+respaldos/

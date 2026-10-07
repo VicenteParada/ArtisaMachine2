@@ -1,0 +1,267 @@
+"""Respuestas de /api/mapa, /api/dashboard y /api/vehiculos/<id>/recorrido.
+
+Leen la versión activa de la clasificación de rutas (machine_learning/rutas_job.py).
+Si todavía no hay una, devuelven None y la API mantiene la respuesta "pendiente".
+"""
+
+from datetime import datetime, timedelta, timezone
+import json
+import math
+
+import pymysql
+
+from common import dias
+
+REFRESH_SECONDS = 300
+JOURNEY_LIMIT = 20000
+MAX_GAP_MIN = 5
+VEL_MAX_KMH = 150
+
+
+def active_version(cursor):
+    try:
+        cursor.execute("SELECT * FROM rutas_version WHERE activa=1 ORDER BY id DESC LIMIT 1")
+    except pymysql.err.ProgrammingError:
+        return None  # tablas aún no creadas
+    version = cursor.fetchone()
+    if version:
+        version["metricas"] = json.loads(version.pop("metricas_json") or "{}")
+        version["lugares"] = json.loads(version.pop("lugares_json") or "{}")
+    return version
+
+
+def available_reports(cursor):
+    total = 0
+    for query in ("SELECT validos AS n FROM raw_gps_estado WHERE id=1",
+                  "SELECT validos AS n FROM telemetria_api_estado WHERE id=1"):
+        try:
+            cursor.execute(query)
+            total += int((cursor.fetchone() or {}).get("n") or 0)
+        except pymysql.err.ProgrammingError:
+            pass
+    return total
+
+
+def _iso(value):
+    return value.isoformat() + "Z" if isinstance(value, datetime) else value
+
+
+DRIVER_LOOKBACK = timedelta(hours=24)
+
+
+def last_driver(cursor, asset_id, until):
+    """Último conductor informado para el camión en las 24 h previas a `until`.
+    Algunos reportes llegan sin conductor; se usa el más reciente que sí lo trae."""
+    for table in ("telemetria_api", "raw_gps"):
+        try:
+            cursor.execute(
+                f"""SELECT driver_name, driver_last_name FROM {table}
+                    WHERE asset_id=%s AND report_date <= %s AND report_date >= %s
+                      AND driver_name IS NOT NULL AND driver_name <> ''
+                    ORDER BY report_date DESC LIMIT 1""",
+                (asset_id, until, until - DRIVER_LOOKBACK),
+            )
+        except pymysql.err.ProgrammingError:
+            continue
+        row = cursor.fetchone()
+        if row:
+            return row
+    return {}
+
+
+def latest_positions(cursor, route_by_asset):
+    """Última posición conocida de cada camión (API en vivo o histórico, la más reciente),
+    con su patente (asset_id) y el último conductor informado."""
+    cursor.execute(
+        """SELECT v.asset_id FROM vehiculos AS v INNER JOIN tipos_vehiculo AS t ON t.id_tipo = v.id_tipo
+           WHERE t.nombre = 'camion' ORDER BY v.asset_id"""
+    )
+    trucks = [row["asset_id"] for row in cursor.fetchall()]
+    vehicles = []
+    for asset_id in trucks:
+        best = None
+        for table, extra in (("telemetria_api", "speed, heading, ignition, event_name, driver_name, driver_last_name"),
+                             ("raw_gps", "speed, NULL AS heading, NULL AS ignition, event_name, driver_name, driver_last_name")):
+            try:
+                cursor.execute(
+                    f"""SELECT asset_id, asset_name, report_date, latitude, longitude, {extra}
+                        FROM {table} WHERE asset_id=%s ORDER BY report_date DESC LIMIT 1""",
+                    (asset_id,),
+                )
+            except pymysql.err.ProgrammingError:
+                continue
+            row = cursor.fetchone()
+            if row and (best is None or row["report_date"] > best["report_date"]):
+                best = dict(row, fuente="api" if table == "telemetria_api" else "historico")
+        if best:
+            driver = best if best.get("driver_name") else last_driver(cursor, asset_id, best["report_date"])
+            vehicles.append({
+                "vehicle_id": asset_id, "vehicle_name": best["asset_name"] or asset_id,
+                "patente": asset_id,
+                "driver_name": driver.get("driver_name"), "driver_last_name": driver.get("driver_last_name"),
+                "latitude": best["latitude"], "longitude": best["longitude"],
+                "timestamp": _iso(best["report_date"]), "speed_kmh": best["speed"],
+                "heading": best["heading"], "ignition": best["ignition"], "event": best["event_name"],
+                "route_id": route_by_asset.get(asset_id), "fuente": best["fuente"],
+            })
+    return vehicles
+
+
+def _route(row):
+    from_level = {"HIGH": ("Más usada", "#14532d"), "MEDIUM": ("Uso medio", "#f97316"),
+                  "LOW": ("Poco usada", "#dc2626")}
+    label, color = from_level.get(row["usage_level"], (row["usage_level"], "#718785"))
+    return {
+        "route_id": row["route_id"], "label": row["label"], "usage_count": row["usage_count"],
+        "unique_vehicle_count": row["unique_vehicle_count"], "usage_level": row["usage_level"],
+        "usage_label": label, "color": color, "geometry_source": row["geometry_source"],
+        "observed_points": row["observed_points"], "map_matching": False,
+        "km_mediana": row["km_mediana"], "origen": row["origen"], "destino": row["destino"],
+        "primer_viaje": _iso(row["primer_viaje"]), "ultimo_viaje": _iso(row["ultimo_viaje"]),
+        "geometry": json.loads(row["geometria"]),
+    }
+
+
+def classified_map(cursor):
+    version = active_version(cursor)
+    if not version:
+        return None
+    cursor.execute("SELECT * FROM rutas_clasificadas WHERE version_id=%s ORDER BY usage_count DESC, route_id", (version["id"],))
+    routes = [_route(row) for row in cursor.fetchall()]
+    cursor.execute("SELECT asset_id, route_id FROM rutas_vehiculo WHERE version_id=%s", (version["id"],))
+    route_by_asset = {row["asset_id"]: row["route_id"] for row in cursor.fetchall()}
+    vehicles = latest_positions(cursor, route_by_asset)
+    metrics = version["metricas"]
+    available = available_reports(cursor)
+    umbrales = metrics.get("umbrales") or {}
+    return {
+        "schema_version": 1, "status": "ok", "source_mode": "HISTORICAL_GPS_CATALOG",
+        "snapshot_date": version["hasta"].isoformat(),
+        "routes": routes, "trips": [], "vehicles": vehicles, "readings": [],
+        "summary": {
+            "trip_count": metrics.get("viajes_clasificados", 0),
+            "vehicle_count": metrics.get("camiones", 0),
+            "route_count": len(routes),
+            "available_report_count": available,
+        },
+        "ranking": {"most_used": routes[0] if routes else None,
+                    "least_used": min(routes, key=lambda r: (r["usage_count"], r["route_id"])) if routes else None},
+        "metadata": {
+            "status": "ok",
+            "version": version["id"],
+            "window": {"desde": version["desde"].isoformat(), "hasta": version["hasta"].isoformat()},
+            "processed_report_count": sum(r["observed_points"] for r in routes),
+            "source_report_count": available,
+            "refresh_seconds": REFRESH_SECONDS,
+            "classification": (
+                f"Rutas completas entre paradas, agrupadas por origen-destino y trayectoria, con los viajes del "
+                f"{version['desde']:%d-%m-%Y} al {version['hasta']:%d-%m-%Y}. Nivel por cantidad de recorridos: "
+                f"verde con más de {round(umbrales.get('percentil_67') or 0, 1):g}, rojo con "
+                f"{round(umbrales.get('percentil_33') or 0, 1):g} o menos (percentiles 67 y 33)."
+            ),
+            "geometry": "Cada línea es un viaje real observado (el más representativo de su ruta).",
+            "road_matching": "Sin ajuste a calles: se dibujan los puntos GPS reportados, sin unir saltos.",
+            "data_retention": (f"{metrics.get('viajes_sin_origen_o_destino', 0)} viajes sin origen o destino "
+                               f"conocido no se clasifican."),
+            "metricas": metrics,
+        },
+    }
+
+
+def classified_dashboard(cursor):
+    version = active_version(cursor)
+    if not version:
+        return None
+    metrics = version["metricas"]
+    niveles = metrics.get("por_nivel") or {}
+    return {
+        "status": "ok", "version": version["id"],
+        "calidad": {"validos": available_reports(cursor)},
+        "operacion": {"viajes": metrics.get("viajes_clasificados", 0), "camiones": metrics.get("camiones", 0)},
+        "rutas": {level: int(niveles.get(level, 0)) for level in ("HIGH", "MEDIUM", "LOW")},
+    }
+
+
+def _distance_m(a, b):
+    return math.hypot(b[0] - a[0], (b[1] - a[1]) * math.cos(math.radians((a[0] + b[0]) / 2))) * 111_000
+
+
+def _local(value):
+    return value.replace(tzinfo=timezone.utc).astimezone(dias.zona()).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def truck_journey(cursor, asset_id):
+    """Recorrido observado del camión en su último día con datos (hora de Chile)."""
+    latest = None
+    for table in ("telemetria_api", "raw_gps"):
+        try:
+            cursor.execute(f"SELECT MAX(report_date) AS ultimo FROM {table} WHERE asset_id=%s", (asset_id,))
+        except pymysql.err.ProgrammingError:
+            continue
+        value = (cursor.fetchone() or {}).get("ultimo")
+        if value and (latest is None or value > latest):
+            latest = value
+    if latest is None:
+        return None
+    day = dias.dia_local(latest)
+    start, end = dias.limites_utc(day)
+    rows = []
+    for table, extra in (("telemetria_api", "driver_name, driver_last_name"),
+                         ("raw_gps", "driver_name, driver_last_name")):
+        try:
+            cursor.execute(
+                f"""SELECT report_id, asset_name, report_date, latitude, longitude, {extra}
+                    FROM {table} WHERE asset_id=%s AND report_date >= %s AND report_date < %s
+                    ORDER BY report_date DESC LIMIT %s""",
+                (asset_id, start, end, JOURNEY_LIMIT + 1),
+            )
+        except pymysql.err.ProgrammingError:
+            continue
+        rows.extend(cursor.fetchall())
+    seen, points = set(), []
+    for row in sorted(rows, key=lambda r: r["report_date"]):
+        lat, lon = row["latitude"], row["longitude"]
+        key = (row["report_date"], lat, lon)
+        if lat is None or lon is None or (lat == 0 and lon == 0) or key in seen or row["report_id"] in seen:
+            continue
+        seen.update({key, row["report_id"]})
+        points.append(row)
+    complete = len(points) <= JOURNEY_LIMIT
+    points = points[-JOURNEY_LIMIT:]
+    paths, current, meters, moving_seconds = [], [], 0.0, 0.0
+    gaps, gap_seconds = 0, 0.0  # cortes de señal: más de MAX_GAP_MIN sin reportes
+    for prev, row in zip([None] + points[:-1], points):
+        coords = [round(row["longitude"], 6), round(row["latitude"], 6)]
+        if prev is not None:
+            hours = (row["report_date"] - prev["report_date"]).total_seconds() / 3600
+            if hours > MAX_GAP_MIN / 60:
+                gaps += 1
+                gap_seconds += hours * 3600
+            d = _distance_m((prev["latitude"], prev["longitude"]), (row["latitude"], row["longitude"]))
+            if 0 < hours <= MAX_GAP_MIN / 60 and d / 1000 <= VEL_MAX_KMH * hours:
+                meters += d
+                if d > 50:
+                    moving_seconds += hours * 3600
+                current.append(coords)
+                continue
+            if len(current) >= 2:
+                paths.append(current)
+        current = [coords]
+    if len(current) >= 2:
+        paths.append(current)
+    driver = next((r for r in reversed(points) if r.get("driver_name")), {})
+    return {
+        "asset_id": asset_id, "patente": asset_id,
+        "asset_name": next((r["asset_name"] for r in reversed(points) if r["asset_name"]), asset_id),
+        "fecha": day.isoformat(),
+        "driver_name": driver.get("driver_name"), "driver_last_name": driver.get("driver_last_name"),
+        "inicio": _local(points[0]["report_date"]) if points else None,
+        "termino_observado": _local(points[-1]["report_date"]) if points else None,
+        "distancia_km": round(meters / 1000, 2),
+        "tiempo_movimiento_minutos": round(moving_seconds / 60, 1),
+        "lecturas": len(points), "completo": complete,
+        "cortes": gaps, "minutos_sin_senal": round(gap_seconds / 60, 1),
+        "nota": (f"Posiciones GPS del {day:%d-%m-%Y} (hora de Chile). Solo se unen reportes seguidos "
+                 f"(hasta {MAX_GAP_MIN} min y {VEL_MAX_KMH} km/h); los saltos de GPS no se dibujan."),
+        "geometry": {"type": "MultiLineString", "coordinates": paths},
+    }

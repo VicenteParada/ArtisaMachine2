@@ -16,8 +16,10 @@ from datetime import datetime, timezone
 import json
 import math
 import os
-import re
-import unicodedata
+
+# La clasificacion de vehiculos vive en common/vehiculos.py y la comparten ETL,
+# API en vivo, endpoints y Machine.
+from common.vehiculos import es_camion, registrar_nuevos
 
 
 @dataclass(frozen=True)
@@ -60,24 +62,6 @@ def _connect_db(autocommit=True):
     # Importacion diferida: las transformaciones se pueden probar sin drivers instalados.
     from common.db import connect_db
     return connect_db(autocommit=autocommit)
-
-
-# Vehiculos que NO son camion siempre traen una de estas palabras en su asset_name
-# (ej. "716-Camioneta-CesarM", "Lampa-Furgon", "Mantencion"); los camiones reales se
-# nombran "<ubicacion>-<numero>" (ej. "Lampa-826", "Codelco-Calama-859") y nunca las
-# incluyen. Automatico: no requiere mantener ninguna lista de patentes a mano, se
-# aplica igual a vehiculos nuevos apenas aparecen en Mongo.
-PATRON_NO_CAMION = re.compile(r"camioneta|furgon|mantenc", re.IGNORECASE)
-
-
-def es_camion(asset_name):
-    """True si el nombre del vehiculo no contiene ninguna palabra de PATRON_NO_CAMION.
-    Sin nombre (asset_name ausente) no se puede confirmar que sea camion: se excluye
-    por seguridad, ya que todos los camiones reales traen nombre."""
-    if not asset_name:
-        return False
-    normalizado = unicodedata.normalize("NFKD", asset_name).encode("ascii", "ignore").decode("ascii")
-    return not PATRON_NO_CAMION.search(normalizado)
 
 
 def fetch_batch(config, after_id):
@@ -267,6 +251,8 @@ def run_once(config):
             (last_id, new_read, new_valid, new_rejected, status,
              json.dumps(rejection_history, ensure_ascii=False)),
         )
+        # Mismo commit: ningun reporte guardado queda sin vehiculo en el catalogo.
+        registrar_nuevos(cursor, {row["asset_id"]: row["asset_name"] for row in accepted})
         connection.commit()
     return {"estado": status, "recibidos": len(documents), "validos": len(accepted),
             "rechazados": len(rejected), "total_validos": new_valid}

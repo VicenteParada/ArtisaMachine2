@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  Mapas de telemetria: los 4 mapas de guias_ml/telemetria_colab.ipynb (calor, rutas por camion,
+  Mapas de telemetria: los 4 mapas del cuaderno de telemetría del equipo (calor, rutas por camion,
   uso de rutas y puntos) calculados en el navegador para el rango de fechas que se elija.
 
   Datos que usa (mismo origen que el front, que hace de proxy a endpoints):
@@ -72,24 +72,31 @@
     width: 14px; height: 14px; border-radius: 50%; background: #2e7d32;
     border: 2px solid #fff; box-shadow: 0 0 3px rgba(0, 0, 0, .5);
   }
-  .camion-seleccionado { display: grid; place-items: center; width: 38px; height: 38px;
-    border: 3px solid #fff; border-radius: 50%; background: #216447;
-    box-shadow: 0 3px 12px rgba(0, 0, 0, .35); font-size: 21px; }
-  .camion-ficha { display: grid; gap: 5px; min-width: 190px; font-size: 12px; }
-  .camion-ficha strong { font-size: 14px; }
-  .camion-ficha small { color: var(--suave); }
-  .camion-ficha button { margin-top: 4px; color: var(--acento); font-weight: 700; }
   .solo-calor .pestanas { display: none; }
   .etiqueta { color: var(--acento); font-size: 11px; font-weight: 700; }
+  .titulo { display: flex; flex-direction: column; gap: 2px; align-self: center; }
+  .rango { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 10px; margin: 0; padding: 0; border: 0; }
+  .rango legend { float: left; width: 100%; margin-bottom: 2px; padding: 0; font-size: 11px; font-weight: 700; color: var(--suave); }
+  .duracion button { padding: 7px 10px; font-size: 13px; }
 </style>
 </head>
 <body>
 <header class="barra">
-  <h1>Mapas de telemetría</h1>
-  <span class="etiqueta">DATOS HISTÓRICOS</span>
-  <label class="campo">Día histórico <input type="date" id="desde" value="2026-09-08"></label>
-  <input type="hidden" id="hasta" value="2026-09-08">
-  <button id="cargar">Cargar</button>
+  <div class="titulo">
+    <h1>Mapas de telemetría</h1>
+    <span class="etiqueta">DATOS HISTÓRICOS</span>
+  </div>
+  <fieldset class="rango">
+    <legend>Rango de fechas (hasta 14 días)</legend>
+    <label class="campo">Desde <input type="date" id="desde"></label>
+    <label class="campo">Hasta <input type="date" id="hasta"></label>
+    <div class="duracion" role="group" aria-label="Rangos rápidos">
+      <button type="button" data-dias="1">1 día</button>
+      <button type="button" data-dias="7">7 días</button>
+      <button type="button" data-dias="14">14 días</button>
+    </div>
+    <button id="cargar">Cargar</button>
+  </fieldset>
   <nav class="pestanas" role="tablist">
     <button role="tab" data-vista="calor" aria-selected="true">Mapa de calor</button>
     <button role="tab" data-vista="rutas" aria-selected="false">Rutas por camión</button>
@@ -97,14 +104,14 @@
     <button role="tab" data-vista="puntos" aria-selected="false">Puntos</button>
   </nav>
 </header>
-<p id="estado">Elige un día y presiona Cargar. El calor representa densidad de reportes GPS; el uso de rutas cuenta camiones próximos a cada tramo y aún no es una clasificación definitiva.</p>
+<p id="estado">Elige un rango de fechas (hasta 14 días) y presiona Cargar. El calor representa densidad de reportes GPS; el uso de rutas cuenta camiones próximos a cada tramo y aún no es una clasificación definitiva.</p>
 <div id="mapa"></div>
 
 <script>
 "use strict";
 
 const API_BASE = "";
-const MAX_DIAS = 1;  // Esta vista integrada limita la carga a un día histórico.
+const MAX_DIAS = 14;  // mismo máximo que /api/gps (GPS_MAX_DIAS)
 document.body.classList.toggle("solo-calor", new URLSearchParams(location.search).get("vista") === "calor");
 
 // ---------------------------------------------------------------------------
@@ -120,13 +127,6 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;",
 function redondeoPar(v) {
   const r = Math.round(v);
   return (r - v === 0.5 && r % 2 !== 0) ? r - 1 : r;
-}
-
-function mediana(ordenado) { return cuantil(ordenado, 0.5); }
-function cuantil(ordenado, q) {  // interpolacion lineal, igual que pandas
-  if (!ordenado.length) return NaN;
-  const pos = (ordenado.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
-  return ordenado[lo] + (ordenado[hi] - ordenado[lo]) * (pos - lo);
 }
 
 function estado(texto, error = false) {
@@ -250,6 +250,10 @@ function capaFaenas(conMarcadores) {
 // ---------------------------------------------------------------------------
 let datos = null;          // puntos del rango cargado
 let cache = {};            // vista -> promesa de {overlays, leyenda, resumen, encuadre}
+
+// "06-10-2026" o "01-10-2026 al 06-10-2026"
+const fechaCL = iso => iso.split("-").reverse().join("-");
+const periodo = D => D.desde === D.hasta ? fechaCL(D.desde) : `${fechaCL(D.desde)} al ${fechaCL(D.hasta)}`;
 let vistaActual = "calor";
 let mostrado = null;       // lo que esta dibujado ahora en el mapa
 let turno = 0;             // invalida calculos viejos si se cambia de vista o de fechas
@@ -345,7 +349,7 @@ function vistaCalor(D) {
   const encuadre = {limites: limitesDatos(D.lat, D.lon), opciones: {padding: [40, 40], maxZoom: 12}};
   return {
     overlays: {"Densidad GPS": calor, "Faenas": capaFaenas(true)},
-    resumen: `Mapa de calor: ${nf.format(D.n)} reportes de ${D.nPatentes} patentes en ${nf.format(celdas.size)} celdas`,
+    resumen: `${periodo(D)}: ${nf.format(D.n)} reportes GPS de ${D.nPatentes} camiones.`,
     encuadre,
   };
 }
@@ -392,7 +396,7 @@ function vistaRutas(D) {
   overlays["Faenas"] = capaFaenas(false);
   return {
     overlays, controlCerrado: true,
-    resumen: `Rutas: ${nf.format(dibujados)} de ${nf.format(D.n)} reportes · ${camiones.length} patentes`,
+    resumen: `${periodo(D)}: recorridos de ${camiones.length} camiones (${nf.format(dibujados)} reportes dibujados).`,
     encuadre: {limites: limitesDatos(D.lat, D.lon), opciones: {padding: [30, 30]}},
   };
 }
@@ -416,7 +420,7 @@ const USO = {
   ANG_PASO: 15,         // las direcciones se agrupan en bloques de estos grados
   LOTE: 5000,           // lineas entre cada actualizacion de progreso
 };
-const COLORES = ["#d7191c", "#f29e2e", "#14532d"];
+const COLORES = ["#dc2626", "#f97316", "#14532d"];  // mismos colores que las rutas clasificadas
 
 // Tabla hash clave -> mascara de camiones (un bit por camion, en palabras de 32 bits).
 // Las claves son enteros grandes (> 2^31): un Map de JS con esas claves es varias veces mas lento.
@@ -538,12 +542,9 @@ async function vistaUso(D, progreso) {
     if (dtH > 0 && dtH <= P.MAX_GAP_MIN / 60 && distM > 0 && distM / 1000 <= P.VEL_MAX_KMH * dtH) { I0.push(p); I1.push(i); }
   }
   const n = I0.length;
-  pares.sort((a, b) => a - b);
   const resumen = [
-    `${D.desde} a ${D.hasta}: ${nf.format(D.n)} filas -> ${nf.format(u.length)} reportes reales `
-      + `(${nf.format(D.n - u.length)} copias eliminadas) de ${new Set(Array.from(u, i => D.cam[i])).size} camiones`,
-    `Distancia entre reportes seguidos: mediana ${Math.round(mediana(pares))} m · 90% bajo ${Math.round(cuantil(pares, 0.9))} m`,
-    `Lineas dibujadas: ${nf.format(n)} · no unidas (pausa larga o salto de GPS): ${nf.format(pares.length - n)}`,
+    `${periodo(D)}: ${nf.format(u.length)} reportes GPS de ${new Set(Array.from(u, i => D.cam[i])).size} camiones.`,
+    `Tramos dibujados: ${nf.format(n)} · sin dibujar ${nf.format(pares.length - n)} (más de ${P.MAX_GAP_MIN} min sin reportes o salto de GPS).`,
   ];
   if (!n) return {overlays: {"Faenas": capaFaenas(false)}, resumen: resumen.join("\n")};
 
@@ -582,8 +583,6 @@ async function vistaUso(D, progreso) {
     nivel[l] = mejor;
     xMin = Math.min(xMin, x0[l], x1); yMin = Math.min(yMin, y0[l], y1); yMax = Math.max(yMax, y0[l], y1);
   }
-  const radiosOrdenados = Float64Array.from(radio).sort();
-  resumen.push(`Radio de las lineas: mediana ${Math.round(mediana(radiosOrdenados))} m · maximo ${Math.round(radiosOrdenados[n - 1])} m`);
 
   const dAng = [];
   for (let d = -Math.floor(N_ANG / 2); d <= Math.floor(N_ANG / 2); d++) if (Math.abs(d) * P.ANG_PASO <= P.ANG_MAX) dAng.push(d);
@@ -797,10 +796,8 @@ function vistaPuntos(D) {
     overlays: {"Puntos GPS": new CapaPuntos({lat, lon, cam, dia, seg, niv, colores, dias, camiones: D.camiones}),
                "Faenas": capaFaenas(false)},
     leyenda: leyendaPasos(colores, cortes, `Reportes GPS en un cuadro de ~${lado} m (rojo = pocos, verde = muchos)`),
-    resumen: `${D.desde} a ${D.hasta}: ${nf.format(D.filas)} filas -> ${nf.format(n)} puntos de `
-      + `${new Set(cam).size} camiones (${nf.format(D.filas - D.n)} sin coordenadas validas, `
-      + `${nf.format(D.n - n)} copias exactas de la ETL)\n`
-      + `Concentracion: mediana ${Math.round(mediana(Int32Array.from(concentracion).sort()))} reportes alrededor · maximo ${nf.format(maxConc)}`,
+    resumen: `${periodo(D)}: ${nf.format(n)} puntos GPS de ${new Set(cam).size} camiones. `
+      + `Mayor concentración: ${nf.format(maxConc)} reportes en un cuadro de ~${lado} m.`,
     encuadre: {limites: limitesDatos(lat, lon), opciones: {padding: [30, 30]}},
   };
 }
@@ -848,160 +845,41 @@ async function mostrarVista(nombre) {
   estado(v.resumen);
 }
 
-// Selección visual del vehículo: capas independientes de las cuatro vistas y sus cálculos.
-const capaCamionSeleccionado = L.layerGroup().addTo(mapa);
-const capaRecorridoSeleccionado = L.layerGroup().addTo(mapa);
-mapa.createPane("recorrido-camion-seleccionado");
-mapa.getPane("recorrido-camion-seleccionado").style.zIndex = "450";
-let vehiculosDelDia = new Map();
-let camionSeleccionado = null;
-let fichaCamion = null;
-
-function avisarPanel(type, extra = {}) {
-  if (window.parent !== window) window.parent.postMessage({type, ...extra}, location.origin);
-}
-
-function resumirVehiculos(D) {
-  const vehicles = new Map();
-  for (const i of D.unicos) {
-    const asset_id = D.camiones[D.cam[i]];
-    let vehicle = vehicles.get(asset_id);
-    if (!vehicle) {
-      vehicle = {asset_id, reportes: 0, primero: D.t[i], ultimo: D.t[i],
-                 latitude: D.lat[i], longitude: D.lon[i]};
-      vehicles.set(asset_id, vehicle);
-    }
-    vehicle.reportes++;
-    vehicle.ultimo = D.t[i];
-    vehicle.latitude = D.lat[i];
-    vehicle.longitude = D.lon[i];
-  }
-  return vehicles;
-}
-
-function limpiarCamionSeleccionado() {
-  capaCamionSeleccionado.clearLayers();
-  capaRecorridoSeleccionado.clearLayers();
-  camionSeleccionado = null;
-  fichaCamion = null;
-}
-
-function fichaSeleccionada() {
-  const vehicle = vehiculosDelDia.get(camionSeleccionado);
-  if (!vehicle || !datos) return null;
-  const box = document.createElement("div");
-  box.className = "camion-ficha";
-  const title = document.createElement("strong");
-  title.textContent = fichaCamion?.ultimo_reporte?.asset_name ||
-    fichaCamion?.primer_reporte?.asset_name || vehicle.asset_id;
-  const identifier = document.createElement("span");
-  identifier.textContent = "Patente: " + vehicle.asset_id;
-  const driver = document.createElement("span");
-  driver.textContent = "Conductor del último reporte: " +
-    ([fichaCamion?.ultimo_reporte?.driver_name, fichaCamion?.ultimo_reporte?.driver_last_name]
-      .filter(Boolean).join(" ") || "No informado");
-  const first = document.createElement("small");
-  first.textContent = "Primera posición GPS válida: " + ddmmHHMM(datos, vehicle.primero);
-  const last = document.createElement("small");
-  last.textContent = "Última posición GPS válida: " + ddmmHHMM(datos, vehicle.ultimo) + " · posición del ícono";
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = "Ver recorrido completo";
-  button.disabled = vehicle.reportes < 2;
-  button.addEventListener("click", () => avisarPanel("artisa:gps-journey-request", {
-    fecha: datos.desde, asset_id: vehicle.asset_id
-  }));
-  box.append(title, identifier, driver, first, last, button);
-  return box;
-}
-
-function seleccionarCamion(asset_id) {
-  const vehicle = vehiculosDelDia.get(asset_id);
-  if (!vehicle) return;
-  limpiarCamionSeleccionado();
-  camionSeleccionado = asset_id;
-  const icon = L.divIcon({className: "", html: '<span class="camion-seleccionado">🚚</span>',
-                          iconSize: [38, 38], iconAnchor: [19, 38], popupAnchor: [0, -34]});
-  const marker = L.marker([vehicle.latitude, vehicle.longitude], {icon, zIndexOffset: 1000})
-    .addTo(capaCamionSeleccionado);
-  mapa.setView([vehicle.latitude, vehicle.longitude], Math.max(mapa.getZoom(), 10));
-  marker.bindPopup(fichaSeleccionada()).openPopup();
-}
-
-function mostrarRecorridoCamion(asset_id) {
-  if (camionSeleccionado !== asset_id || !datos) return;
-  capaRecorridoSeleccionado.clearLayers();
-  const vehicleIndex = datos.camiones.indexOf(asset_id);
-  const tramos = [];
-  let tramo = [];
-  let tiempoAnterior = null;
-  for (const i of datos.unicos) {
-    if (datos.cam[i] !== vehicleIndex) continue;
-    if (tiempoAnterior !== null && datos.t[i] - tiempoAnterior > GAP_MINUTOS * 60) {
-      if (tramo.length > 1) tramos.push(tramo);
-      tramo = [];
-    }
-    tramo.push([datos.lat[i], datos.lon[i]]);
-    tiempoAnterior = datos.t[i];
-  }
-  if (tramo.length > 1) tramos.push(tramo);
-  if (!tramos.length) {
-    avisarPanel("artisa:gps-journey-unavailable", {fecha: datos.desde, asset_id});
-    return;
-  }
-  const line = L.polyline(tramos, {pane: "recorrido-camion-seleccionado",
-    color: "#155e9a", weight: 6, opacity: .95})
-    .addTo(capaRecorridoSeleccionado);
-  mapa.fitBounds(line.getBounds(), {padding: [45, 45], maxZoom: 14});
-}
-
-window.addEventListener("message", event => {
-  if (event.origin !== location.origin || event.source !== window.parent || !event.data ||
-      typeof event.data !== "object") return;
-  const {type, fecha, asset_id} = event.data;
-  if (type === "artisa:gps-clear-vehicle") {
-    limpiarCamionSeleccionado();
-    if (datos?.n) mapa.fitBounds(limitesDatos(datos.lat, datos.lon), {padding: [30, 30]});
-    return;
-  }
-  if (!datos || fecha !== datos.desde || !vehiculosDelDia.has(asset_id)) return;
-  if (type === "artisa:gps-select-vehicle") seleccionarCamion(asset_id);
-  if (type === "artisa:gps-vehicle-info" && camionSeleccionado === asset_id) {
-    fichaCamion = event.data.detail;
-    capaCamionSeleccionado.eachLayer(marker => marker.setPopupContent(fichaSeleccionada()));
-  }
-  if (type === "artisa:gps-show-journey") mostrarRecorridoCamion(asset_id);
-});
-
 // ---------------------------------------------------------------------------
-// Rango de fechas: un día por consulta en la vista integrada.
+// Rango de fechas: de 1 a MAX_DIAS días, ambos incluidos (00:00 a 00:00 hora de Chile).
 // ---------------------------------------------------------------------------
 const campoDesde = document.getElementById("desde"), campoHasta = document.getElementById("hasta");
 const sumarDias = (iso, n) => new Date(Date.parse(iso) + n * 86400000).toISOString().slice(0, 10);
 const diasRango = () => Math.round((Date.parse(campoHasta.value) - Date.parse(campoDesde.value)) / 86400000) + 1;
 
+// Por defecto se muestra el día anterior completo; no se pueden elegir días futuros.
+const hoyChile = new Intl.DateTimeFormat("en-CA", {timeZone: "America/Santiago"}).format(new Date());
+campoDesde.max = campoHasta.max = hoyChile;
+campoDesde.value = campoHasta.value = sumarDias(hoyChile, -1);
+
 function actualizarRango() {
-  if (!campoDesde.value) return;
-  // El calendario de 'hasta' solo deja elegir dentro del maximo
-  campoHasta.min = campoDesde.value;
-  campoHasta.max = sumarDias(campoDesde.value, MAX_DIAS - 1);
-  const dias = campoHasta.value ? diasRango() : 0;
-  document.querySelectorAll("[data-dias]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.dias === dias));
+  const dias = campoDesde.value && campoHasta.value ? diasRango() : 0;
+  document.querySelectorAll("[data-dias]").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.dias === dias)));
 }
 
-// Al mover 'desde' se mantiene la misma duracion (y se recorta al maximo)
-let duracion = 1;
+// Si una fecha deja el rango al revés o más largo que el máximo, se ajusta la otra.
 campoDesde.addEventListener("change", () => {
-  if (campoDesde.value) campoHasta.value = sumarDias(campoDesde.value, duracion - 1);
+  if (!campoDesde.value) return;
+  if (!campoHasta.value || campoHasta.value < campoDesde.value) campoHasta.value = campoDesde.value;
+  if (diasRango() > MAX_DIAS) campoHasta.value = sumarDias(campoDesde.value, MAX_DIAS - 1);
+  if (campoHasta.value > hoyChile) campoHasta.value = hoyChile;
   actualizarRango();
 });
 campoHasta.addEventListener("change", () => {
-  if (campoDesde.value && campoHasta.value) duracion = Math.min(Math.max(diasRango(), 1), MAX_DIAS);
+  if (!campoHasta.value) return;
+  if (!campoDesde.value || campoDesde.value > campoHasta.value) campoDesde.value = campoHasta.value;
+  if (diasRango() > MAX_DIAS) campoDesde.value = sumarDias(campoHasta.value, -(MAX_DIAS - 1));
   actualizarRango();
 });
+// Los rangos rápidos terminan en la fecha 'hasta' elegida (por defecto, ayer).
 document.querySelectorAll("[data-dias]").forEach(b => b.addEventListener("click", () => {
-  duracion = +b.dataset.dias;
-  if (campoDesde.value) campoHasta.value = sumarDias(campoDesde.value, duracion - 1);
+  if (!campoHasta.value) campoHasta.value = sumarDias(hoyChile, -1);
+  campoDesde.value = sumarDias(campoHasta.value, -(+b.dataset.dias - 1));
   actualizarRango();
 }));
 actualizarRango();
@@ -1011,16 +889,13 @@ async function cargar() {
   if (!desde || !hasta) { estado("Elige las dos fechas.", true); return; }
   const dias = diasRango();
   if (dias < 1) { estado("La fecha 'hasta' tiene que ser igual o posterior a 'desde'.", true); return; }
-  if (dias > MAX_DIAS) { estado("Esta vista carga un día a la vez.", true); return; }
+  if (dias > MAX_DIAS) { estado(`El rango máximo es de ${MAX_DIAS} días.`, true); return; }
 
   const boton = document.getElementById("cargar");
   boton.disabled = true;
   turno++;
   quitarMostrado();
   datos = null; cache = {};
-  limpiarCamionSeleccionado();
-  vehiculosDelDia = new Map();
-  avisarPanel("artisa:gps-vehicles-loading", {fecha: desde});
   // Contador mientras llegan los datos: la consulta puede tardar, que se vea que sigue trabajando
   const inicio = Date.now();
   const avisoCarga = () => estado(`Cargando reportes GPS del ${desde} al ${hasta}… ${Math.round((Date.now() - inicio) / 1000)} s`
@@ -1039,19 +914,12 @@ async function cargar() {
         return {nombre: f.nombre, area_m2: f.area_m2, geojson, centro: centroGeojson(geojson)};
       });
     }
-    if (!gps.t.length) {
-      estado(`No hay reportes GPS entre ${desde} y ${hasta}.`);
-      avisarPanel("artisa:gps-vehicles", {fecha: desde, vehicles: []});
-      return;
-    }
+    if (!gps.t.length) { estado(`No hay reportes GPS entre ${desde} y ${hasta}.`); return; }
     datos = prepararDatos(gps);
-    vehiculosDelDia = resumirVehiculos(datos);
     await mostrarVista(vistaActual);
-    avisarPanel("artisa:gps-vehicles", {fecha: desde, vehicles: [...vehiculosDelDia.values()]});
   } catch (e) {
     console.error(e);
     estado(`No se pudieron cargar los datos: ${e.message}`, true);
-    avisarPanel("artisa:gps-vehicles-error", {fecha: desde});
   } finally {
     clearInterval(reloj);
     boton.disabled = false;

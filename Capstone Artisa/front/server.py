@@ -25,6 +25,16 @@ FILES = {"/": ("index.html", "text/html; charset=utf-8"),
 
 
 class Handler(BaseHTTPRequestHandler):
+    # Los chequeos de salud de Docker (cada 5 s) no se registran si responden bien;
+    # así los registros muestran solo lo útil. Los errores siempre se registran.
+    QUIET_PATHS = {"/front-health", "/health"}
+
+    def log_request(self, code="-", size="-"):
+        path = getattr(self, "path", "").split("?", 1)[0]
+        if path in self.QUIET_PATHS and isinstance(code, int) and 200 <= code < 300:
+            return
+        super().log_request(code, size)
+
     def setup(self):
         super().setup()
         self.connection.settimeout(5)
@@ -35,7 +45,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", csp or "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://unpkg.com https://tile.openstreetmap.org; frame-src 'self'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", csp or "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://unpkg.com https://tile.openstreetmap.org https://server.arcgisonline.com; frame-src 'self'; frame-ancestors 'none'")
         self.end_headers()
         self.wfile.write(body)
 
@@ -59,7 +69,8 @@ class Handler(BaseHTTPRequestHandler):
                 request.add_header("Content-Type", self.headers.get("Content-Type", "application/octet-stream"))
             try:
                 # Un día GPS puede tardar más que las respuestas pequeñas del panel.
-                timeout = 120 if urlsplit(self.path).path == "/api/gps" else 20
+                slow = {"/api/gps": 120, "/api/mapa": 90, "/api/dashboard": 60}
+                timeout = slow.get(urlsplit(self.path).path, 20)
                 upstream = urlopen(request, timeout=timeout)
             except HTTPError as error:
                 upstream = error

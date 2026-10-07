@@ -14,9 +14,12 @@ x-python-health: &python-health
   retries: 12
 
 services:
+  # MongoDB y el ETL del JSON histórico son opcionales (perfil "historico"): solo se usan
+  # para cargar el archivo histórico. La instalación de la empresa trabaja solo con la API.
   mongodb:
     image: mongo:8.0
     container_name: artisa-mongodb
+    profiles: ["historico"]
     volumes:
       - mongodb_data:/data/db
     healthcheck:
@@ -52,6 +55,7 @@ services:
       context: .
       dockerfile: ETLs/Dockerfile
     container_name: artisa-etl
+    profiles: ["historico"]
     environment:
       <<: *db-environment
       MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017}
@@ -71,17 +75,59 @@ services:
     restart: unless-stopped
     init: true
 
-  machine:
+  # Telemetría actual: consulta la API de la empresa (requiere estar en su red/Wi-Fi).
+  # Sin COMPANY_API_URL queda en espera y la web sigue mostrando "pendiente".
+  # Ante cortes reintenta solo y retoma desde el último reporte guardado.
+  telemetria:
+    build:
+      context: .
+      dockerfile: telemetria_api/Dockerfile
+    container_name: artisa-telemetria
+    environment:
+      <<: *db-environment
+      COMPANY_API_URL: ${COMPANY_API_URL:-}
+      COMPANY_API_TOKEN: ${COMPANY_API_TOKEN:-}
+      COMPANY_API_AUTH_HEADER: ${COMPANY_API_AUTH_HEADER:-Authorization}
+      COMPANY_API_TABLE: ${COMPANY_API_TABLE:-reportes}
+      COMPANY_API_TIMEZONE: ${COMPANY_API_TIMEZONE:-auto}
+      COMPANY_API_NATIVE_DATES: ${COMPANY_API_NATIVE_DATES:-1}
+      COMPANY_API_INTERVAL_SECONDS: ${COMPANY_API_INTERVAL_SECONDS:-30}
+      COMPANY_API_TIMEOUT_SECONDS: ${COMPANY_API_TIMEOUT_SECONDS:-30}
+      COMPANY_API_BATCH_SIZE: ${COMPANY_API_BATCH_SIZE:-2000}
+      COMPANY_API_OVERLAP_SECONDS: ${COMPANY_API_OVERLAP_SECONDS:-300}
+      COMPANY_API_INITIAL_LOOKBACK_HOURS: ${COMPANY_API_INITIAL_LOOKBACK_HOURS:-24}
+      COMPANY_API_START: ${COMPANY_API_START:-}
+      COMPANY_API_DIALECT: ${COMPANY_API_DIALECT:-postgres}
+      COMPANY_API_CURSOR: ${COMPANY_API_CURSOR:-ctid}
+      COMPANY_API_WINDOW_PAGES: ${COMPANY_API_WINDOW_PAGES:-500}
+      ARTISA_TIMEZONE: ${ARTISA_TIMEZONE:-America/Santiago}
+      COMPANY_API_RETRY_MIN_SECONDS: ${COMPANY_API_RETRY_MIN_SECONDS:-5}
+      COMPANY_API_RETRY_MAX_SECONDS: ${COMPANY_API_RETRY_MAX_SECONDS:-60}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck: *python-health
+    restart: unless-stopped
+    init: true
+
+  # Cierre diario (parte de Machine): resume cada día de 00:00 a 00:00 hora Chile con
+  # las reglas del cuaderno de telemetría, sobre los datos en vivo y el histórico.
+  machine-diario:
     build:
       context: .
       dockerfile: machine_learning/Dockerfile
-    container_name: artisa-machine
+    container_name: artisa-machine-diario
+    command: ["python", "-m", "machine_learning.diario_worker"]
     environment:
       <<: *db-environment
-      TELEMETRY_MODEL_MAX_ROWS: ${TELEMETRY_MODEL_MAX_ROWS:-20000}
-      TELEMETRY_MODEL_RADIUS_KM: ${TELEMETRY_MODEL_RADIUS_KM:-0.8}
-      TELEMETRY_MODEL_MIN_SAMPLES: ${TELEMETRY_MODEL_MIN_SAMPLES:-5}
-      TELEMETRY_MODEL_INTERVAL_SECONDS: ${TELEMETRY_MODEL_INTERVAL_SECONDS:-30}
+      ARTISA_TIMEZONE: ${ARTISA_TIMEZONE:-America/Santiago}
+      DIARIO_GRACIA_MINUTOS: ${DIARIO_GRACIA_MINUTOS:-15}
+      DIARIO_REVISAR_DIAS: ${DIARIO_REVISAR_DIAS:-7}
+      DIARIO_DESDE: ${DIARIO_DESDE:-}
+      DIARIO_HORA: ${DIARIO_HORA-00:30}
+      DIARIO_HOY_CADA_MINUTOS: ${DIARIO_HOY_CADA_MINUTOS:-10}
     depends_on:
       mariadb:
         condition: service_healthy
@@ -97,6 +143,9 @@ services:
     environment:
       <<: *db-environment
       TELEMETRY_INTERVAL_SECONDS: ${TELEMETRY_INTERVAL_SECONDS:-30}
+      COMPANY_API_INTERVAL_SECONDS: ${COMPANY_API_INTERVAL_SECONDS:-30}
+      ARTISA_TIMEZONE: ${ARTISA_TIMEZONE:-America/Santiago}
+      ETL_HISTORICO: ${ETL_HISTORICO:-1}
     depends_on:
       mariadb:
         condition: service_healthy
@@ -153,8 +202,10 @@ services:
       context: .
       dockerfile: nginx/Dockerfile
     container_name: artisa-nginx
+    # ARTISA_BIND=0.0.0.0 permite entrar desde otros equipos de la red (servidor de la
+    # empresa). Por defecto solo desde este equipo.
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${ARTISA_BIND:-127.0.0.1}:${ARTISA_PORT:-8080}:8080"
     depends_on:
       auth:
         condition: service_healthy
@@ -166,6 +217,26 @@ services:
       timeout: 5s
       start_period: 5s
       retries: 12
+    restart: unless-stopped
+    init: true
+
+  # Respaldo diario de MariaDB en la carpeta respaldos/ (scripts/respaldo.sh).
+  respaldo:
+    image: mariadb:11.8
+    container_name: artisa-respaldo
+    entrypoint: ["bash", "/scripts/respaldo.sh"]
+    environment:
+      TZ: ${ARTISA_TIMEZONE:-America/Santiago}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:?Ejecuta python3 scripts/prepare_env.py}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Ejecuta python3 scripts/prepare_env.py}
+      RESPALDO_HORA: ${RESPALDO_HORA:-03:00}
+      RESPALDO_DIAS: ${RESPALDO_DIAS:-3}
+    volumes:
+      - ./scripts/respaldo.sh:/scripts/respaldo.sh:ro
+      - ./respaldos:/respaldos
+    depends_on:
+      mariadb:
+        condition: service_healthy
     restart: unless-stopped
     init: true
 

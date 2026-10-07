@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="/style.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
   <script src="/map-data.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
@@ -75,13 +76,13 @@
       </div>
     </header>
     <section class="heading">
-      <div><div class="eyebrow">INTELIGENCIA PARA EL TRANSPORTE</div><h1>De los datos a la decisión.</h1><p>Sistema base operativo, telemetría pendiente de API empresa y análisis Machine pendiente de integración.</p></div>
+      <div><div class="eyebrow">INTELIGENCIA PARA EL TRANSPORTE</div><h1>De los datos a la decisión.</h1><p id="overview-summary">Consultando el estado del sistema…</p></div>
       <button class="button secondary" id="refresh" type="button">↻ Actualizar</button>
     </section>
     <div id="notice" class="notice" role="status" hidden></div>
     <section id="flujo" class="panel pipeline">
       <div class="section-top"><div><span class="eyebrow">01 / ARQUITECTURA</span><h2>Todo conectado.</h2></div><span id="system-status" class="status neutral">Consultando servicios…</span></div>
-      <div class="origin"><span>ORIGEN GPS</span><strong>MongoDB · raw_gps</strong><span>→</span><small>Lotes controlados e idempotentes</small></div>
+      <div class="origin"><span>ORIGEN GPS</span><strong id="origin-source">API de la empresa</strong><span>→</span><small>Lotes controlados e idempotentes</small></div>
       <div class="flow">
         <article class="node etl" data-service="etl"><span class="node-number">01</span><h3>ETL</h3><p>Extrae, limpia y carga</p><span class="node-status">Consultando…</span></article>
         <div class="flow-arrow arrow-a" aria-hidden="true">→</div>
@@ -91,8 +92,8 @@
         <div class="flow-arrow arrow-c" aria-hidden="true">→</div>
         <article class="node front" data-service="front"><span class="node-number">05</span><h3>Frontend</h3><p>Visualiza y explora</p><span class="node-status">Consultando…</span></article>
         <div class="machine-link">↕ <span>Lee datos · guarda resultados</span></div>
-        <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Identifica zonas GPS</p><span class="node-status">Consultando…</span></article>
-        <div class="flow-explanation"><strong>Servicios conectados.</strong><p>El ETL carga la telemetría en MariaDB. El modelo analiza zonas GPS y los endpoints entregan los resultados a esta pantalla.</p></div>
+        <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Cierre diario y clasificación de rutas</p><span class="node-status">Consultando…</span></article>
+        <div class="flow-explanation"><strong>Servicios conectados.</strong><p>El ETL trae la telemetría de la API de la empresa a MariaDB. Machine cierra cada día y clasifica las rutas, y los endpoints entregan los resultados a esta pantalla.</p></div>
       </div>
       <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada 5 min</span></div>
     </section>
@@ -109,44 +110,61 @@
           <p class="telemetry-intro">Esta sección quedará disponible cuando se conecte la API de telemetría de la empresa.</p>
         </div>
         <div id="telemetry-content" hidden>
+        <div id="telemetry-connection" class="telemetry-connection warning" role="status" aria-live="polite" hidden></div>
         <div class="real-metrics" aria-label="Resumen de telemetría real">
-          <article><span>Reportes guardados</span><strong id="telemetry-count">—</strong><small>Muestra: últimos 30 reportes</small></article>
-          <article><span>Vehículos observados</span><strong id="vehicle-count">—</strong><small>Identificados por patente</small></article>
+          <article><span>Reportes guardados</span><strong id="telemetry-count">—</strong><small>Tabla: últimos 30 reportes de camiones · se actualiza cada minuto</small></article>
+          <article><span>Camiones activos</span><strong id="vehicle-count">—</strong><small id="vehicle-count-note">Camiones con reportes en las últimas 24 h</small></article>
         </div>
         <div class="telemetry-range"><span id="telemetry-range">Esperando rango temporal…</span><span id="telemetry-quality">Esperando control de calidad…</span></div>
-        <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha UTC</th><th>Evento</th><th>Coordenadas</th><th>Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
+        <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha (hora Chile)</th><th>Evento</th><th>Coordenadas</th><th class="col-ignition">Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
+        </div>
+      </section>
+      <section id="historial" class="panel telemetry-panel history-panel">
+        <div class="section-top"><div><span class="eyebrow">REPORTES DIARIOS</span><h2>Historial por día</h2></div><span id="history-status" class="status neutral">Cargando…</span></div>
+        <p class="telemetry-intro">Cada día va de 00:00 a 00:00, hora de Chile. Al pasar la medianoche el día se cierra y queda disponible para consulta. Si después llegan reportes atrasados de ese día (por ejemplo, tras un corte de red), el día se recalcula solo. Un viaje es el recorrido entre dos paradas (detenido al menos 10 min en el mismo lugar); el tiempo detenido, por ejemplo al cargar, no separa viajes y se muestra aparte. Los kilómetros solo suman tramos entre reportes seguidos; no se inventa recorrido.</p>
+        <div class="history-controls">
+          <button type="button" class="button secondary" id="history-prev" aria-label="Día anterior al seleccionado">◀</button>
+          <input type="date" id="history-date" aria-label="Día a consultar">
+          <button type="button" class="button secondary" id="history-next" aria-label="Día siguiente al seleccionado">▶</button>
+          <button type="button" class="button secondary" id="history-yesterday">Ayer</button>
+          <button type="button" class="button secondary" id="history-today">Hoy</button>
+          <span id="history-note" class="history-note"></span>
+        </div>
+        <div class="real-metrics history-metrics" aria-label="Resumen del día">
+          <article><span>Camiones</span><strong id="history-trucks">—</strong><small>Con al menos un reporte en el día</small></article>
+          <article><span>Reportes</span><strong id="history-reports">—</strong><small id="history-discarded">Reportes GPS válidos</small></article>
+          <article><span>Km observados</span><strong id="history-km">—</strong><small>Suma de tramos unidos</small></article>
+          <article><span>Último cálculo</span><strong id="history-calculated">—</strong><small id="history-calculated-note">Hora de Chile</small></article>
+        </div>
+        <div class="table-scroll telemetry-table"><table><thead><tr><th>Camión</th><th>Reportes</th><th>Primer reporte</th><th>Último reporte</th><th>Km observados</th><th>Viajes</th><th>Tiempo detenido</th></tr></thead><tbody id="history-rows"><tr><td colspan="7" class="empty">Selecciona un día.</td></tr></tbody></table></div>
+        <div id="history-detail" class="history-detail" hidden>
+          <div class="section-top"><h3 id="history-detail-title">Reportes del camión</h3><button type="button" class="text-button" id="history-detail-close">Cerrar</button></div>
+          <div class="table-scroll telemetry-table"><table><thead><tr><th>Hora (Chile)</th><th>Evento</th><th>Coordenadas</th><th class="col-ignition">Encendido</th></tr></thead><tbody id="history-detail-rows"></tbody></table></div>
+          <button type="button" class="button secondary" id="history-detail-more" hidden>Cargar más reportes</button>
+        </div>
+        <div class="history-month">
+          <div class="section-top"><h3>Resumen del mes</h3><input type="month" id="history-month" aria-label="Mes a consultar"></div>
+          <div class="table-scroll telemetry-table"><table><thead><tr><th>Día</th><th>Estado</th><th>Camiones</th><th>Reportes</th><th>Km observados</th></tr></thead><tbody id="history-month-rows"></tbody></table></div>
         </div>
       </section>
     </div>
     <div id="dashboard" class="dataset-space" data-dataset-view="dashboard" hidden>
       <section class="panel dashboard-panel">
         <div class="section-top">
-          <div><span class="eyebrow">03 / RESUMEN HISTÓRICO</span><h2>Actividad diaria de rutas y flota</h2></div>
+          <div><span class="eyebrow">03 / PANEL OPERATIVO</span><h2>Dashboard de rutas y flota</h2></div>
           <span id="dashboard-snapshot" class="status neutral">Preparando indicadores…</span>
         </div>
-        <p class="telemetry-intro">Cada jornada va desde las 00:00 hasta antes de las 00:00 del día siguiente, en horario de Chile. El resumen GPS histórico está separado de la telemetría actual.</p>
-        <div class="dashboard-date-bar">
-          <label for="dashboard-date">Día cerrado <input id="dashboard-date" type="date" aria-describedby="dashboard-date-note"></label>
-          <label for="dashboard-range">Comparar rutas <select id="dashboard-range"><option value="7">Últimos 7 días</option><option value="30">Últimos 30 días</option></select></label>
-          <button id="dashboard-latest" type="button">Último día con datos</button>
-          <span id="dashboard-date-note">Corte diario en horario de Chile · solo días anteriores a hoy</span>
-        </div>
-        <p id="dashboard-source-note" class="dashboard-source-note" role="status">Consultando reportes GPS…</p>
+        <p class="telemetry-intro">Resumen de las rutas clasificadas y del estado de la flota. Se actualiza junto con el mapa de rutas.</p>
         <div class="dashboard-kpis" aria-label="Indicadores principales del dashboard">
-          <article><span>Reportes GPS de camiones</span><strong id="dashboard-reports">—</strong><small>Registros de camiones en el día elegido</small></article>
-          <article><span>Camiones distintos</span><strong id="dashboard-vehicles">—</strong><small>Asset ID de camiones con reportes ese día</small></article>
-          <article><span>Rutas clasificadas</span><strong id="dashboard-routes">—</strong><small>Se completará con los resultados de Machine</small></article>
+          <article><span>Reportes disponibles</span><strong id="dashboard-reports">—</strong><small>Telemetría conservada en MariaDB</small></article>
+          <article><span>Recorridos analizados</span><strong id="dashboard-trips">—</strong><small>Viajes dentro de la ventana procesada</small></article>
+          <article><span>Rutas identificadas</span><strong id="dashboard-routes">—</strong><small>Agrupaciones geoespaciales completas</small></article>
         </div>
         <div class="dashboard-grid">
-          <article class="dashboard-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">RANKING DIARIO</span><h3>Rutas más usadas</h3></div><span class="chart-unit">Camiones distintos</span></div>
-            <p>Rutas ordenadas por la cantidad de camiones distintos que pasaron por ellas durante el día elegido.</p>
-            <div id="dashboard-most-routes" class="dashboard-bars" aria-label="Rutas más usadas"><span class="chart-empty">Esperando rutas procesadas…</span></div>
-          </article>
-          <article class="dashboard-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">RANKING DIARIO</span><h3>Rutas menos usadas</h3></div><span class="chart-unit">Camiones distintos</span></div>
-            <p>Incluye solo rutas observadas; cero reportes se indica como falta de datos, no como poco uso.</p>
-            <div id="dashboard-least-routes" class="dashboard-bars" aria-label="Rutas menos usadas"><span class="chart-empty">Esperando rutas procesadas…</span></div>
+          <article class="dashboard-card dashboard-wide">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">ACTIVIDAD GEOGRÁFICA</span><h3>Uso de rutas por zona</h3></div><span class="chart-unit">Recorridos</span></div>
+            <p>Recorridos de cada ruta, contados en la zona donde queda su punto central.</p>
+            <div id="dashboard-route-zones" class="dashboard-bars" aria-label="Gráfico de uso de rutas por zona"><span class="chart-empty">Cargando zonas…</span></div>
           </article>
           <article class="dashboard-card dashboard-donut-card">
             <div class="dashboard-card-heading"><div><span class="eyebrow">CLASIFICACIÓN</span><h3>Nivel de uso de rutas</h3></div></div>
@@ -154,17 +172,25 @@
             <div id="dashboard-route-levels" class="dashboard-donut-wrap" aria-label="Distribución de rutas por nivel de uso"></div>
           </article>
           <article class="dashboard-card dashboard-donut-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">COMPARACIÓN</span><h3 id="dashboard-trend-period">Evolución de uso · 7 días</h3></div></div>
-            <p>Pasos de camiones por rutas procesadas en los días cerrados hasta la fecha elegida.</p>
-            <div id="dashboard-route-trend" class="dashboard-bars" aria-label="Evolución de uso de rutas"><span class="chart-empty">Esperando resumen diario de rutas…</span></div>
+            <div class="dashboard-card-heading"><div><span class="eyebrow">FLOTA ACTUAL</span><h3>Disponibilidad de los vehículos</h3></div></div>
+            <p>Estado de señal y encendido según la última posición disponible.</p>
+            <div id="dashboard-fleet-status" class="dashboard-donut-wrap" aria-label="Distribución del estado de la flota"></div>
           </article>
+          <article class="dashboard-card dashboard-wide">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">RANKING OPERATIVO</span><h3>Rutas con mayor actividad</h3></div><span class="chart-unit">Top 8</span></div>
+            <p>Recorridos agrupados por ruta completa; el color conserva su clasificación global.</p>
+            <div id="dashboard-top-routes" class="dashboard-bars routes" aria-label="Ranking de rutas con mayor actividad"><span class="chart-empty">Calculando ranking…</span></div>
+          </article>
+          <aside class="dashboard-highlights" aria-label="Hallazgos destacados">
+            <article><span>ZONA CON MAYOR USO</span><strong id="dashboard-most-route-zone">—</strong><small id="dashboard-most-route-zone-detail">Calculando recorridos…</small></article>
+          </aside>
         </div>
-        <div class="dashboard-method"><strong>Explorar los recorridos</strong><span>El mapa conserva sus filtros y análisis detallados en una sola vista.</span><a href="#mapa-calor">Abrir mapa de rutas →</a></div>
+        <div class="dashboard-method"><strong>Cómo se definen las zonas</strong><span id="dashboard-method">Se calculan con las rutas clasificadas.</span></div>
       </section>
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
       <section class="panel heatmap-panel">
-        <div class="section-top"><div><span class="eyebrow">04 / ANÁLISIS GEOESPACIAL</span><h2>Uso de rutas históricas</h2></div><span id="heatmap-source-status" class="status info">Pendiente de procesamiento Machine</span></div>
+        <div class="section-top"><div><span class="eyebrow">MAPA DE RUTAS</span><h2>Rutas y flota</h2></div><span id="heatmap-source-status" class="status info">Cargando…</span></div>
         <p id="heatmap-intro" class="telemetry-intro">Consultando la fuente del mapa y su cobertura histórica…</p>
         <div class="route-filter-panel">
           <span>Mostrar rutas</span>
@@ -189,11 +215,11 @@
         </div>
         <div class="heatmap-layout">
           <article class="map-card">
-            <div class="map-title"><div><strong>Monitoreo de rutas y flota</strong><small id="heatmap-zones">Preparando datos técnicos…</small></div><div class="map-title-actions"><span id="map-last-update">Cargando contrato del mapa…</span><button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button></div></div>
+            <div class="map-title"><div><strong>Monitoreo de rutas y flota</strong><small id="heatmap-zones">Cargando rutas…</small></div><div class="map-title-actions"><span id="map-last-update">Cargando…</span><button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button></div></div>
             <div class="map-view-selector" role="group" aria-label="Vista del mapa">
-              <button type="button" data-map-mode="historical" aria-pressed="true">Mapas de telemetría</button>
               <button type="button" data-map-mode="classified" aria-pressed="false" disabled>Rutas clasificadas</button>
-              <span id="map-view-description">GPS histórico de MariaDB; la clasificación de rutas depende de Machine.</span>
+              <button type="button" data-map-mode="historical" aria-pressed="true">Mapas de telemetría</button>
+              <span id="map-view-description"></span>
             </div>
             <div class="map-view-stage">
               <div id="explorer-routes" class="explorer-frame-wrap" hidden>
@@ -210,13 +236,11 @@
                 <button type="button" class="monitor-tab" data-monitor-tab="vehicles" role="tab" aria-selected="false">Vehículos <b id="vehicle-live-count">—</b></button>
               </div>
               <label class="monitor-search"><span>⌕</span><input id="monitor-search" type="search" placeholder="Buscar ruta…" aria-label="Buscar rutas o vehículos"></label>
-              <p id="historical-vehicle-context" class="historical-vehicle-context" hidden>Elige un día en Mapas de telemetría y pulsa Cargar.</p>
               <ul id="route-monitor-list" class="monitor-list" data-monitor-list="routes"><li>Esperando rutas…</li></ul>
               <ul id="vehicle-live-list" class="monitor-list" data-monitor-list="vehicles" hidden><li>Esperando posiciones…</li></ul>
               <div id="map-selection-detail" class="map-selection-detail" aria-live="polite">
                 <span>SELECCIÓN DEL MAPA</span><strong>Selecciona una ruta o un vehículo</strong><p>El mapa centrará el elemento y mostrará sus datos sin modificar la clasificación.</p>
               </div>
-              <div id="historical-vehicle-detail" class="historical-vehicle-detail" hidden aria-live="polite"></div>
               <div id="journey-detail" class="journey-detail" hidden aria-live="polite">
                 <strong>Recorrido observado del camión</strong>
                 <dl>
@@ -226,7 +250,7 @@
                   <div><dt>Última posición</dt><dd id="journey-end">—</dd></div>
                   <div><dt>Distancia GPS</dt><dd id="journey-distance">—</dd></div>
                   <div><dt>Tiempo en movimiento</dt><dd id="journey-moving">—</dd></div>
-                  <div><dt>Viajes encadenados</dt><dd id="journey-chains">—</dd></div>
+                  <div><dt>Cortes de señal (más de 5 min)</dt><dd id="journey-gaps">—</dd></div>
                   <div><dt>Ruta histórica</dt><dd id="journey-route">—</dd></div>
                 </dl>
                 <small id="journey-note"></small>
@@ -236,8 +260,8 @@
             <article class="route-highlight most"><span>RUTA MÁS USADA</span><strong id="most-route">Calculando…</strong><small id="most-route-usage">—</small></article>
             <article class="route-highlight least"><span>RUTA MENOS USADA</span><strong id="least-route">Calculando…</strong><small id="least-route-usage">—</small></article>
             <article class="geo-model">
-              <span class="eyebrow">FUENTE DEL MAPA</span>
-              <strong id="geo-model-zones">Contrato procesado</strong>
+              <span class="eyebrow">PERÍODO ANALIZADO</span>
+              <strong id="geo-model-zones">Clasificación vigente</strong>
               <small id="geo-model-detail">Preparando la telemetría.</small>
             </article>
           </aside>
