@@ -74,15 +74,29 @@
   }
   .solo-calor .pestanas { display: none; }
   .etiqueta { color: var(--acento); font-size: 11px; font-weight: 700; }
+  .titulo { display: flex; flex-direction: column; gap: 2px; align-self: center; }
+  .rango { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 10px; margin: 0; padding: 0; border: 0; }
+  .rango legend { float: left; width: 100%; margin-bottom: 2px; padding: 0; font-size: 11px; font-weight: 700; color: var(--suave); }
+  .duracion button { padding: 7px 10px; font-size: 13px; }
 </style>
 </head>
 <body>
 <header class="barra">
-  <h1>Mapas de telemetría</h1>
-  <span class="etiqueta">DATOS HISTÓRICOS</span>
-  <label class="campo">Día histórico <input type="date" id="desde"></label>
-  <input type="hidden" id="hasta">
-  <button id="cargar">Cargar</button>
+  <div class="titulo">
+    <h1>Mapas de telemetría</h1>
+    <span class="etiqueta">DATOS HISTÓRICOS</span>
+  </div>
+  <fieldset class="rango">
+    <legend>Rango de fechas (hasta 14 días)</legend>
+    <label class="campo">Desde <input type="date" id="desde"></label>
+    <label class="campo">Hasta <input type="date" id="hasta"></label>
+    <div class="duracion" role="group" aria-label="Rangos rápidos">
+      <button type="button" data-dias="1">1 día</button>
+      <button type="button" data-dias="7">7 días</button>
+      <button type="button" data-dias="14">14 días</button>
+    </div>
+    <button id="cargar">Cargar</button>
+  </fieldset>
   <nav class="pestanas" role="tablist">
     <button role="tab" data-vista="calor" aria-selected="true">Mapa de calor</button>
     <button role="tab" data-vista="rutas" aria-selected="false">Rutas por camión</button>
@@ -90,14 +104,14 @@
     <button role="tab" data-vista="puntos" aria-selected="false">Puntos</button>
   </nav>
 </header>
-<p id="estado">Elige un día y presiona Cargar. El calor representa densidad de reportes GPS; el uso de rutas cuenta camiones próximos a cada tramo y aún no es una clasificación definitiva.</p>
+<p id="estado">Elige un rango de fechas (hasta 14 días) y presiona Cargar. El calor representa densidad de reportes GPS; el uso de rutas cuenta camiones próximos a cada tramo y aún no es una clasificación definitiva.</p>
 <div id="mapa"></div>
 
 <script>
 "use strict";
 
 const API_BASE = "";
-const MAX_DIAS = 1;  // Esta vista integrada limita la carga a un día histórico.
+const MAX_DIAS = 14;  // mismo máximo que /api/gps (GPS_MAX_DIAS)
 document.body.classList.toggle("solo-calor", new URLSearchParams(location.search).get("vista") === "calor");
 
 // ---------------------------------------------------------------------------
@@ -842,39 +856,40 @@ async function mostrarVista(nombre) {
 }
 
 // ---------------------------------------------------------------------------
-// Rango de fechas: un día por consulta en la vista integrada.
+// Rango de fechas: de 1 a MAX_DIAS días, ambos incluidos (00:00 a 00:00 hora de Chile).
 // ---------------------------------------------------------------------------
 const campoDesde = document.getElementById("desde"), campoHasta = document.getElementById("hasta");
 const sumarDias = (iso, n) => new Date(Date.parse(iso) + n * 86400000).toISOString().slice(0, 10);
 const diasRango = () => Math.round((Date.parse(campoHasta.value) - Date.parse(campoDesde.value)) / 86400000) + 1;
 
-// Por defecto se muestra el día anterior completo (00:00 a 00:00 hora de Chile).
+// Por defecto se muestra el día anterior completo; no se pueden elegir días futuros.
 const hoyChile = new Intl.DateTimeFormat("en-CA", {timeZone: "America/Santiago"}).format(new Date());
-campoDesde.max = hoyChile;
+campoDesde.max = campoHasta.max = hoyChile;
 campoDesde.value = campoHasta.value = sumarDias(hoyChile, -1);
 
 function actualizarRango() {
-  if (!campoDesde.value) return;
-  // El calendario de 'hasta' solo deja elegir dentro del maximo
-  campoHasta.min = campoDesde.value;
-  campoHasta.max = sumarDias(campoDesde.value, MAX_DIAS - 1);
-  const dias = campoHasta.value ? diasRango() : 0;
-  document.querySelectorAll("[data-dias]").forEach(b => b.setAttribute("aria-pressed", +b.dataset.dias === dias));
+  const dias = campoDesde.value && campoHasta.value ? diasRango() : 0;
+  document.querySelectorAll("[data-dias]").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.dias === dias)));
 }
 
-// Al mover 'desde' se mantiene la misma duracion (y se recorta al maximo)
-let duracion = 1;
+// Si una fecha deja el rango al revés o más largo que el máximo, se ajusta la otra.
 campoDesde.addEventListener("change", () => {
-  if (campoDesde.value) campoHasta.value = sumarDias(campoDesde.value, duracion - 1);
+  if (!campoDesde.value) return;
+  if (!campoHasta.value || campoHasta.value < campoDesde.value) campoHasta.value = campoDesde.value;
+  if (diasRango() > MAX_DIAS) campoHasta.value = sumarDias(campoDesde.value, MAX_DIAS - 1);
+  if (campoHasta.value > hoyChile) campoHasta.value = hoyChile;
   actualizarRango();
 });
 campoHasta.addEventListener("change", () => {
-  if (campoDesde.value && campoHasta.value) duracion = Math.min(Math.max(diasRango(), 1), MAX_DIAS);
+  if (!campoHasta.value) return;
+  if (!campoDesde.value || campoDesde.value > campoHasta.value) campoDesde.value = campoHasta.value;
+  if (diasRango() > MAX_DIAS) campoDesde.value = sumarDias(campoHasta.value, -(MAX_DIAS - 1));
   actualizarRango();
 });
+// Los rangos rápidos terminan en la fecha 'hasta' elegida (por defecto, ayer).
 document.querySelectorAll("[data-dias]").forEach(b => b.addEventListener("click", () => {
-  duracion = +b.dataset.dias;
-  if (campoDesde.value) campoHasta.value = sumarDias(campoDesde.value, duracion - 1);
+  if (!campoHasta.value) campoHasta.value = sumarDias(hoyChile, -1);
+  campoDesde.value = sumarDias(campoHasta.value, -(+b.dataset.dias - 1));
   actualizarRango();
 }));
 actualizarRango();
@@ -884,7 +899,7 @@ async function cargar() {
   if (!desde || !hasta) { estado("Elige las dos fechas.", true); return; }
   const dias = diasRango();
   if (dias < 1) { estado("La fecha 'hasta' tiene que ser igual o posterior a 'desde'.", true); return; }
-  if (dias > MAX_DIAS) { estado("Esta vista carga un día a la vez.", true); return; }
+  if (dias > MAX_DIAS) { estado(`El rango máximo es de ${MAX_DIAS} días.`, true); return; }
 
   const boton = document.getElementById("cargar");
   boton.disabled = true;

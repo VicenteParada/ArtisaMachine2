@@ -516,7 +516,10 @@ class Handler(JsonHandler):
                 self.respond(400, {"error": error})
                 return
         try:
-            with connect_db(autocommit=False) as connection, connection.cursor() as cursor:
+            # Un rango de varios días de GPS puede tardar más que el límite normal de 15 s
+            # (Nginx corta a los 150 s).
+            read_timeout = 120 if path == "/api/gps" else 15
+            with connect_db(autocommit=False, read_timeout=read_timeout) as connection, connection.cursor() as cursor:
                 if path in ("/health", "/api/estado"):
                     state = pipeline_state(cursor, detailed=path == "/api/estado")
                     self.respond(503 if path == "/health" and state["status"] != "ok" else 200, state)
