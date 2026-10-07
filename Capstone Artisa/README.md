@@ -212,7 +212,7 @@ Corre dentro de `machine-diario`, sin servicios extra:
    - Agrupa por par origen-destino (ida y vuelta juntas) y por trayectoria (32 puntos,
      distancia media, enlace promedio con umbral de 750 m): un desvío real es otra ruta.
    - La línea de cada ruta es su viaje medoide: un recorrido real, no un promedio.
-   - Nivel por cantidad de recorridos: HIGH sobre el percentil 67, LOW hasta el 33.
+   - Nivel por cantidad de recorridos: más usadas (sobre la mediana) y menos usadas.
 3. `/api/mapa` y `/api/dashboard` entregan la versión activa; `/api/vehiculos/<id>/recorrido`
    entrega el último día observado de un camión. Sin versión activa siguen en "pendiente".
 

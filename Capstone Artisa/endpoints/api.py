@@ -41,7 +41,7 @@ PENDING_RESPONSES = {
     "/api/dashboard": {
         "status": "pending", "calidad": {"validos": None},
         "operacion": {"viajes": None},
-        "rutas": {"HIGH": None, "MEDIUM": None, "LOW": None},
+        "rutas": {"HIGH": None, "LOW": None},
     },
 }
 

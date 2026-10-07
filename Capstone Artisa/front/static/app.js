@@ -267,15 +267,15 @@ function routeUsageSummary(route) {
     : "Sin información";
 }
 
-const ROUTE_DRAW_ORDER = ["LOW", "MEDIUM", "HIGH"];
-const ROUTE_COLORS = Object.freeze({HIGH: "#14532d", MEDIUM: "#f97316", LOW: "#dc2626"});
+const ROUTE_DRAW_ORDER = ["LOW", "HIGH"];
+const ROUTE_COLORS = Object.freeze({HIGH: "#14532d", LOW: "#dc2626"});
 const mapLayerVisibility = {routes: true, vehicles: true};
 let activeRouteFilter = "ALL";
 let activeMonitorTab = "routes";
 let activeMapMode = "historical";
 let userChoseMapMode = false;
 let fleetMap = null;
-const routeLayers = {LOW: null, MEDIUM: null, HIGH: null};
+const routeLayers = {LOW: null, HIGH: null};
 let truckLayer = null;
 let journeyLayer = null;
 let selectedRouteLayer = null;
@@ -324,7 +324,7 @@ function setLayerVisibility(layer, visible) {
 }
 
 function updateRouteFilterCounts(routes) {
-  const counts = {ALL: routes.length, LOW: 0, MEDIUM: 0, HIGH: 0};
+  const counts = {ALL: routes.length, LOW: 0, HIGH: 0};
   for (const route of routes) {
     const level = routeProperties(route).usage_level;
     if (Object.hasOwn(counts, level)) counts[level] += 1;
@@ -610,7 +610,7 @@ function initializeFleetMap() {
   container.append(pendingNote);
 
   for (const [paneName, zIndex] of [
-    ["routeLowPane", 410], ["routeMediumPane", 420],
+    ["routeLowPane", 410],
     ["routeHighPane", 430], ["routeSelectedPane", 440], ["journeyPane", 625], ["truckPane", 650]
   ]) {
     fleetMap.createPane(paneName).style.zIndex = String(zIndex);
@@ -861,10 +861,10 @@ function renderFleetMap(data) {
     const level = properties.usage_level;
     const layer = routeLayers[level];
     if (!layer || !route.geometry || route.geometry.type !== "LineString") continue;
-    const pane = level === "HIGH" ? "routeHighPane" : (level === "MEDIUM" ? "routeMediumPane" : "routeLowPane");
+    const pane = level === "HIGH" ? "routeHighPane" : "routeLowPane";
     const feature = {type: "Feature", properties, geometry: route.geometry};
-    const baseWeight = level === "HIGH" ? 6 : (level === "MEDIUM" ? 4.8 : 3.3);
-    const baseOpacity = level === "HIGH" ? 0.98 : (level === "MEDIUM" ? 0.92 : 0.82);
+    const baseWeight = level === "HIGH" ? 6 : 3.6;
+    const baseOpacity = level === "HIGH" ? 0.98 : 0.85;
     const haloWeight = baseWeight + 1.5;
     const haloOpacity = 0.9;
     const halo = L.geoJSON(feature, {
@@ -1191,7 +1191,7 @@ function renderDashboard(data, metrics = {}) {
   $("dashboard-reports").textContent = format(quality.validos || summary.available_report_count || 0);
   $("dashboard-trips").textContent = format(operation.viajes || data.trips.length);
   $("dashboard-routes").textContent = format(
-    Number(routeMetrics.HIGH || 0) + Number(routeMetrics.MEDIUM || 0) + Number(routeMetrics.LOW || 0)
+    Number(routeMetrics.HIGH || 0) + Number(routeMetrics.LOW || 0)
     || data.routes.length
   );
   $("dashboard-snapshot").textContent = "Corte " + formatDataDay(data.snapshotDate);
@@ -1215,10 +1215,9 @@ function renderDashboard(data, metrics = {}) {
 
   const routeLevels = {
     HIGH: Number(routeMetrics.HIGH || 0),
-    MEDIUM: Number(routeMetrics.MEDIUM || 0),
     LOW: Number(routeMetrics.LOW || 0)
   };
-  if (routeLevels.HIGH + routeLevels.MEDIUM + routeLevels.LOW === 0) {
+  if (routeLevels.HIGH + routeLevels.LOW === 0) {
     for (const route of data.routes) {
       const level = routeProperties(route).usage_level;
       if (Object.hasOwn(routeLevels, level)) routeLevels[level] += 1;
@@ -1226,8 +1225,7 @@ function renderDashboard(data, metrics = {}) {
   }
   renderDashboardDonut("dashboard-route-levels", [
     {label: "Más usadas", value: routeLevels.HIGH, color: "#14532d"},
-    {label: "Uso medio", value: routeLevels.MEDIUM, color: "#f97316"},
-    {label: "Poco usadas", value: routeLevels.LOW, color: "#dc2626"}
+    {label: "Menos usadas", value: routeLevels.LOW, color: "#dc2626"}
   ], "rutas");
 
   const fleet = {moving: 0, off: 0};

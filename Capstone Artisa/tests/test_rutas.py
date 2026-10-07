@@ -54,7 +54,7 @@ class RouteTests(unittest.TestCase):
         directa, desvio, ac = rutas
         self.assertEqual(directa["unique_vehicle_count"], 4)
         self.assertIn("Faena Lampa", directa["label"])
-        self.assertEqual([r["usage_level"] for r in rutas], ["HIGH", "MEDIUM", "LOW"])
+        self.assertEqual([r["usage_level"] for r in rutas], ["HIGH", "LOW", "LOW"])  # mediana = 6
         self.assertEqual(metricas["viajes_clasificados"], 23)
         self.assertEqual((metricas["caminos_esporadicos"], metricas["viajes_esporadicos"]), (1, 1))
 
@@ -77,15 +77,12 @@ class RouteTests(unittest.TestCase):
             self.assertIn(tuple(map(tuple, ruta["geometry"]["coordinates"])), observados)
             self.assertEqual(ruta["geometry_source"], "viaje_real_medoide")
 
-    def test_levels_by_percentile(self):
+    def test_two_levels_by_median(self):
         niveles, umbrales = clasificar_niveles([1, 1, 1, 2, 3, 5, 8, 13, 40])
-        self.assertEqual(niveles[0], "LOW")
-        self.assertEqual(niveles[-1], "HIGH")
-        self.assertIn("MEDIUM", niveles)
-        # Empate en el corte: el nivel medio no desaparece.
-        niveles, _ = clasificar_niveles([5] * 8 + [9, 30])
-        self.assertIn("MEDIUM", niveles)
-        self.assertEqual(clasificar_niveles([3, 3, 3])[0], ["MEDIUM"] * 3)
+        self.assertEqual(umbrales["mediana"], 3)
+        self.assertEqual(niveles, ["LOW"] * 5 + ["HIGH"] * 4)
+        self.assertNotIn("MEDIUM", clasificar_niveles([5] * 8 + [9, 30])[0])
+        self.assertEqual(clasificar_niveles([3, 3, 3])[0], ["HIGH"] * 3)
 
     def test_point_in_faena(self):
         self.assertTrue(dentro_geojson(-33.4, -70.6, FAENA_A["geojson"]))

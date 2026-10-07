@@ -108,8 +108,7 @@ def latest_positions(cursor, route_by_asset):
 
 
 def _route(row):
-    from_level = {"HIGH": ("Más usada", "#14532d"), "MEDIUM": ("Uso medio", "#f97316"),
-                  "LOW": ("Poco usada", "#dc2626")}
+    from_level = {"HIGH": ("Más usada", "#14532d"), "LOW": ("Menos usada", "#dc2626")}
     label, color = from_level.get(row["usage_level"], (row["usage_level"], "#718785"))
     return {
         "route_id": row["route_id"], "label": row["label"], "usage_count": row["usage_count"],
@@ -156,8 +155,8 @@ def classified_map(cursor):
             "classification": (
                 f"Rutas completas entre paradas, agrupadas por origen-destino y trayectoria, con los viajes del "
                 f"{version['desde']:%d-%m-%Y} al {version['hasta']:%d-%m-%Y}. Nivel por cantidad de recorridos: "
-                f"verde con más de {round(umbrales.get('percentil_67') or 0, 1):g}, rojo con "
-                f"{round(umbrales.get('percentil_33') or 0, 1):g} o menos (percentiles 67 y 33)."
+                f"verde (más usadas) con más de {round(umbrales.get('mediana') or 0, 1):g} recorridos, "
+                f"rojo (menos usadas) con {round(umbrales.get('mediana') or 0, 1):g} o menos (mediana)."
             ),
             "geometry": "Cada línea es un viaje real observado (el más representativo de su ruta).",
             "road_matching": "Sin ajuste a calles: se dibujan los puntos GPS reportados, sin unir saltos.",
@@ -178,7 +177,7 @@ def classified_dashboard(cursor):
         "status": "ok", "version": version["id"],
         "calidad": {"validos": available_reports(cursor)},
         "operacion": {"viajes": metrics.get("viajes_clasificados", 0), "camiones": metrics.get("camiones", 0)},
-        "rutas": {level: int(niveles.get(level, 0)) for level in ("HIGH", "MEDIUM", "LOW")},
+        "rutas": {level: int(niveles.get(level, 0)) for level in ("HIGH", "LOW")},
     }
 
 

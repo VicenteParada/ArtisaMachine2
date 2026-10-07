@@ -30,7 +30,7 @@ VERSION = {"id": 4, "desde": date(2026, 7, 1), "hasta": date(2026, 9, 28), "acti
            "creado_en": datetime(2026, 10, 6),
            "metricas_json": json.dumps({"viajes_clasificados": 18, "camiones": 5,
                                         "por_nivel": {"HIGH": 1, "LOW": 1},
-                                        "umbrales": {"percentil_33": 2.0, "percentil_67": 6.67}}),
+                                        "umbrales": {"mediana": 6.5}}),
            "lugares_json": "{}"}
 RUTA = {"route_id": "R-ABC123", "label": "Faena Lampa ↔ Lugar 1", "origen": "F7", "destino": "L0",
         "usage_count": 12, "unique_vehicle_count": 4, "observed_points": 360, "km_mediana": 16.6,
@@ -73,12 +73,12 @@ class MapContractTests(unittest.TestCase):
         self.assertEqual((vehicle["patente"], vehicle["driver_name"], vehicle["driver_last_name"]),
                          ("RJXS30", "JULIO", "PÉREZ"))
         self.assertEqual(payload["ranking"]["most_used"]["route_id"], "R-ABC123")
-        self.assertIn("6.7", payload["metadata"]["classification"])
+        self.assertIn("6.5", payload["metadata"]["classification"])
 
     def test_dashboard_levels(self):
         cursor = FakeCursor([("FROM rutas_version", lambda p: [dict(VERSION)]), ("validos", [{"n": 7}])])
         dash = rutas_api.classified_dashboard(cursor)
-        self.assertEqual(dash["rutas"], {"HIGH": 1, "MEDIUM": 0, "LOW": 1})
+        self.assertEqual(dash["rutas"], {"HIGH": 1, "LOW": 1})
         self.assertEqual(dash["operacion"]["viajes"], 18)
 
 

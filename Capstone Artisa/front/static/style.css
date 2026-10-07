@@ -446,3 +446,4 @@
 @media(max-width:690px){.history-panel .history-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .no-ignition .col-ignition{display:none}
 .leaflet-tooltip.route-endpoint{font-size:11px;font-weight:700;color:#0b1f1a;background:#fff;border:2px solid #0b1f1a;border-radius:6px;padding:3px 7px;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+#classified-map-legend i:nth-of-type(2){background:#14532d}
