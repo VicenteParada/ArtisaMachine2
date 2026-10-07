@@ -627,6 +627,9 @@ function initializeFleetMap() {
 function fitPendingMap(force = false) {
   if (!fleetMap) return;
   fleetMap.invalidateSize();
+  // Con un camión o una ruta seleccionados se respeta esa vista: volver a la pestaña o la
+  // actualización automática no deben alejar el mapa a toda la flota.
+  if (activeJourneyVehicleId || selectedRouteId || selectedVehicleId) return;
   if ((force || !mapHasFitted) && pendingMapBounds && pendingMapBounds.isValid()) {
     fleetMap.fitBounds(pendingMapBounds, {padding: [28, 28], maxZoom: 11});
     mapHasFitted = true;
