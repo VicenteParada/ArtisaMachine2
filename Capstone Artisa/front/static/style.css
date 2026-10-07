@@ -88,18 +88,6 @@
 @media(max-width:940px){.dataset-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}.dashboard-grid{grid-template-columns:minmax(0,1fr)}.dashboard-wide,.dashboard-highlights{grid-column:auto}}
 @media(max-width:690px){.dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.dashboard-kpis article{padding:14px}.dashboard-kpis strong{font-size:23px}.dashboard-card{padding:15px}.dashboard-bars.routes{grid-template-columns:minmax(0,1fr)}.dashboard-highlights{grid-template-columns:minmax(0,1fr)}.dashboard-method{flex-direction:column;gap:5px}.dashboard-donut-wrap{grid-template-columns:115px minmax(0,1fr)}.dashboard-donut{width:115px}.dashboard-donut>div{inset:21px}}
 @media(max-width:380px){.dashboard-kpis{grid-template-columns:minmax(0,1fr)}.dashboard-donut-wrap{grid-template-columns:minmax(0,1fr);justify-items:center}.dashboard-donut-legend{width:100%}}
-.dashboard-heatmap-card{margin-top:14px}
-.dashboard-heatmap-card>p{min-height:0}
-.dashboard-heatmap-stage{display:grid;place-items:center;min-height:320px;overflow:hidden;border:1px solid #d5e0d9;border-radius:10px;background-color:#f2f6f3;background-image:linear-gradient(rgba(84,121,101,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(84,121,101,.07) 1px,transparent 1px);background-size:34px 34px}
-.dashboard-heatmap-empty{display:grid;justify-items:center;gap:9px;max-width:340px;margin:20px;padding:23px 28px;border:1px solid #d6e2d9;border-radius:12px;background:rgba(255,255,255,.94);box-shadow:0 14px 38px rgba(23,45,50,.07);text-align:center}
-.dashboard-heatmap-symbol{display:grid;place-items:center;width:42px;height:42px;border-radius:50%;background:#e8f0e9;color:var(--green);font-size:25px}
-.dashboard-heatmap-empty strong{font-size:14px;color:var(--ink)}
-.dashboard-heatmap-empty>span:last-child{color:var(--muted);font-size:10px;line-height:1.6}
-.dashboard-heatmap-legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:12px;color:var(--muted);font-size:10px}
-.dashboard-heatmap-legend span{display:inline-flex;align-items:center;gap:7px}
-.dashboard-heatmap-legend i{display:inline-block;width:11px;height:11px;border-radius:50%}
-.dashboard-heatmap-legend .low{background:#dc2626}.dashboard-heatmap-legend .medium{background:#f97316}.dashboard-heatmap-legend .high{background:#14532d}
-@media(max-width:690px){.dashboard-heatmap-stage{min-height:260px}.dashboard-heatmap-empty{padding:19px}}
 /* Portada fotográfica de Transportes Artisa */
 .landing {
   position: relative;
@@ -417,13 +405,7 @@
 /* Vista previa manual de los mapas históricos de guias_ml. */
 .gps-explorer-panel{margin-top:18px}
 .gps-explorer-panel .telemetry-intro{max-width:900px;line-height:1.6}
-.explorer-launch{display:inline-flex;align-items:center;justify-content:center;margin:5px 0 12px;padding:10px 15px;border:1px solid #216447;border-radius:7px;background:#216447;color:#fff;font-size:11px;font-weight:700}
-.explorer-launch:hover{background:#174b35}
-.explorer-launch[hidden]{display:none}
-.explorer-launch:focus-visible{outline:3px solid #f97316;outline-offset:3px}
-.dashboard-heatmap-empty .explorer-launch{margin:15px 0 0}
 .explorer-frame-wrap[hidden]{display:none}
-.dashboard-heatmap-stage[hidden]{display:none}
 .explorer-frame-wrap{overflow:hidden;border:1px solid #d5e0d9;border-radius:9px;background:#f4f8f5}
 .explorer-frame-wrap iframe{display:block;width:100%;height:680px;border:0}
 @media(max-width:690px){.explorer-frame-wrap iframe{height:580px}}

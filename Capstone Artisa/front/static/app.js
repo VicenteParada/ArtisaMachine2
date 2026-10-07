@@ -80,9 +80,6 @@ function logout(message = "") {
     const frame = wrapper.querySelector("iframe");
     if (frame) frame.removeAttribute("src");
   }
-  const dashboardPreview = $("dashboard-route-heatmap");
-  if (dashboardPreview) dashboardPreview.hidden = false;
-  for (const button of document.querySelectorAll("[data-explorer-open]")) button.hidden = false;
   activeToken = null;
   try { localStorage.removeItem(TOKEN_KEY); } catch { /* Almacenamiento no disponible. */ }
   clearPassword();
@@ -166,26 +163,9 @@ $("toggle-password").addEventListener("click", () => {
 
 $("logout").addEventListener("click", () => logout());
 
-function openExplorer(which) {
-  if (!token()) return;
-  if (which === "routes") {
-    setMapMode(activeMapMode);
-    return;
-  }
-  const button = document.querySelector(`[data-explorer-open="${which}"]`);
-  const wrapper = button && $(button.getAttribute("aria-controls"));
-  const frame = wrapper?.querySelector("iframe[data-explorer-frame]");
-  if (!frame) return;
-  if (!frame.hasAttribute("src")) frame.src = frame.dataset.explorerFrame;
-  wrapper.hidden = false;
-  button.hidden = true;
-  if (which === "dashboard") $("dashboard-route-heatmap").hidden = true;
-  frame.contentWindow?.postMessage("artisa:show-map", location.origin);
+function openExplorer() {
+  if (token()) setMapMode(activeMapMode);
 }
-
-document.querySelectorAll("[data-explorer-open]").forEach((button) => {
-  button.addEventListener("click", () => openExplorer(button.dataset.explorerOpen));
-});
 
 async function api(path, options = {}) {
   const currentToken = token();
@@ -241,8 +221,8 @@ function syncDatasetView() {
   for (const link of document.querySelectorAll(".sidebar [data-dataset-link]")) {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
   }
-  if (view === "dashboard" || view === "heatmap") {
-    window.setTimeout(() => openExplorer(view === "dashboard" ? "dashboard" : "routes"), 50);
+  if (view === "heatmap") {
+    window.setTimeout(() => openExplorer(), 50);
   }
   if (view === "heatmap" && activeMapMode === "classified" && fleetMap) {
     window.setTimeout(fitPendingMap, 0);
