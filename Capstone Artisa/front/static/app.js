@@ -1817,6 +1817,65 @@ async function loadHistoryMonth(month) {
   }
 }
 
+function csvValue(value) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function csvLocalDateTime(value, zone) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("es-CL", {
+    dateStyle: "short", timeStyle: "medium", timeZone: zone || HISTORY_ZONE
+  }).format(new Date(value));
+}
+
+async function downloadHistoryMonth() {
+  const month = $("history-month").value || historyState.month;
+  if (!month) return;
+  const button = $("history-month-download");
+  const status = $("history-month-download-status");
+  button.disabled = true;
+  button.textContent = "Preparando CSV…";
+  status.className = "history-download-status";
+  status.textContent = "Reuniendo el detalle completo del mes…";
+  try {
+    const data = await api(`/api/reportes/mes-completo?mes=${encodeURIComponent(month)}`);
+    const rows = data.filas || [];
+    if (!rows.length) throw new Error("Este mes todavía no tiene informes procesados.");
+    const headers = [
+      "Fecha", "Estado del día", "Patente", "Camión", "Reportes", "Primer reporte (Chile)",
+      "Último reporte (Chile)", "Km observados", "Viajes", "Tramos unidos", "Paradas",
+      "Tiempo detenido (minutos)"
+    ];
+    const lines = [headers.map(csvValue).join(";")];
+    for (const row of rows) {
+      const [stateLabel] = HISTORY_STATES[row.estado] || [row.estado || ""];
+      lines.push([
+        row.fecha, stateLabel, row.asset_id, row.asset_name, row.reportes,
+        csvLocalDateTime(row.primer_reporte, data.zona),
+        csvLocalDateTime(row.ultimo_reporte, data.zona),
+        row.km_observados, row.viajes, row.tramos_unidos, row.paradas, row.minutos_detenido
+      ].map(csvValue).join(";"));
+    }
+    const blob = new Blob(["\uFEFF", lines.join("\r\n")], {type: "text/csv;charset=utf-8"});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `artisa-informe-${month}.csv`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    status.textContent = `CSV generado con ${format(rows.length)} registros del mes.`;
+  } catch (error) {
+    status.className = "history-download-status is-error";
+    status.textContent = "No se pudo generar el CSV: " + error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "↓ Descargar CSV";
+  }
+}
+
 function refreshHistory() {
   if (!token()) return;
   if (!historyState.loadedOnce) {
@@ -1833,6 +1892,7 @@ $("history-next").addEventListener("click", () => loadHistoryDay(shiftDay(histor
 $("history-yesterday").addEventListener("click", () => loadHistoryDay(shiftDay(localToday(), -1)));
 $("history-today").addEventListener("click", () => loadHistoryDay(localToday()));
 $("history-month").addEventListener("change", () => { if ($("history-month").value) loadHistoryMonth($("history-month").value); });
+$("history-month-download").addEventListener("click", downloadHistoryMonth);
 $("history-detail-close").addEventListener("click", closeTruckDetail);
 $("history-detail-more").addEventListener("click", () => {
   const detail = historyState.detail;

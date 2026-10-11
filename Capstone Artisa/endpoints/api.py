@@ -337,6 +337,28 @@ def monthly_report(cursor, year, month):
     return {"mes": f"{year:04d}-{month:02d}", "zona": dias.ZONA, "hoy": dias.hoy(), "dias": cursor.fetchall()}
 
 
+def monthly_full_report(cursor, year, month):
+    """Detalle mensual exportable: una fila por camión y día ya procesado."""
+    first = date(year, month, 1)
+    following = date(year + (month == 12), month % 12 + 1, 1)
+    try:
+        cursor.execute(
+            """SELECT r.fecha, e.estado, r.asset_id, r.asset_name, r.reportes,
+                      r.primer_reporte, r.ultimo_reporte, r.km_observados, r.viajes,
+                      r.tramos_unidos, r.paradas, r.minutos_detenido
+               FROM reporte_diario AS r
+               INNER JOIN reporte_diario_estado AS e ON e.fecha = r.fecha
+               WHERE r.fecha >= %s AND r.fecha < %s
+               ORDER BY r.fecha, r.asset_name, r.asset_id""",
+            (first, following),
+        )
+    except pymysql.err.ProgrammingError:
+        rows = []
+    else:
+        rows = cursor.fetchall()
+    return {"mes": f"{year:04d}-{month:02d}", "zona": dias.ZONA, "filas": rows}
+
+
 def truck_day(cursor, asset_id, dia, limit, after):
     """Reportes de un camión en un día local, paginados por (report_date, report_id)."""
     inicio, fin = dias.limites_utc(dia)
@@ -378,12 +400,13 @@ def truck_day(cursor, asset_id, dia, limit, after):
 
 def history_request(path, query):
     """Valida parámetros. Devuelve (handler, args) o (None, mensaje_error)."""
-    if path == "/api/reportes/mes":
+    if path in ("/api/reportes/mes", "/api/reportes/mes-completo"):
         mes = _param(query, "mes") or dias.hoy().strftime("%Y-%m")
         match = re.fullmatch(r"(\d{4})-(\d{2})", mes)
         if not match or not 1 <= int(match.group(2)) <= 12:
             return None, "Usa ?mes=YYYY-MM"
-        return monthly_report, (int(match.group(1)), int(match.group(2)))
+        handler = monthly_full_report if path == "/api/reportes/mes-completo" else monthly_report
+        return handler, (int(match.group(1)), int(match.group(2)))
     try:
         dia = date.fromisoformat(_param(query, "fecha") or "")
     except ValueError:
@@ -466,6 +489,7 @@ class Handler(JsonHandler):
                                          "/api/gps?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
                                          "/api/telemetria?limite=30", "/api/telemetria/resumen",
                                          "/api/reportes/dia?fecha=YYYY-MM-DD", "/api/reportes/mes?mes=YYYY-MM",
+                                         "/api/reportes/mes-completo?mes=YYYY-MM",
                                          "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
                                          *PENDING_RESPONSES]})
             return
@@ -491,7 +515,8 @@ class Handler(JsonHandler):
             self.respond(200, PENDING_RESPONSES[path])
             return
         history = None
-        if path in ("/api/reportes/dia", "/api/reportes/mes", "/api/reportes/camion"):
+        if path in ("/api/reportes/dia", "/api/reportes/mes", "/api/reportes/mes-completo",
+                    "/api/reportes/camion"):
             history, args = history_request(path, parsed.query)
             if history is None:
                 self.respond(400, {"error": args})

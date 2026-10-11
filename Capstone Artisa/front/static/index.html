@@ -143,7 +143,14 @@
           <button type="button" class="button secondary" id="history-detail-more" hidden>Cargar más reportes</button>
         </div>
         <div class="history-month">
-          <div class="section-top"><h3>Resumen del mes</h3><input type="month" id="history-month" aria-label="Mes a consultar"></div>
+          <div class="section-top history-month-heading">
+            <div><h3>Resumen del mes</h3><small>Descarga el detalle diario de todos los camiones del mes seleccionado.</small></div>
+            <div class="history-month-actions">
+              <input type="month" id="history-month" aria-label="Mes a consultar">
+              <button type="button" class="button secondary" id="history-month-download">↓ Descargar CSV</button>
+            </div>
+          </div>
+          <p id="history-month-download-status" class="history-download-status" aria-live="polite"></p>
           <div class="table-scroll telemetry-table"><table><thead><tr><th>Día</th><th>Estado</th><th>Camiones</th><th>Reportes</th><th>Km observados</th></tr></thead><tbody id="history-month-rows"></tbody></table></div>
         </div>
       </section>
