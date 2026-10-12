@@ -466,23 +466,8 @@ function vehicleStatus(vehicle) {
   return {label: "Con señal reciente", className: "moving"};
 }
 
-const TRUCK_MARKUP = '<svg class="truck-glyph" viewBox="0 0 48 36" aria-hidden="true" focusable="false">' +
-  '<ellipse cx="24" cy="31" rx="21" ry="2" fill="#173f35" opacity=".12"/>' +
-  '<g stroke="#193f38" stroke-width="1.5" stroke-linejoin="round">' +
-  '<rect x="2.5" y="6" width="26" height="19" rx="2.5" fill="#f2f6f4"/>' +
-  '<path d="M4 21h23v4H4z" fill="#c6d9cf" stroke="none"/>' +
-  '<path d="M8 10v7m6-7v7m6-7v7" stroke="#c2d1cb" stroke-linecap="round"/>' +
-  '<path d="M29 13h9l7 9v5H29z" fill="#28785c"/>' +
-  '<path d="M32 15h5l5 7H32z" fill="#b7e0e5"/>' +
-  '<path d="M34 15v7" stroke="#f4fbfc" stroke-width="1"/>' +
-  '<path d="M3 25h28v3H3z" fill="#34574e"/>' +
-  '<path d="M41 24h4v3h-4z" fill="#f4d98b" stroke="none"/>' +
-  '<path d="M31 25h3" stroke="#d5ee9c" stroke-linecap="round"/>' +
-  '<path d="M43 28h3" stroke="#193f38" stroke-linecap="round"/>' +
-  '</g>' +
-  '<g fill="#193f38"><circle cx="10" cy="28" r="4"/><circle cx="20" cy="28" r="4"/><circle cx="38" cy="28" r="4"/></g>' +
-  '<g fill="#dce7e2"><circle cx="10" cy="28" r="1.7"/><circle cx="20" cy="28" r="1.7"/><circle cx="38" cy="28" r="1.7"/></g>' +
-  '</svg>';
+const TRUCK_MARKUP = '<img class="truck-glyph" src="/artisa-truck-3d.png?v=20261012" alt="" aria-hidden="true">';
+const TRUCK_LIST_MARKUP = '<img class="truck-glyph" src="/artisa-truck-side-3d.png?v=20261012" alt="" aria-hidden="true">';
 
 function renderLiveFleet(vehicles) {
   const list = $("vehicle-live-list");
@@ -502,7 +487,7 @@ function renderLiveFleet(vehicles) {
     button.dataset.vehicleSelect = vehicle.vehicle_id;
     const icon = document.createElement("span");
     icon.className = "vehicle-list-icon";
-    icon.innerHTML = TRUCK_MARKUP;
+    icon.innerHTML = TRUCK_LIST_MARKUP;
     const copy = document.createElement("span");
     const name = document.createElement("strong");
     name.textContent = vehicle.vehicle_name || vehicle.vehicle_id;
@@ -741,9 +726,9 @@ function truckIcon(vehicle) {
   return L.divIcon({
     className: "truck-div-icon",
     html,
-    iconSize: [42, 42],
-    iconAnchor: [21, 21],
-    popupAnchor: [0, -21]
+    iconSize: [54, 46],
+    iconAnchor: [27, 23],
+    popupAnchor: [0, -23]
   });
 }
 
