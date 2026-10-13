@@ -266,3 +266,37 @@ CREATE TABLE IF NOT EXISTS prediccion_celda (
     valor FLOAT NOT NULL,
     PRIMARY KEY (version_id, fecha, celda_lat, celda_lon)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Predicción de rutas: camiones distintos por tramo (dos celdas vecinas de 0,01° que un
+-- camión cruzó entre dos reportes seguidos) y día local.
+CREATE TABLE IF NOT EXISTS actividad_tramo_dia (
+    fecha DATE NOT NULL,
+    a_lat INT NOT NULL,
+    a_lon INT NOT NULL,
+    b_lat INT NOT NULL,
+    b_lon INT NOT NULL,
+    camiones SMALLINT UNSIGNED NOT NULL,
+    PRIMARY KEY (fecha, a_lat, a_lon, b_lat, b_lon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS actividad_tramo_estado (
+    fecha DATE NOT NULL,
+    calculado_en DATETIME(6) NOT NULL,
+    reportes INT UNSIGNED NOT NULL,
+    PRIMARY KEY (fecha)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Cada versión de predicción es de un tipo: calor (zonas) o rutas (tramos).
+ALTER TABLE prediccion_version ADD COLUMN IF NOT EXISTS tipo VARCHAR(16) NOT NULL DEFAULT 'calor';
+ALTER TABLE prediccion_version ADD INDEX IF NOT EXISTS idx_prediccion_version_tipo (tipo, activa);
+
+CREATE TABLE IF NOT EXISTS prediccion_tramo (
+    version_id INT UNSIGNED NOT NULL,
+    fecha DATE NOT NULL,
+    a_lat INT NOT NULL,
+    a_lon INT NOT NULL,
+    b_lat INT NOT NULL,
+    b_lon INT NOT NULL,
+    valor FLOAT NOT NULL,
+    PRIMARY KEY (version_id, fecha, a_lat, a_lon, b_lat, b_lon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

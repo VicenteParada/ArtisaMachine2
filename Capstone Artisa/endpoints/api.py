@@ -46,9 +46,14 @@ PENDING_RESPONSES = {
         "status": "pending", "dias": [],
         "message": "La predicción se calcula con al menos 21 días cerrados.",
     },
+    "/api/prediccion-rutas": {
+        "status": "pending", "dias": [],
+        "message": "La predicción de rutas se calcula con al menos 21 días cerrados.",
+    },
 }
 BUILDERS = {"/api/mapa": rutas_api.classified_map, "/api/dashboard": rutas_api.classified_dashboard,
-            "/api/prediccion": prediccion_api.prediction}
+            "/api/prediccion": prediccion_api.prediction,
+            "/api/prediccion-rutas": lambda cursor: prediccion_api.prediction(cursor, "rutas")}
 
 
 # Telemetría actual (servicio telemetria). Mientras la API de la empresa no esté

@@ -281,9 +281,13 @@
     <div id="prediccion" class="dataset-space" data-dataset-view="prediction" hidden>
       <section class="panel prediction-panel" aria-labelledby="prediction-title">
         <div class="section-top"><div><span class="eyebrow">MACHINE LEARNING · PREDICCIÓN</span><h2 id="prediction-title">Actividad esperada de la flota</h2></div><span id="prediction-status" class="status neutral">Cargando…</span></div>
+        <div class="prediction-tabs" role="tablist" aria-label="Modelo de predicción">
+          <button type="button" role="tab" class="prediction-tab is-active" data-prediction-tab="calor" aria-selected="true"><span>◉</span><span><strong>Mapa de calor</strong><small>Zonas con más movimiento</small></span></button>
+          <button type="button" role="tab" class="prediction-tab" data-prediction-tab="rutas" aria-selected="false"><span>⟋</span><span><strong>Rutas</strong><small>Tramos y camiones esperados</small></span></button>
+        </div>
         <p id="prediction-intro" class="telemetry-intro">Zonas donde se espera más movimiento de camiones en los próximos días, según lo ocurrido en las últimas semanas.</p>
         <div class="real-metrics prediction-metrics" aria-label="Resumen de la predicción">
-          <article><span>Reportes esperados</span><strong id="prediction-total">—</strong><small id="prediction-total-detail">Camiones en movimiento</small></article>
+          <article><span id="prediction-total-label">Reportes esperados</span><strong id="prediction-total">—</strong><small id="prediction-total-detail">Camiones en movimiento</small></article>
           <article><span>Día con más actividad</span><strong id="prediction-peak">—</strong><small id="prediction-peak-detail">—</small></article>
           <article><span>Error en días de prueba</span><strong id="prediction-error">—</strong><small id="prediction-error-detail">Reportes por zona y día</small></article>
           <article><span>Aprendió con datos hasta</span><strong id="prediction-base">—</strong><small id="prediction-base-detail">—</small></article>
@@ -311,10 +315,11 @@
           <div class="confidence-legend"><span><i class="confidence-dot alta"></i>Confianza alta</span><span><i class="confidence-dot media"></i>Media</span><span><i class="confidence-dot baja"></i>Baja</span><small>Según el error real al predecir esa misma cantidad de días hacia adelante.</small></div>
         </div>
         <div id="prediction-map" class="prediction-map" role="application" aria-label="Mapa de calor de la actividad esperada"></div>
-        <div class="prediction-legend"><span>Menos actividad</span><i aria-hidden="true"></i><span>Más actividad</span><small>Es una predicción: no son posiciones reales de los camiones.</small></div>
+        <div class="prediction-legend" id="prediction-legend-heat"><span>Menos actividad</span><i aria-hidden="true"></i><span>Más actividad</span><small>Es una predicción: no son posiciones reales de los camiones.</small></div>
+        <div class="prediction-legend routes" id="prediction-legend-routes" hidden><span>Pocos camiones</span><i aria-hidden="true"></i><span>Muchos camiones</span><small>Es una predicción: cada línea es un tramo de ~1 km; pasa el mouse para ver cuántos camiones.</small></div>
         <div class="prediction-charts">
           <article class="dashboard-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">PRÓXIMOS DÍAS</span><h3>Actividad esperada por día</h3></div><span class="chart-unit">Reportes</span></div>
+            <div class="dashboard-card-heading"><div><span class="eyebrow">PRÓXIMOS DÍAS</span><h3>Actividad esperada por día</h3></div><span class="chart-unit" id="prediction-chart-unit">Reportes</span></div>
             <p>Toca un día para verlo en el mapa. Los fines de semana suelen tener menos movimiento.</p>
             <div id="prediction-daily-chart" class="prediction-columns" role="group" aria-label="Actividad esperada por día"></div>
           </article>

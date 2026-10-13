@@ -100,6 +100,39 @@ class PrediccionTests(unittest.TestCase):
         self.assertEqual(len(errores), 15)
         self.assertTrue(all(e is not None and e >= 0 for e in errores[:15]))
 
+    def test_route_segments_follow_the_road_cells(self):
+        celdas = prediccion.trazar(-22.455, -68.925, -22.455, -68.895)  # 3 km hacia el este
+        self.assertEqual(celdas[0], prediccion.celda(-22.455, -68.925))
+        self.assertEqual(celdas[-1], prediccion.celda(-22.455, -68.895))
+        self.assertEqual(len(celdas), 4)  # celdas vecinas, sin saltos
+        self.assertTrue(all(abs(a[1] - b[1]) <= 1 and abs(a[0] - b[0]) <= 1 for a, b in zip(celdas, celdas[1:])))
+
+    def test_counts_distinct_trucks_per_route_segment(self):
+        t = datetime(2026, 10, 6, 15)
+        def pasada(camion, desfase):
+            # El mismo camino, con reportes en puntos distintos: debe dar los mismos tramos.
+            return [{"asset_id": camion, "report_date": t + timedelta(minutes=k), "speed": 60,
+                     "latitude": -22.455, "longitude": -68.925 + desfase + 0.012 * k} for k in range(3)]
+        filas = pasada("A", 0.0) + pasada("A", 0.0) + pasada("B", 0.003)
+        filas.append({"asset_id": "C", "report_date": t, "speed": 60, "latitude": -22.455, "longitude": -68.925})
+        filas.append({"asset_id": "C", "report_date": t + timedelta(minutes=1), "speed": 60,
+                      "latitude": -20.0, "longitude": -68.925})  # salto de GPS: no es tramo
+        filas.append({"asset_id": "D", "report_date": t, "speed": 60, "latitude": -22.455, "longitude": -68.925})
+        filas.append({"asset_id": "D", "report_date": t + timedelta(minutes=30), "speed": 60,
+                      "latitude": -22.455, "longitude": -68.913})  # 30 min sin reportes: no es tramo
+        conteo = prediccion.contar_tramos(filas)
+        tramo = prediccion.celda(-22.455, -68.915) + prediccion.celda(-22.455, -68.905)
+        self.assertEqual(conteo[tramo], 2)  # A y B, aunque A aparezca dos veces
+        self.assertEqual(max(conteo.values()), 2)
+
+    def test_publishes_only_days_with_few_errors(self):
+        # Error por distancia: se publica hasta el último día con error <= 1,3 x el primero.
+        errores = [1.0, 1.05, 1.1, 1.2, 1.25, 1.28, 1.3, 1.35, 1.5, 1.6]
+        self.assertEqual(prediccion.dias_confiables(errores, 15), 7)
+        self.assertEqual(prediccion.dias_confiables([1.0] * 15, 15), 15)
+        self.assertEqual(prediccion.dias_confiables([1.0, 2.0, 3.0], 15), 7)   # mínimo 7 días
+        self.assertEqual(prediccion.dias_confiables(None, 9), 9)
+
     def test_new_trucks_change_the_fingerprint(self):
         self.assertNotEqual(prediccion.huella(["A", "B"]), prediccion.huella(["A", "B", "C"]))
         self.assertEqual(prediccion.huella(["B", "A"]), prediccion.huella(["A", "B"]))

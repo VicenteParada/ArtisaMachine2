@@ -136,8 +136,22 @@ class PredictionApiTests(unittest.TestCase):
         self.assertEqual([d["fecha"] for d in data["dias"]], ["2026-10-13", "2026-10-14"])
         self.assertEqual(data["dias"][0]["celdas"][0], [-22.455, -68.925, 12.0])
         self.assertEqual(data["dias"][0]["total"], 16)
+        self.assertEqual(data["dias"][0]["elementos"], 2)
         self.assertEqual(data["metricas"]["metodo"], "lightgbm")
         self.assertNotIn("huella_camiones", data["metricas"])
+
+
+class RoutePredictionApiTests(unittest.TestCase):
+    def test_route_segments_as_lines(self):
+        version = {"id": 3, "creado_en": datetime(2026, 10, 13, 4), "base_hasta": date(2026, 10, 12),
+                   "desde": date(2026, 10, 13), "hasta": date(2026, 10, 27), "camiones": 116,
+                   "metricas_json": json.dumps({"metodo": "promedio_dia_semana"})}
+        tramos = [{"fecha": date(2026, 10, 13), "a_lat": -2246, "a_lon": -6893, "b_lat": -2246, "b_lon": -6892,
+                   "valor": 4.0}]
+        cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_tramo", tramos)])
+        data = prediccion_api.prediction(cursor, "rutas")
+        self.assertEqual(data["tipo"], "rutas")
+        self.assertEqual(data["dias"][0]["celdas"], [[-22.455, -68.925, -22.455, -68.915, 4.0]])
 
 
 if __name__ == "__main__":

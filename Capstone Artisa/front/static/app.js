@@ -1943,10 +1943,41 @@ const PREDICTION_METHODS = {
   promedio_historico: "Promedio histórico"
 };
 const CONFIDENCE_LABELS = {alta: "Confianza alta", media: "Confianza media", baja: "Confianza baja", na: "Sin evaluar"};
-const predictionState = {
-  data: null, loadedAt: 0, loading: false, map: null, layer: null, fitted: false,
-  mode: "day", index: 0, from: 0, to: 0, timer: null, scrollTimer: null, wheelBound: false
+// Dos modelos en pestañas: mapa de calor (zonas) y rutas (tramos).
+const PREDICTION_TYPES = {
+  calor: {
+    endpoint: "/api/prediccion", unit: "reportes", totalLabel: "Reportes esperados",
+    chartUnit: "Reportes", errorUnit: "reportes por zona y día",
+    value: (item) => item.total, cardText: (item) => format(item.total),
+    intro: "Zonas donde se espera más movimiento de camiones",
+    method: "Cada zona es un cuadro de ~1 km. Para cada día se predice cuántos reportes de camiones en movimiento " +
+      "(sobre 2 km/h) habrá en cada zona"
+  },
+  rutas: {
+    endpoint: "/api/prediccion-rutas", unit: "tramos", totalLabel: "Tramos con camiones esperados",
+    chartUnit: "Tramos", errorUnit: "camiones por tramo y día",
+    value: (item) => item.elementos, cardText: (item) => format(item.elementos) + " tramos",
+    intro: "Tramos de ruta por los que se espera que pasen camiones",
+    method: "Cada tramo une dos cuadros vecinos de ~1 km que los camiones cruzan entre dos reportes seguidos " +
+      "(5 min o menos y bajo 150 km/h). Para cada día se predice cuántos camiones distintos pasarán por cada tramo"
+  }
 };
+const predictionState = {
+  tipo: "calor", cache: {}, data: null, loadedAt: 0, loading: false, map: null, layer: null, fitted: false,
+  mode: "day", index: 0, from: 0, to: 0, timer: null, scrollTimer: null, wheelBound: false, renderer: null
+};
+
+function predictionConfig() { return PREDICTION_TYPES[predictionState.tipo]; }
+
+// Colores de rutas: rojo = pocos camiones, naranja = medio, verde = muchos (igual que las rutas clasificadas).
+function routeHeatColor(ratio) {
+  const stops = [[0, [220, 38, 38]], [0.5, [249, 115, 22]], [1, [20, 83, 45]]];
+  const x = Math.max(0, Math.min(1, ratio));
+  const [i0, i1] = x <= 0.5 ? [0, 1] : [1, 2];
+  const t = (x - stops[i0][0]) / (stops[i1][0] - stops[i0][0]);
+  const c = stops[i0][1].map((v, k) => Math.round(v + (stops[i1][1][k] - v) * t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
 
 function predictionDate(iso) { return new Date(iso + "T12:00:00Z"); }
 
@@ -1978,15 +2009,20 @@ function predictionSelected() {
 }
 
 function predictionCells(days) {
+  // Calor: suma de los días. Rutas: promedio de camiones por día en cada tramo.
   if (days.length === 1) return days[0].celdas;
+  const routes = predictionState.tipo === "rutas";
   const sum = new Map();
   for (const item of days) {
-    for (const [lat, lon, value] of item.celdas) {
-      const key = lat + "," + lon;
-      sum.set(key, [lat, lon, (sum.get(key)?.[2] || 0) + value]);
+    for (const cell of item.celdas) {
+      const key = cell.slice(0, -1).join(",");
+      const previous = sum.get(key);
+      sum.set(key, [...cell.slice(0, -1), (previous ? previous[previous.length - 1] : 0) + cell[cell.length - 1]]);
     }
   }
-  return [...sum.values()];
+  const result = [...sum.values()];
+  if (routes) for (const cell of result) cell[cell.length - 1] /= days.length;
+  return result;
 }
 
 function ensurePredictionMap() {
@@ -2002,8 +2038,12 @@ function drawPrediction() {
   const data = predictionState.data;
   if (!data || !data.dias.length) return;
   const days = predictionSelected();
-  const total = days.reduce((sum, item) => sum + item.total, 0);
+  const config = predictionConfig();
+  const routes = predictionState.tipo === "rutas";
+  const cells = predictionCells(days);
+  const total = routes ? cells.length : days.reduce((sum, item) => sum + item.total, 0);
   // Resumen de la selección
+  $("prediction-total-label").textContent = config.totalLabel;
   $("prediction-total").textContent = format(total);
   $("prediction-total-detail").textContent = days.length === 1
     ? predictionDayLabel(days[0].fecha, "long") : `En ${days.length} días · camiones en movimiento`;
@@ -2017,24 +2057,42 @@ function drawPrediction() {
     const badge = document.createElement("span");
     badge.className = "confidence-badge " + confidence.level;
     badge.textContent = CONFIDENCE_LABELS[confidence.level];
-    text.append(strong, ` · ${format(days[0].total)} reportes esperados `, badge,
-      confidence.error === null ? "" : ` · se equivoca ~${format(confidence.error, 2)} por zona`);
+    const amount = routes ? `${format(days[0].elementos)} tramos con camiones esperados `
+      : `${format(days[0].total)} reportes esperados `;
+    text.append(strong, " · " + amount, badge,
+      confidence.error === null ? "" : ` · se equivoca ~${format(confidence.error, 2)} ${routes ? "camiones por tramo" : "por zona"}`);
   } else {
     text.textContent = `${predictionDayLabel(days[0].fecha, "long")} → ${predictionDayLabel(days[days.length - 1].fecha, "long")}` +
-      ` · ${format(total)} reportes esperados en ${days.length} días`;
+      (routes ? ` · ${format(total)} tramos con camiones (promedio de camiones por día en cada tramo)`
+        : ` · ${format(total)} reportes esperados en ${days.length} días`);
   }
   // Mapa de calor
   const map = ensurePredictionMap();
   if (map) {
     map.invalidateSize();
     if (predictionState.layer) map.removeLayer(predictionState.layer);
-    const cells = predictionCells(days);
-    const max = cells.reduce((top, cell) => Math.max(top, cell[2]), 0);
-    // Escala logarítmica, igual que el mapa de calor del cuaderno (np.log1p).
-    const points = cells.map(([lat, lon, value]) => [lat, lon, max ? Math.log1p(value) / Math.log1p(max) : 0]);
-    predictionState.layer = L.heatLayer
-      ? L.heatLayer(points, {radius: 9, blur: 11, minOpacity: 0.3, max: 1, maxZoom: 18, gradient: PREDICTION_GRADIENT})
-      : L.layerGroup();
+    const max = cells.reduce((top, cell) => Math.max(top, cell[cell.length - 1]), 0);
+    if (routes) {
+      // Tramos como líneas: de menos a más usados, para que los verdes queden encima.
+      predictionState.renderer = predictionState.renderer || L.canvas({padding: 0.5});
+      const layer = L.layerGroup();
+      const sorted = [...cells].sort((a, b) => a[4] - b[4]);
+      for (const [lat1, lon1, lat2, lon2, value] of sorted) {
+        const ratio = max ? Math.sqrt(value / max) : 0;
+        L.polyline([[lat1, lon1], [lat2, lon2]], {
+          renderer: predictionState.renderer, color: routeHeatColor(ratio), weight: 2 + ratio * 4,
+          opacity: 0.55 + ratio * 0.4, lineCap: "round"
+        }).bindTooltip(`${format(value, 1)} camiones ${days.length > 1 ? "por día (promedio)" : "esperados"}`, {sticky: true})
+          .addTo(layer);
+      }
+      predictionState.layer = layer;
+    } else {
+      // Escala logarítmica, igual que el mapa de calor del cuaderno (np.log1p).
+      const points = cells.map(([lat, lon, value]) => [lat, lon, max ? Math.log1p(value) / Math.log1p(max) : 0]);
+      predictionState.layer = L.heatLayer
+        ? L.heatLayer(points, {radius: 9, blur: 11, minOpacity: 0.3, max: 1, maxZoom: 18, gradient: PREDICTION_GRADIENT})
+        : L.layerGroup();
+    }
     predictionState.layer.addTo(map);
     if (!predictionState.fitted && cells.length) {
       map.fitBounds(L.latLngBounds(cells.map((cell) => [cell[0], cell[1]])), {padding: [30, 30], maxZoom: 9});
@@ -2071,7 +2129,7 @@ function buildPredictionWheel(data, today) {
     const month = document.createElement("small");
     month.textContent = predictionDayLabel(item.fecha, "month");
     const total = document.createElement("span");
-    total.textContent = format(item.total);
+    total.textContent = predictionConfig().cardText(item);
     const dot = document.createElement("i");
     dot.className = "confidence-dot " + confidence.level;
     dot.title = CONFIDENCE_LABELS[confidence.level];
@@ -2236,33 +2294,44 @@ function renderPrediction(data) {
   status.className = "status " + (usesModel ? "" : "neutral");
   const today = localToday();
   const first = data.dias[0].fecha, last = data.dias[data.dias.length - 1].fecha;
+  const config = predictionConfig();
+  for (const tab of document.querySelectorAll("[data-prediction-tab]")) {
+    const selected = tab.dataset.predictionTab === predictionState.tipo;
+    tab.classList.toggle("is-active", selected);
+    tab.setAttribute("aria-selected", String(selected));
+  }
+  $("prediction-legend-heat").hidden = predictionState.tipo !== "calor";
+  $("prediction-legend-routes").hidden = predictionState.tipo !== "rutas";
+  $("prediction-chart-unit").textContent = config.chartUnit;
   $("prediction-intro").textContent =
-    `Zonas donde se espera más movimiento de camiones entre el ${predictionDayLabel(first, "long")} y el ` +
+    `${config.intro} entre el ${predictionDayLabel(first, "long")} y el ` +
     `${predictionDayLabel(last, "long")} (${data.dias.length} días). Gira la ruleta para elegir un día, ` +
-    "elige un rango o recorre los días con ▶. Se recalcula sola cada noche.";
-  const peak = data.dias.reduce((top, item) => item.total > top.total ? item : top, data.dias[0]);
+    "elige un rango o recorre los días con ▶. Se recalcula sola cada noche." +
+    ((data.metricas || {}).dias_descartados
+      ? ` Se muestran solo los días en que el modelo se equivoca poco; ${data.metricas.dias_descartados} días ` +
+        "más allá se descartaron por tener demasiado error." : "");
+  const peak = data.dias.reduce((top, item) => config.value(item) > config.value(top) ? item : top, data.dias[0]);
   $("prediction-peak").textContent = predictionDayLabel(peak.fecha);
-  $("prediction-peak-detail").textContent = format(peak.total) + " reportes esperados";
+  $("prediction-peak-detail").textContent = format(config.value(peak)) + " " + config.unit + " esperados";
   const error = m.mae_publicado ?? errors[m.metodo] ?? m.mae_referencia;
   $("prediction-error").textContent = error === undefined ? "—" : format(error, 2);
   const others = Object.entries(errors).filter(([method]) => method !== m.metodo)
     .map(([method, value]) => `${PREDICTION_METHODS[method] || method}: ${format(value, 2)}`);
   $("prediction-error-detail").textContent = others.length
-    ? others.join(" · ") + " · menor es mejor" : "Reportes por zona y día · menor es mejor";
+    ? others.join(" · ") + " · menor es mejor" : `En ${config.errorUnit} · menor es mejor`;
   $("prediction-base").textContent = new Intl.DateTimeFormat("es-CL", {
     day: "numeric", month: "short", timeZone: "UTC"}).format(predictionDate(data.base_hasta));
   $("prediction-base-detail").textContent = m.dias_historia
     ? `${format(m.dias_historia)} días de historia · ${format(m.camiones || 0)} camiones` : "—";
   $("prediction-method").textContent =
-    "Cada zona es un cuadro de ~1 km. Para cada día se predice cuántos reportes de camiones en movimiento " +
-    "(sobre 2 km/h) habrá en cada zona, usando el día anterior, el mismo día de las semanas pasadas y los " +
+    config.method + ", usando los días anteriores, el mismo día de las semanas pasadas, la tendencia y los " +
     "promedios recientes. Los días siguientes se apoyan en la predicción del día anterior, por eso cada día " +
     "muestra su confianza: es el error real que tuvo el método al predecir esa misma distancia hacia " +
     "adelante en los días de prueba (alta: hasta 10 % más que el primer día; media: hasta 30 %; baja: más). " +
     `Compiten tres métodos en ${format(m.dias_prueba || 0)} días de prueba que ninguno vio: el modelo LightGBM, ` +
     "el promedio del mismo día de la semana y el promedio de todo el período. " +
     `Se publica el de menor error: ${PREDICTION_METHODS[m.metodo] || m.metodo}` +
-    (error === undefined ? "." : ` (${format(error, 2)} reportes de error por zona y día).`) +
+    (error === undefined ? "." : ` (${format(error, 2)} ${config.errorUnit} de error).`) +
     (!usesModel && m.motivo ? ` ${m.motivo}.` : "");
   // Mantener la selección si sigue existiendo; si no, hoy (o el primer día).
   const count = data.dias.length;
@@ -2278,7 +2347,8 @@ function renderPrediction(data) {
 function renderPredictionCharts(data, today) {
   // Columnas: total esperado por día (clic = ver ese día). La transparencia indica la confianza.
   const chart = $("prediction-daily-chart");
-  const peak = Math.max(1, ...data.dias.map((item) => item.total));
+  const config = predictionConfig();
+  const peak = Math.max(1, ...data.dias.map((item) => config.value(item)));
   chart.replaceChildren(...data.dias.map((item, index) => {
     const weekday = predictionDate(item.fecha).getUTCDay();
     const confidence = predictionConfidence(data, item.fecha);
@@ -2287,12 +2357,12 @@ function renderPredictionCharts(data, today) {
     button.className = "prediction-column confidence-" + confidence.level +
       (weekday === 0 || weekday === 6 ? " weekend" : "") + (item.fecha === today ? " is-today" : "");
     button.dataset.predictionFecha = item.fecha;
-    button.title = `${predictionDayLabel(item.fecha, "long")}: ${format(item.total)} reportes esperados · ` +
+    button.title = `${predictionDayLabel(item.fecha, "long")}: ${format(config.value(item))} ${config.unit} esperados · ` +
       CONFIDENCE_LABELS[confidence.level];
     const value = document.createElement("strong");
-    value.textContent = format(item.total);
+    value.textContent = format(config.value(item));
     const bar = document.createElement("i");
-    bar.style.height = Math.max(2, item.total / peak * 100) + "%";
+    bar.style.height = Math.max(2, config.value(item) / peak * 100) + "%";
     const label = document.createElement("span");
     label.textContent = item.fecha === today ? "Hoy" : predictionDayLabel(item.fecha);
     button.append(value, bar, label);
@@ -2319,22 +2389,26 @@ function renderPredictionCharts(data, today) {
 
 async function loadPrediction(force = false) {
   if (!token() || predictionState.loading) return;
-  if (!force && predictionState.data && Date.now() - predictionState.loadedAt < PREDICTION_REFRESH_MS) {
-    drawPrediction();
-    centerPredictionWheel(false);
+  const tipo = predictionState.tipo;
+  const cached = predictionState.cache[tipo];
+  if (!force && cached && Date.now() - cached.loadedAt < PREDICTION_REFRESH_MS) {
+    if (predictionState.data !== cached.data) renderPrediction(cached.data);
+    else { drawPrediction(); centerPredictionWheel(false); }
     return;
   }
   predictionState.loading = true;
-  if (!predictionState.data) {
+  if (!cached) {
     $("prediction-status").textContent = "Cargando…";
     $("prediction-intro").textContent = "Cargando la predicción…";
   }
   try {
-    renderPrediction(await api("/api/prediccion", {timeoutMs: 120000}));
+    const data = await api(PREDICTION_TYPES[tipo].endpoint, {timeoutMs: 120000});
+    predictionState.cache[tipo] = {data, loadedAt: Date.now()};
     predictionState.loadedAt = Date.now();
     predictionState.retries = 0;
+    if (predictionState.tipo === tipo) renderPrediction(data);
   } catch (error) {
-    if (!predictionState.data) {
+    if (!cached) {
       $("prediction-status").textContent = "Reintentando…";
       $("prediction-status").className = "status warning";
       $("prediction-intro").textContent = "No se pudo consultar la predicción (" + error.message + "). Se reintentará sola.";
@@ -2347,6 +2421,17 @@ async function loadPrediction(force = false) {
   } finally {
     predictionState.loading = false;
   }
+}
+
+function setPredictionType(tipo) {
+  if (tipo === predictionState.tipo) return;
+  stopPredictionPlay();
+  predictionState.tipo = tipo;
+  loadPrediction();
+}
+
+for (const tab of document.querySelectorAll("[data-prediction-tab]")) {
+  tab.addEventListener("click", () => setPredictionType(tab.dataset.predictionTab));
 }
 
 for (const button of document.querySelectorAll("[data-prediction-mode]")) {
