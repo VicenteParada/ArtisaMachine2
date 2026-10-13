@@ -38,7 +38,7 @@ import numpy as np
 
 from common import dias
 
-VENTANA_DIAS = int(os.environ.get("PRED_VENTANA_DIAS", "56"))   # 8 semanas de historia
+VENTANA_DIAS = int(os.environ.get("PRED_VENTANA_DIAS", "112"))  # 16 semanas de historia
 DIAS_ADELANTE = int(os.environ.get("PRED_DIAS", "7"))           # hoy + 7 días
 MIN_DIAS = 21                       # como el cuaderno: al menos 3 semanas para entrenar
 VEL_MOVIMIENTO = 2                  # km/h: igual que el cuaderno (speed > 2)
