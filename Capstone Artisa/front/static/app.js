@@ -223,7 +223,7 @@ function syncDatasetView() {
     window.setTimeout(openExplorer, 50);
   }
   if (view === "prediction") {
-    window.setTimeout(loadPrediction, 50);
+    window.setTimeout(() => { loadPrediction(); if (predictionState.map) predictionState.map.invalidateSize(); }, 50);
   }
   if (view === "heatmap" && activeMapMode === "classified" && fleetMap) {
     window.setTimeout(fitPendingMap, 0);
@@ -2090,9 +2090,11 @@ function buildPredictionWheel(data, today) {
         if (index !== predictionState.index) { predictionState.index = index; drawPrediction(); }
       }, 140);
     }, {passive: true});
-    // Rueda del mouse: avanza un día por movimiento, como una ruleta.
+    // Rueda del mouse: avanza un día por movimiento, como una ruleta. Solo cuando la ruleta
+    // está activa (después de tocarla), para no robarle el desplazamiento a la página.
+    wheel.addEventListener("pointerdown", () => wheel.focus({preventScroll: true}));
     wheel.addEventListener("wheel", (event) => {
-      if (Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
+      if (!wheel.contains(document.activeElement) || Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
       event.preventDefault();
       stopPredictionPlay();
       selectPredictionIndex(predictionState.index + (event.deltaY > 0 ? 1 : -1), true);
@@ -2110,6 +2112,7 @@ function buildPredictionWheel(data, today) {
 
 function centeredPredictionIndex() {
   const wheel = $("prediction-wheel");
+  if (!wheel.clientWidth) return predictionState.index;  // oculta: no cambiar la selección
   const middle = wheel.scrollLeft + wheel.clientWidth / 2;
   let best = 0, distance = Infinity;
   for (const card of wheel.children) {
@@ -2322,14 +2325,24 @@ async function loadPrediction(force = false) {
     return;
   }
   predictionState.loading = true;
+  if (!predictionState.data) {
+    $("prediction-status").textContent = "Cargando…";
+    $("prediction-intro").textContent = "Cargando la predicción…";
+  }
   try {
-    renderPrediction(await api("/api/prediccion", {timeoutMs: 60000}));
+    renderPrediction(await api("/api/prediccion", {timeoutMs: 120000}));
     predictionState.loadedAt = Date.now();
+    predictionState.retries = 0;
   } catch (error) {
     if (!predictionState.data) {
-      $("prediction-status").textContent = "No disponible";
+      $("prediction-status").textContent = "Reintentando…";
       $("prediction-status").className = "status warning";
-      $("prediction-intro").textContent = "No se pudo consultar la predicción: " + error.message;
+      $("prediction-intro").textContent = "No se pudo consultar la predicción (" + error.message + "). Se reintentará sola.";
+      // Reintento automático mientras se esté mirando la sección (máx. 5 veces).
+      predictionState.retries = (predictionState.retries || 0) + 1;
+      if (predictionState.retries <= 5) {
+        setTimeout(() => { if (window.location.hash === "#prediccion") loadPrediction(); }, 8000);
+      }
     }
   } finally {
     predictionState.loading = false;

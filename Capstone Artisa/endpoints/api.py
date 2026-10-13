@@ -447,7 +447,9 @@ def history_request(path, query):
 # un cálculo falla se entrega el último resultado bueno.
 CACHE_SECONDS = 60
 _cache = {}
-_cache_lock = threading.Lock()
+# Un candado por ruta: el mapa, el dashboard y la predicción se calculan en paralelo; antes
+# compartían uno y la predicción esperaba al mapa hasta agotar el tiempo del navegador.
+_cache_locks = {}
 
 
 def cached_result(path):
@@ -455,7 +457,7 @@ def cached_result(path):
     entry = _cache.get(path)
     if entry and now - entry[0] < CACHE_SECONDS:
         return entry[1]
-    with _cache_lock:
+    with _cache_locks.setdefault(path, threading.Lock()):
         entry = _cache.get(path)
         if entry and time.monotonic() - entry[0] < CACHE_SECONDS:
             return entry[1]  # otra petición lo calculó mientras esperábamos
