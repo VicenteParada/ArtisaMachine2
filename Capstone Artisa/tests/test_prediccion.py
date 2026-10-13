@@ -55,31 +55,42 @@ class PrediccionTests(unittest.TestCase):
         np.testing.assert_array_equal(X[:, prediccion.FEATURES.index("lag7")], matriz[:, d - 7])
 
     @unittest.skipUnless(HAY_LIGHTGBM, "LightGBM se valida dentro del contenedor Machine")
-    def test_model_learns_weekly_pattern_and_beats_reference(self):
+    def test_weekly_pattern_beats_flat_average_and_days_differ(self):
         matriz, lista = matriz_semanal()
-        modelo, metricas = prediccion.entrenar(matriz, lista)
-        self.assertEqual(metricas["metodo"], "lightgbm")
-        self.assertLess(metricas["mae_modelo"], metricas["mae_referencia"])
+        predictor, metricas = prediccion.entrenar(matriz, lista)
+        errores = metricas["errores"]
+        self.assertEqual(set(errores), {"lightgbm", "promedio_dia_semana", "promedio_historico"})
+        self.assertEqual(metricas["metodo"], min(errores, key=errores.get))
+        self.assertNotEqual(metricas["metodo"], "promedio_historico")  # hay patrón semanal
+        self.assertIn(metricas["objetivo"], prediccion.OBJETIVOS)
         futuras = [lista[-1] + timedelta(days=k) for k in range(1, 9)]
-        pronostico = prediccion.pronosticar(modelo, matriz, lista, futuras)
+        pronostico = prediccion.pronosticar(predictor, matriz, lista, futuras)
         self.assertEqual(sorted(pronostico), futuras)
         laboral = [pronostico[f].sum() for f in futuras if f.weekday() < 5]
         finde = [pronostico[f].sum() for f in futuras if f.weekday() >= 5]
         self.assertGreater(min(laboral), 2 * max(finde))  # distingue días, no repite el mismo mapa
 
-    def test_falls_back_to_reference_without_signal(self):
-        # Ruido puro: si el modelo no supera al promedio, se publica el promedio y se dice.
-        rng = np.random.default_rng(7)
+    @unittest.skipUnless(HAY_LIGHTGBM, "LightGBM se valida dentro del contenedor Machine")
+    def test_publishes_the_lowest_error_and_says_why(self):
+        rng = np.random.default_rng(7)  # ruido puro, sin patrón
         lista = [date(2026, 8, 17) + timedelta(days=k) for k in range(30)]
         matriz = rng.poisson(5, size=(200, 30)).astype(np.float32)
-        modelo, metricas = prediccion.entrenar(matriz, lista)
-        if modelo is None:
-            self.assertEqual(metricas["metodo"], "promedio_historico")
+        predictor, metricas = prediccion.entrenar(matriz, lista)
+        errores = metricas["errores"]
+        self.assertEqual(predictor["metodo"], metricas["metodo"])
+        self.assertEqual(metricas["mae_publicado"], min(errores.values()))
+        if metricas["metodo"] != "lightgbm":
+            self.assertIsNone(predictor["modelo"])
             self.assertTrue(metricas["motivo"])
-            pron = prediccion.pronosticar(None, matriz, lista, [lista[-1] + timedelta(days=1)])
-            np.testing.assert_allclose(next(iter(pron.values())), matriz.mean(axis=1), rtol=1e-5)
-        else:
-            self.assertLess(metricas["mae_modelo"], metricas["mae_referencia"])
+
+    def test_averages_forecast_without_lightgbm(self):
+        matriz, lista = matriz_semanal(dias=35, celdas=4)
+        futura = lista[-1] + timedelta(days=1)
+        hist = prediccion.pronosticar({"metodo": "promedio_historico", "modelo": None}, matriz, lista, [futura])
+        np.testing.assert_allclose(hist[futura], matriz.mean(axis=1), rtol=1e-5)
+        semana = prediccion.pronosticar({"metodo": "promedio_dia_semana", "modelo": None}, matriz, lista, [futura])
+        mismos = [len(lista) - 7 * k for k in range(1, 5)]  # mismo día de la semana, 4 semanas
+        np.testing.assert_allclose(semana[futura], matriz[:, mismos].mean(axis=1), rtol=1e-5)
 
     def test_new_trucks_change_the_fingerprint(self):
         self.assertNotEqual(prediccion.huella(["A", "B"]), prediccion.huella(["A", "B", "C"]))

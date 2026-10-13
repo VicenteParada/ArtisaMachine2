@@ -14,9 +14,12 @@ Cambios respecto del cuaderno (detectados al auditarlo):
   día de la semana anterior) y "media7" (última semana), con la misma regla sin fuga de
   datos: cada día solo ve días anteriores.
 - En el cuaderno el early stopping se quedó en 1 árbol y el modelo no superó a la
-  referencia ingenua (promedio histórico de la celda). Aquí se compara siempre contra esa
-  referencia en días de prueba que el modelo no vio, y se publica la que tenga menor error,
-  diciendo cuál es. Nunca se presenta una predicción peor que el promedio como "modelo".
+  referencia ingenua (promedio histórico de la celda). Aquí compiten tres métodos en días
+  de prueba que ninguno vio, y se publica el de menor error, diciendo cuál es:
+    * lightgbm: el modelo (se prueban dos objetivos y la validación elige el mejor);
+    * promedio_dia_semana: promedio del mismo día de la semana en las últimas 4 semanas;
+    * promedio_historico: promedio de la celda en toda la ventana (referencia del cuaderno).
+  Nunca se presenta como "modelo" una predicción peor que un promedio.
 
 Regla de camiones nuevos: la actividad cuenta solo camiones del catálogo. Cuando el
 catálogo de camiones cambia (por ejemplo, la API registra un camión nuevo), se vuelven a
@@ -42,9 +45,14 @@ VEL_MOVIMIENTO = 2                  # km/h: igual que el cuaderno (speed > 2)
 ESCALA = 100                        # celda de 0,01°: celda = floor(lat * 100)
 MIN_VALOR = 0.5                     # no se guardan celdas con menos de medio reporte esperado
 CONSERVAR_VERSIONES = 3
-FEATURES = ["dia_semana", "lag1", "lag7", "media7", "media_historica"]
-PARAMS = {"objective": "poisson", "metric": "l1", "learning_rate": 0.05, "num_leaves": 15,
+FEATURES = ["dia_semana", "lag1", "lag7", "media7", "media_dia_semana", "media_historica"]
+PARAMS = {"metric": "l1", "learning_rate": 0.05, "num_leaves": 15,
           "min_data_in_leaf": 30, "seed": 42, "verbose": -1, "num_threads": 1}  # 1 hilo: no acapara la CPU
+# "regression_l1" minimiza directamente el error absoluto (el que se compara); "poisson"
+# modela conteos. La validación elige cuál usar.
+OBJETIVOS = ("regression_l1", "poisson")
+SEMANAS_DIA = 4  # promedio del mismo día de la semana: últimas 4 semanas
+COLUMNA_PROMEDIO = {"promedio_historico": "media_historica", "promedio_dia_semana": "media_dia_semana"}
 
 
 def celda(lat, lon):
@@ -167,11 +175,13 @@ def cargar_matriz(cursor, lista_dias):
 def features(matriz, d, dia_semana):
     """Variables del día d usando solo días anteriores (sin fuga de datos)."""
     previos = matriz[:, :d]
+    mismos = [d - 7 * k for k in range(1, SEMANAS_DIA + 1) if d - 7 * k >= 0]
     return np.column_stack([
         np.full(matriz.shape[0], dia_semana, dtype=np.float32),
         matriz[:, d - 1],
         matriz[:, d - 7],
         matriz[:, d - 7:d].mean(axis=1),
+        matriz[:, mismos].mean(axis=1),
         previos.mean(axis=1),
     ])
 
@@ -193,8 +203,9 @@ def correlacion(pred, real):
 
 
 def entrenar(matriz, lista_dias):
-    """Entrena con días ordenados en el tiempo: 60 % entrenamiento, 20 % validación (early
-    stopping) y 20 % prueba. Devuelve (predictor, métricas)."""
+    """Días ordenados en el tiempo: 60 % entrenamiento, 20 % validación (early stopping y
+    elección del objetivo) y 20 % prueba. En la prueba compiten LightGBM y los dos promedios;
+    gana el de menor error absoluto medio. Devuelve (predictor, métricas)."""
     indices = list(range(7, len(lista_dias)))
     n = len(indices)
     corte_train, corte_val = indices[int(n * 0.6)], indices[int(n * 0.8)]
@@ -202,44 +213,55 @@ def entrenar(matriz, lista_dias):
     val = [d for d in indices if corte_train < d <= corte_val]
     test = [d for d in indices if d > corte_val]
     X_test, y_test = tabla(matriz, lista_dias, test)
-    referencia = X_test[:, FEATURES.index("media_historica")]
-    metricas = {
-        "dias_entrenamiento": len(train), "dias_validacion": len(val), "dias_prueba": len(test),
-        "celdas": int(matriz.shape[0]),
-        "mae_referencia": round(mae(referencia, y_test), 3),
-        "correlacion_referencia": correlacion(referencia, y_test),
-    }
+    candidatos = {m: X_test[:, FEATURES.index(c)] for m, c in COLUMNA_PROMEDIO.items()}
+    metricas = {"dias_entrenamiento": len(train), "dias_validacion": len(val), "dias_prueba": len(test),
+                "celdas": int(matriz.shape[0])}
+    modelo = None
     try:
         import lightgbm as lgb
     except ImportError:
-        metricas.update(metodo="promedio_historico", motivo="LightGBM no está instalado")
-        return None, metricas
-    X_train, y_train = tabla(matriz, lista_dias, train)
-    X_val, y_val = tabla(matriz, lista_dias, val)
-    ds_train = lgb.Dataset(X_train, label=y_train, feature_name=FEATURES)
-    ds_val = lgb.Dataset(X_val, label=y_val, reference=ds_train)
-    modelo = lgb.train(PARAMS, ds_train, num_boost_round=2000, valid_sets=[ds_val],
-                       callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=False)])
-    rondas = max(1, modelo.best_iteration or 1)
-    pred_test = np.clip(modelo.predict(X_test, num_iteration=rondas), 0, None)
+        metricas["nota"] = "LightGBM no está instalado"
+        lgb = None
+    if lgb is not None:
+        X_train, y_train = tabla(matriz, lista_dias, train)
+        X_val, y_val = tabla(matriz, lista_dias, val)
+        mejor = None
+        for objetivo in OBJETIVOS:
+            ds_train = lgb.Dataset(X_train, label=y_train, feature_name=FEATURES)
+            ds_val = lgb.Dataset(X_val, label=y_val, reference=ds_train)
+            prueba = lgb.train(dict(PARAMS, objective=objetivo), ds_train, num_boost_round=2000,
+                               valid_sets=[ds_val], callbacks=[lgb.early_stopping(stopping_rounds=50, verbose=False)])
+            rondas = max(1, prueba.best_iteration or 1)
+            error_val = mae(np.clip(prueba.predict(X_val, num_iteration=rondas), 0, None), y_val)
+            if mejor is None or error_val < mejor[0]:
+                mejor = (error_val, objetivo, rondas, prueba)
+        error_val, objetivo, rondas, modelo = mejor
+        candidatos["lightgbm"] = np.clip(modelo.predict(X_test, num_iteration=rondas), 0, None)
+        metricas.update(objetivo=objetivo, rondas=rondas, mae_validacion=round(error_val, 3),
+                        importancia=dict(zip(FEATURES, (int(v) for v in modelo.feature_importance()))))
+    errores = {m: round(mae(p, y_test), 3) for m, p in candidatos.items()}
+    # Gana el menor error; ante empate, el método más simple.
+    simpleza = {"promedio_historico": 0, "promedio_dia_semana": 1, "lightgbm": 2}
+    metodo = min(candidatos, key=lambda m: (errores[m], simpleza[m]))
     metricas.update(
-        rondas=rondas, mae_entrenamiento=round(mae(np.clip(modelo.predict(X_train, num_iteration=rondas), 0, None), y_train), 3),
-        mae_validacion=round(mae(np.clip(modelo.predict(X_val, num_iteration=rondas), 0, None), y_val), 3),
-        mae_modelo=round(mae(pred_test, y_test), 3), correlacion_modelo=correlacion(pred_test, y_test),
-        importancia=dict(zip(FEATURES, (int(v) for v in modelo.feature_importance()))),
+        metodo=metodo, errores=errores,
+        correlaciones={m: correlacion(p, y_test) for m, p in candidatos.items()},
+        mae_publicado=errores[metodo], mae_referencia=errores["promedio_historico"],
     )
-    if metricas["mae_modelo"] >= metricas["mae_referencia"]:
-        metricas.update(metodo="promedio_historico",
-                        motivo="El modelo no superó al promedio histórico en los días de prueba")
-        return None, metricas
+    if "lightgbm" in errores:
+        metricas["mae_modelo"] = errores["lightgbm"]
+    if metodo != "lightgbm":
+        metricas["motivo"] = ("LightGBM no superó a los promedios en los días de prueba"
+                              if "lightgbm" in errores else metricas.get("nota", ""))
+        return {"metodo": metodo, "modelo": None}, metricas
     # Se reentrena con todos los días (incluida la prueba) y las rondas que eligió la validación.
     X_all, y_all = tabla(matriz, lista_dias, indices)
-    final = lgb.train(PARAMS, lgb.Dataset(X_all, label=y_all, feature_name=FEATURES), num_boost_round=rondas)
-    metricas["metodo"] = "lightgbm"
-    return final, metricas
+    final = lgb.train(dict(PARAMS, objective=metricas["objetivo"]),
+                      lgb.Dataset(X_all, label=y_all, feature_name=FEATURES), num_boost_round=metricas["rondas"])
+    return {"metodo": "lightgbm", "modelo": final}, metricas
 
 
-def pronosticar(modelo, matriz, lista_dias, fechas_futuras):
+def pronosticar(predictor, matriz, lista_dias, fechas_futuras):
     """Predice día por día; cada predicción pasa a ser la historia del día siguiente
     (igual que el cuaderno: la predicción de hoy es el lag1 de mañana)."""
     extendida = matriz
@@ -247,10 +269,10 @@ def pronosticar(modelo, matriz, lista_dias, fechas_futuras):
     for fecha in fechas_futuras:
         d = extendida.shape[1]
         X = features(extendida, d, fecha.weekday())
-        if modelo is None:
-            pred = X[:, FEATURES.index("media_historica")]
-        else:
-            pred = np.clip(modelo.predict(X), 0, None)
+        if predictor["metodo"] == "lightgbm":
+            pred = np.clip(predictor["modelo"].predict(X), 0, None)
+        else:  # los promedios son columnas de las variables
+            pred = X[:, FEATURES.index(COLUMNA_PROMEDIO[predictor["metodo"]])]
         resultado[fecha] = pred
         extendida = np.column_stack([extendida, pred.astype(np.float32)])
     return resultado
@@ -336,14 +358,14 @@ def ejecutar(connection, utc_now):
     connection.commit()
     if not celdas:
         return None
-    modelo, metricas = entrenar(matriz, lista_dias)
+    predictor, metricas = entrenar(matriz, lista_dias)
     hoy = dias.hoy(utc_now)
     futuras = []
     fecha = base_hasta + timedelta(days=1)
     while fecha <= hoy + timedelta(days=DIAS_ADELANTE):
         futuras.append(fecha)
         fecha += timedelta(days=1)
-    pronostico = pronosticar(modelo, matriz, lista_dias, futuras)
+    pronostico = pronosticar(predictor, matriz, lista_dias, futuras)
     metricas.update(
         huella_camiones=huella(lista_camiones), camiones=len(lista_camiones), dias_historia=len(lista_dias),
         historia_desde=lista_dias[0], historia_hasta=lista_dias[-1], dias_recontados=contados,
@@ -351,8 +373,7 @@ def ejecutar(connection, utc_now):
     )
     version = guardar_version(connection, base_hasta, celdas, pronostico, metricas, len(lista_camiones))
     print(f"Predicción: versión {version} · {futuras[0]}..{futuras[-1]} · método {metricas['metodo']} · "
-          f"error prueba {metricas.get('mae_modelo', metricas['mae_referencia'])} "
-          f"(promedio {metricas['mae_referencia']}) en {metricas['segundos']} s", flush=True)
+          f"errores en prueba {metricas['errores']} en {metricas['segundos']} s", flush=True)
     return metricas
 
 

@@ -9,8 +9,8 @@ import json
 import pymysql
 
 ESCALA = 100  # celdas de 0,01° (igual que machine_learning/prediccion.py)
-METRICAS_PUBLICAS = ("metodo", "motivo", "mae_modelo", "mae_referencia", "correlacion_modelo",
-                     "correlacion_referencia", "dias_historia", "historia_desde", "historia_hasta",
+METRICAS_PUBLICAS = ("metodo", "motivo", "errores", "correlaciones", "mae_publicado", "mae_modelo",
+                     "mae_referencia", "objetivo", "dias_historia", "historia_desde", "historia_hasta",
                      "dias_prueba", "celdas", "camiones")
 
 

@@ -1930,6 +1930,11 @@ document.addEventListener("visibilitychange", () => {
 // --- Predicción de actividad (machine de 7 días, /api/prediccion) ---------------------------
 const PREDICTION_REFRESH_MS = 15 * 60 * 1000;
 const PREDICTION_GRADIENT = {0.2: "#3b4cc0", 0.45: "#2ec4b6", 0.65: "#9be15d", 0.82: "#f9c74f", 1: "#e63946"};
+const PREDICTION_METHODS = {
+  lightgbm: "Modelo LightGBM",
+  promedio_dia_semana: "Promedio por día de la semana",
+  promedio_historico: "Promedio histórico"
+};
 const predictionState = {data: null, loadedAt: 0, loading: false, day: "ALL", map: null, layer: null};
 
 function predictionDayLabel(iso, style = "short") {
@@ -1999,7 +2004,8 @@ function renderPrediction(data) {
   }
   const m = data.metricas || {};
   const usesModel = m.metodo === "lightgbm";
-  status.textContent = usesModel ? "Modelo LightGBM" : "Promedio histórico";
+  const errors = m.errores || {};
+  status.textContent = PREDICTION_METHODS[m.metodo] || "Predicción";
   status.className = "status " + (usesModel ? "" : "neutral");
   const today = localToday();
   const first = data.dias[0].fecha, last = data.dias[data.dias.length - 1].fecha;
@@ -2012,11 +2018,12 @@ function renderPrediction(data) {
   const peak = data.dias.reduce((top, item) => item.total > top.total ? item : top, data.dias[0]);
   $("prediction-peak").textContent = predictionDayLabel(peak.fecha);
   $("prediction-peak-detail").textContent = format(peak.total) + " reportes esperados";
-  const error = usesModel ? m.mae_modelo : m.mae_referencia;
-  $("prediction-error").textContent = error === undefined ? "—" : format(error, 1);
-  $("prediction-error-detail").textContent = usesModel
-    ? `Promedio histórico: ${format(m.mae_referencia, 1)} · menor es mejor`
-    : "Reportes por zona y día · menor es mejor";
+  const error = m.mae_publicado ?? errors[m.metodo] ?? m.mae_referencia;
+  $("prediction-error").textContent = error === undefined ? "—" : format(error, 2);
+  const others = Object.entries(errors).filter(([method]) => method !== m.metodo)
+    .map(([method, value]) => `${PREDICTION_METHODS[method] || method}: ${format(value, 2)}`);
+  $("prediction-error-detail").textContent = others.length
+    ? others.join(" · ") + " · menor es mejor" : "Reportes por zona y día · menor es mejor";
   $("prediction-base").textContent = new Intl.DateTimeFormat("es-CL", {
     day: "numeric", month: "short", timeZone: "UTC"}).format(new Date(data.base_hasta + "T12:00:00Z"));
   $("prediction-base-detail").textContent = m.dias_historia
@@ -2026,11 +2033,11 @@ function renderPrediction(data) {
     "(sobre 2 km/h) habrá en cada zona, usando el día anterior, el mismo día de la semana pasada, el promedio " +
     "de la última semana y el promedio de todo el período. Los días siguientes usan la predicción del día " +
     "anterior, así que la confianza baja a medida que se aleja. " +
-    (usesModel
-      ? `En ${format(m.dias_prueba || 0)} días de prueba que el modelo no vio, su error fue ${format(m.mae_modelo, 2)} ` +
-        `contra ${format(m.mae_referencia, 2)} del promedio histórico de cada zona.`
-      : `Se muestra el promedio histórico de cada zona porque el modelo no lo superó en los días de prueba` +
-        (m.motivo ? ` (${m.motivo.toLowerCase()}).` : "."));
+    `Compiten tres métodos en ${format(m.dias_prueba || 0)} días de prueba que ninguno vio: el modelo LightGBM, ` +
+    "el promedio del mismo día de la semana (últimas 4 semanas) y el promedio de todo el período. " +
+    `Se publica el de menor error: ${PREDICTION_METHODS[m.metodo] || m.metodo}` +
+    (error === undefined ? "." : ` (${format(error, 2)} reportes de error por zona y día).`) +
+    (!usesModel && m.motivo ? ` ${m.motivo}.` : "");
   const buttons = [["ALL", "Semana", "Todos los días"]].concat(data.dias.map((item) =>
     [item.fecha, predictionDayLabel(item.fecha), item.fecha === today ? "Hoy" : format(item.total) + " rep."]));
   days.replaceChildren(...buttons.map(([value, label, detail]) => {

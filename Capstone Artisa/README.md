@@ -38,7 +38,7 @@ flowchart LR
 - **Ruta:** viajes con el mismo origen y destino (faena o lugar frecuente) y la misma trayectoria (750 m). Ida y vuelta son la misma ruta. Mínimo 5 viajes y 2 camiones.
 - **Nivel de uso:** verde = más usada (sobre el percentil 67), naranja = uso medio, rojo = poco usada (percentil 33 o menos). Ventana: últimos 90 días.
 - **Línea de la ruta:** un viaje real observado (el más representativo), nunca un promedio inventado.
-- **Predicción (LightGBM):** reportes de camiones en movimiento esperados por zona de ~1 km, desde hoy hasta 7 días más. Aprende de las últimas 8 semanas (mínimo 21 días). Se compara siempre con el promedio histórico de cada zona en días de prueba y se publica el que se equivoque menos.
+- **Predicción (LightGBM):** reportes de camiones en movimiento esperados por zona de ~1 km, desde hoy hasta 7 días más. Aprende de las últimas 8 semanas (mínimo 21 días). En días de prueba compiten LightGBM, el promedio del mismo día de la semana y el promedio histórico; se publica el que se equivoque menos y la web dice cuál es.
 - **Camiones nuevos:** cuando el catálogo de camiones cambia, la predicción vuelve a contar las 8 semanas con la lista nueva y se reentrena.
 - **Camiones:** solo los del catálogo `DB/vehiculos_data.sql`. La patente y el conductor vienen del GPS (no se guarda el RUT).
 
