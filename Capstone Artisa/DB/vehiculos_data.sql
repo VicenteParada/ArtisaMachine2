@@ -1,7 +1,7 @@
 -- Catálogo inicial de vehículos (origen: patentes.csv, recuperado del historial del repo).
 -- Lo aplica common.db.initialize_db() después de DB/schema.sql. Idempotente y seguro
 -- sobre la base persistente: solo agrega lo que falta y nunca sobrescribe una
--- clasificación existente (para corregir una, usa UPDATE vehiculos).
+-- clasificación existente (las correcciones van al final, con UPDATE).
 -- Los tipos se resuelven por nombre, no por id, por si la tabla heredada numera distinto.
 
 INSERT INTO tipos_vehiculo (nombre) SELECT 'camion' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM tipos_vehiculo WHERE nombre = 'camion');
@@ -148,3 +148,10 @@ INSERT IGNORE INTO vehiculos (asset_id, id_tipo, actualizado_en) VALUES
 SET @id_tipo := (SELECT id_tipo FROM tipos_vehiculo WHERE nombre = 'minibus' ORDER BY id_tipo LIMIT 1);
 INSERT IGNORE INTO vehiculos (asset_id, id_tipo, actualizado_en) VALUES
     ('GCFX14', @id_tipo, UTC_TIMESTAMP(6));
+
+-- Correcciones de tipo: INSERT IGNORE no cambia vehículos ya registrados, así que las
+-- patentes reclasificadas se actualizan aquí (solo si todavía tienen el tipo anterior).
+UPDATE vehiculos SET id_tipo = (SELECT id_tipo FROM tipos_vehiculo WHERE nombre = 'camioneta' ORDER BY id_tipo LIMIT 1),
+    actualizado_en = UTC_TIMESTAMP(6)
+WHERE asset_id = 'SBKT91'
+  AND id_tipo = (SELECT id_tipo FROM tipos_vehiculo WHERE nombre = 'camion' ORDER BY id_tipo LIMIT 1);
