@@ -270,7 +270,7 @@ def gps_points(cursor, desde, hasta):
     for table in ("raw_gps", "telemetria_api"):
         try:
             cursor.execute(
-                f"""SELECT asset_id, report_date, latitude, longitude
+                f"""SELECT asset_id, report_date, latitude, longitude, driver_name, driver_last_name
                    FROM {table} WHERE report_date >= %s AND report_date < %s""",
                 (inicio, fin),
             )
@@ -280,9 +280,13 @@ def gps_points(cursor, desde, hasta):
     trucks = truck_ids(cursor)  # filtrar en Python evita un plan lento con IN (subconsulta)
     rows = [row for row in rows if row["asset_id"] in trucks]
     indices, cam, t, lat, lon = {}, [], [], [], []
+    drivers = {}
     rows.sort(key=lambda row: (row["asset_id"], row["report_date"]))
     seen = set()
     for row in rows:
+        driver = " ".join(filter(None, (row.get("driver_name"), row.get("driver_last_name")))).strip()
+        if driver:
+            drivers[row["asset_id"]] = driver  # las filas están ordenadas: queda el último del rango
         key = (row["asset_id"], row["report_date"], row["latitude"], row["longitude"])
         if key in seen:
             continue
@@ -291,7 +295,9 @@ def gps_points(cursor, desde, hasta):
         t.append(round((row["report_date"] - inicio).total_seconds()))
         lat.append(round(row["latitude"] * 1e5))
         lon.append(round(row["longitude"] * 1e5))
-    return {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "zona": dias.ZONA, "camiones": list(indices),
+    truck_list = list(indices)
+    return {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "zona": dias.ZONA, "camiones": truck_list,
+            "conductores": [drivers.get(asset_id) for asset_id in truck_list],
             "cam": cam, "t": t, "lat": lat, "lon": lon}
 
 

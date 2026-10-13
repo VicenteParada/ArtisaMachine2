@@ -50,13 +50,13 @@ class MapContractTests(unittest.TestCase):
             ("FROM rutas_version", lambda p: [dict(VERSION)]),
             ("FROM rutas_clasificadas WHERE", [RUTA]),
             ("FROM rutas_vehiculo", [{"asset_id": "RJXS30", "route_id": "R-ABC123"}]),
-            ("FROM vehiculos", [{"asset_id": "RJXS30"}]),
-            ("FROM telemetria_api WHERE asset_id", [{"asset_id": "RJXS30", "asset_name": "Lampa-826",
-                                                      "report_date": datetime(2026, 10, 6, 17), "latitude": -33.3,
-                                                      "longitude": -70.6, "speed": 40.0, "heading": 5,
-                                                      "ignition": 1, "event_name": "Reporte"}]),
-            ("FROM raw_gps WHERE asset_id", []),
-            ("driver_name IS NOT NULL", [{"driver_name": "JULIO", "driver_last_name": "PÉREZ"}]),
+            ("SELECT v.asset_id FROM vehiculos", [{"asset_id": "RJXS30"}]),
+            ("FROM telemetria_api AS gps", [{"asset_id": "RJXS30", "asset_name": "Lampa-826",
+                                             "report_date": datetime(2026, 10, 6, 17), "latitude": -33.3,
+                                             "longitude": -70.6, "speed": 40.0, "heading": 5,
+                                             "ignition": 1, "event_name": "Reporte",
+                                             "driver_name": "JULIO", "driver_last_name": "PÉREZ"}]),
+            ("FROM raw_gps AS gps", []),
             ("validos", [{"n": 500}]),
         ])
         payload = rutas_api.classified_map(cursor)
@@ -69,7 +69,6 @@ class MapContractTests(unittest.TestCase):
         self.assertFalse(route["map_matching"])
         vehicle = payload["vehicles"][0]
         self.assertEqual((vehicle["vehicle_id"], vehicle["route_id"], vehicle["fuente"]), ("RJXS30", "R-ABC123", "api"))
-        # El último reporte no trae conductor: se usa el último informado en las 24 h previas.
         self.assertEqual((vehicle["patente"], vehicle["driver_name"], vehicle["driver_last_name"]),
                          ("RJXS30", "JULIO", "PÉREZ"))
         self.assertEqual(payload["ranking"]["most_used"]["route_id"], "R-ABC123")

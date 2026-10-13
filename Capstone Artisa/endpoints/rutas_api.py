@@ -49,24 +49,44 @@ def _iso(value):
 DRIVER_LOOKBACK = timedelta(hours=24)
 
 
-def last_driver(cursor, asset_id, until):
-    """Último conductor informado para el camión en las 24 h previas a `until`.
-    Algunos reportes llegan sin conductor; se usa el más reciente que sí lo trae."""
-    for table in ("telemetria_api", "raw_gps"):
+def last_drivers(cursor, positions):
+    """Último conductor informado en las 24 h previas, para varios camiones a la vez."""
+    missing = {asset_id: row for asset_id, row in positions.items() if not row.get("driver_name")}
+    found = {}
+    if not missing:
+        return found
+    conditions = " OR ".join(
+        "(source.asset_id=%s AND source.report_date >= %s AND source.report_date <= %s)"
+        for _ in missing
+    )
+    params = []
+    for asset_id, row in missing.items():
+        params.extend((asset_id, row["report_date"] - DRIVER_LOOKBACK, row["report_date"]))
+    for table, index in (("telemetria_api", "idx_telemetria_api_asset_fecha"),
+                         ("raw_gps", "idx_raw_gps_asset_fecha")):
         try:
             cursor.execute(
-                f"""SELECT driver_name, driver_last_name FROM {table}
-                    WHERE asset_id=%s AND report_date <= %s AND report_date >= %s
-                      AND driver_name IS NOT NULL AND driver_name <> ''
-                    ORDER BY report_date DESC LIMIT 1""",
-                (asset_id, until, until - DRIVER_LOOKBACK),
+                f"""SELECT asset_id, driver_name, driver_last_name, report_date
+                    FROM (
+                        SELECT source.asset_id, source.driver_name, source.driver_last_name,
+                               source.report_date,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY source.asset_id ORDER BY source.report_date DESC
+                               ) AS position
+                        FROM {table} AS source FORCE INDEX ({index})
+                        WHERE source.driver_name IS NOT NULL AND source.driver_name <> ''
+                          AND ({conditions})
+                    ) AS ranked
+                    WHERE position=1""",
+                params,
             )
         except pymysql.err.ProgrammingError:
             continue
-        row = cursor.fetchone()
-        if row:
-            return row
-    return {}
+        for row in cursor.fetchall():
+            previous = found.get(row["asset_id"])
+            if previous is None or row["report_date"] > previous["report_date"]:
+                found[row["asset_id"]] = row
+    return found
 
 
 def latest_positions(cursor, route_by_asset):
@@ -77,24 +97,53 @@ def latest_positions(cursor, route_by_asset):
            WHERE t.nombre = 'camion' ORDER BY v.asset_id"""
     )
     trucks = [row["asset_id"] for row in cursor.fetchall()]
+    truck_ids = set(trucks)
+    best_by_asset = {}
+    # La subconsulta correlacionada aprovecha el índice (asset_id, report_date) y elige un
+    # solo report_id por camión. Agrupar únicamente por MAX(report_date) no basta: la fuente
+    # puede entregar miles de reportes con la misma hora máxima para un mismo vehículo.
+    for table, extra in (
+        ("telemetria_api", "gps.speed, gps.heading, gps.ignition, gps.event_name, "
+                           "gps.driver_name, gps.driver_last_name"),
+        ("raw_gps", "gps.speed, NULL AS heading, NULL AS ignition, gps.event_name, "
+                    "gps.driver_name, gps.driver_last_name"),
+    ):
+        try:
+            cursor.execute(
+                f"""SELECT gps.asset_id, gps.asset_name, gps.report_date, gps.latitude, gps.longitude,
+                           {extra}
+                    FROM {table} AS gps
+                    INNER JOIN (
+                        SELECT vehicle.asset_id,
+                               (SELECT source.report_id
+                                FROM {table} AS source
+                                WHERE source.asset_id = vehicle.asset_id
+                                ORDER BY source.report_date DESC
+                                LIMIT 1) AS report_id
+                        FROM vehiculos AS vehicle
+                        INNER JOIN tipos_vehiculo AS vehicle_type
+                          ON vehicle_type.id_tipo = vehicle.id_tipo
+                        WHERE vehicle_type.nombre = 'camion'
+                    ) AS latest
+                      ON latest.report_id = gps.report_id
+                    ORDER BY gps.asset_id"""
+            )
+        except pymysql.err.ProgrammingError:
+            continue
+        for row in cursor.fetchall():
+            asset_id = row["asset_id"]
+            if asset_id not in truck_ids:
+                continue
+            best = best_by_asset.get(asset_id)
+            if best is None or row["report_date"] > best["report_date"]:
+                best_by_asset[asset_id] = dict(
+                    row, fuente="api" if table == "telemetria_api" else "historico"
+                )
     vehicles = []
     for asset_id in trucks:
-        best = None
-        for table, extra in (("telemetria_api", "speed, heading, ignition, event_name, driver_name, driver_last_name"),
-                             ("raw_gps", "speed, NULL AS heading, NULL AS ignition, event_name, driver_name, driver_last_name")):
-            try:
-                cursor.execute(
-                    f"""SELECT asset_id, asset_name, report_date, latitude, longitude, {extra}
-                        FROM {table} WHERE asset_id=%s ORDER BY report_date DESC LIMIT 1""",
-                    (asset_id,),
-                )
-            except pymysql.err.ProgrammingError:
-                continue
-            row = cursor.fetchone()
-            if row and (best is None or row["report_date"] > best["report_date"]):
-                best = dict(row, fuente="api" if table == "telemetria_api" else "historico")
+        best = best_by_asset.get(asset_id)
         if best:
-            driver = best if best.get("driver_name") else last_driver(cursor, asset_id, best["report_date"])
+            driver = best
             vehicles.append({
                 "vehicle_id": asset_id, "vehicle_name": best["asset_name"] or asset_id,
                 "patente": asset_id,
