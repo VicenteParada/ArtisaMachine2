@@ -28,7 +28,7 @@ from common import dias
 from common.db import connect_db, initialize_db
 from common.http import JsonHandler, serve
 from machine_learning import prediccion, rutas_job
-from machine_learning.diario import VERSION_CALCULO, procesar_dia, ultimo_recibido
+from machine_learning.diario import VERSION_CALCULO, procesar_dia, quitar_no_camiones, ultimo_recibido
 
 
 GRACIA = timedelta(minutes=int(os.environ.get("DIARIO_GRACIA_MINUTOS", "15")))
@@ -213,6 +213,7 @@ def ejecucion_completa(connection, utc_now):
     """Recupera días pendientes y publica rutas por lotes. Devuelve días procesados."""
     total = 0
     revisados = set()
+    quitar_no_camiones(connection)
     while True:
         HEARTBEAT["value"] = time.monotonic()
         hecho = ciclo(connection, utc_now, completo=True, revisados=revisados)

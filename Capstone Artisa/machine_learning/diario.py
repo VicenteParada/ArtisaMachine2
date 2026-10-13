@@ -125,6 +125,43 @@ def camiones_catalogo(cursor):
     return [fila["asset_id"] for fila in cursor.fetchall()]
 
 
+def quitar_no_camiones(connection):
+    """Regla de reclasificación: si un vehículo deja de ser camión en el catálogo (por
+    ejemplo, una patente que era camioneta), se quita de los días ya cerrados y se
+    rehacen los totales de esos días. Los días quedan marcados como recalculados, así las
+    rutas y la predicción se actualizan solas. Devuelve los días corregidos."""
+    with connection.cursor() as cursor:
+        camiones = camiones_catalogo(cursor)
+        if not camiones:
+            return []
+        marcas = ",".join(["%s"] * len(camiones))
+        cursor.execute(
+            f"""SELECT DISTINCT fecha FROM reporte_diario WHERE asset_id NOT IN ({marcas})
+                UNION SELECT DISTINCT fecha FROM viajes_camion WHERE asset_id NOT IN ({marcas})""",
+            camiones + camiones,
+        )
+        fechas = sorted(fila["fecha"] for fila in cursor.fetchall())
+        for fecha in fechas:
+            cursor.execute(f"DELETE FROM reporte_diario WHERE fecha=%s AND asset_id NOT IN ({marcas})",
+                           [fecha] + camiones)
+            cursor.execute(f"DELETE FROM viajes_camion WHERE fecha=%s AND asset_id NOT IN ({marcas})",
+                           [fecha] + camiones)
+            cursor.execute(
+                """UPDATE reporte_diario_estado AS e
+                   LEFT JOIN (SELECT COUNT(*) AS camiones, SUM(reportes) AS reportes,
+                                     SUM(km_observados) AS km
+                              FROM reporte_diario WHERE fecha=%s) AS r ON 1=1
+                   SET e.camiones=COALESCE(r.camiones,0), e.reportes=COALESCE(r.reportes,0),
+                       e.km_observados=ROUND(COALESCE(r.km,0),2), e.calculado_en=UTC_TIMESTAMP(6)
+                   WHERE e.fecha=%s""",
+                (fecha, fecha),
+            )
+    connection.commit()
+    if fechas:
+        print(f"Cierre diario: se quitaron vehículos que ya no son camiones de {len(fechas)} días", flush=True)
+    return fechas
+
+
 def leer_filas_dia(cursor, dia):
     """Reportes de camiones del día local, desde ambas tablas.
 

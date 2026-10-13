@@ -76,7 +76,9 @@ class FakeCursor:
         return False
 
     def execute(self, query, params=None):
-        if "MIN(report_date)" in query:
+        if "FROM vehiculos" in query:
+            self.result = []  # sin catálogo: la limpieza de no camiones no hace nada
+        elif "MIN(report_date)" in query:
             self.result = [{"primero": self.db["primero"]}]
         elif "FROM telemetria_api_estado" in query:
             self.result = [self.db["conector"]] if self.db["conector"] else []
@@ -232,6 +234,38 @@ class ScheduleTests(unittest.TestCase):
         diario_worker.ciclo(FakeConnection(db), datetime(2026, 10, 6, 15),
                             procesar=lambda c, d, e, recalculo=False: hecho.append((d, e)), completo=False)
         self.assertEqual(hecho, [(date(2026, 10, 6), "en_curso")])
+
+
+class ReclassificationTests(unittest.TestCase):
+    def test_vehicle_no_longer_a_truck_is_removed_from_closed_days(self):
+        from machine_learning.diario import quitar_no_camiones
+        ejecutadas = []
+
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *exc): return False
+            def execute(self, query, params=None):
+                ejecutadas.append((" ".join(query.split()), params))
+                if "FROM vehiculos" in query:
+                    self.result = [{"asset_id": "RJXS30"}, {"asset_id": "RRSP47"}]
+                elif "SELECT DISTINCT fecha" in query:
+                    self.result = [{"fecha": date(2026, 10, 2)}, {"fecha": date(2026, 10, 1)}]
+                else:
+                    self.result = []
+            def fetchall(self): return self.result
+
+        class Conn:
+            def cursor(self): return Cursor()
+            def commit(self): pass
+
+        fechas = quitar_no_camiones(Conn())
+        self.assertEqual(fechas, [date(2026, 10, 1), date(2026, 10, 2)])
+        borrados = [p for q, p in ejecutadas if q.startswith("DELETE FROM reporte_diario")]
+        self.assertEqual(borrados[0], [date(2026, 10, 1), "RJXS30", "RRSP47"])  # se conserva solo a camiones
+        self.assertEqual(sum(q.startswith("DELETE FROM viajes_camion") for q, _ in ejecutadas), 2)
+        totales = [q for q, _ in ejecutadas if q.startswith("UPDATE reporte_diario_estado")]
+        self.assertEqual(len(totales), 2)
+        self.assertIn("calculado_en=UTC_TIMESTAMP(6)", totales[0])  # rutas y predicción se recalculan
 
 
 if __name__ == "__main__":
