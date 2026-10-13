@@ -39,7 +39,7 @@ import numpy as np
 from common import dias
 
 VENTANA_DIAS = int(os.environ.get("PRED_VENTANA_DIAS", "112"))  # 16 semanas de historia
-DIAS_ADELANTE = int(os.environ.get("PRED_DIAS", "7"))           # hoy + 7 días
+DIAS_ADELANTE = int(os.environ.get("PRED_DIAS", "14"))          # hoy + 14: 15 días en total
 MIN_DIAS = 21                       # como el cuaderno: al menos 3 semanas para entrenar
 VEL_MOVIMIENTO = 2                  # km/h: igual que el cuaderno (speed > 2)
 ESCALA = 100                        # celda de 0,01°: celda = floor(lat * 100)
@@ -250,6 +250,9 @@ def entrenar(matriz, lista_dias):
     )
     if "lightgbm" in errores:
         metricas["mae_modelo"] = errores["lightgbm"]
+    # Confianza por día: error real al predecir 1, 2, … días hacia adelante en la prueba.
+    de_prueba = {"metodo": metodo, "modelo": modelo if metodo == "lightgbm" else None}
+    metricas["error_por_dia"] = error_por_horizonte(de_prueba, matriz, lista_dias, test, DIAS_ADELANTE + 1)
     if metodo != "lightgbm":
         metricas["motivo"] = ("LightGBM no superó a los promedios en los días de prueba"
                               if "lightgbm" in errores else metricas.get("nota", ""))
@@ -259,6 +262,22 @@ def entrenar(matriz, lista_dias):
     final = lgb.train(dict(PARAMS, objective=metricas["objetivo"]),
                       lgb.Dataset(X_all, label=y_all, feature_name=FEATURES), num_boost_round=metricas["rondas"])
     return {"metodo": "lightgbm", "modelo": final}, metricas
+
+
+def error_por_horizonte(predictor, matriz, lista_dias, dias_prueba, horizonte, max_origenes=7):
+    """Error medio al predecir k días hacia adelante (k = 1..horizonte), simulando el
+    pronóstico encadenado desde varios días de la prueba como si fueran "hoy"."""
+    if not dias_prueba:
+        return []
+    paso = max(1, len(dias_prueba) // max_origenes)
+    errores = [[] for _ in range(horizonte)]
+    for origen in dias_prueba[::paso][:max_origenes]:
+        largo = min(horizonte, matriz.shape[1] - origen)
+        fechas = lista_dias[origen:origen + largo]
+        pronostico = pronosticar(predictor, matriz[:, :origen], lista_dias[:origen], fechas)
+        for k, fecha in enumerate(fechas):
+            errores[k].append(mae(pronostico[fecha], matriz[:, origen + k]))
+    return [round(float(np.mean(e)), 3) if e else None for e in errores]
 
 
 def pronosticar(predictor, matriz, lista_dias, fechas_futuras):

@@ -129,7 +129,7 @@ services:
       DIARIO_HORA: ${DIARIO_HORA-00:30}
       DIARIO_HOY_CADA_MINUTOS: ${DIARIO_HOY_CADA_MINUTOS:-10}
       PRED_VENTANA_DIAS: ${PRED_VENTANA_DIAS:-112}
-      PRED_DIAS: ${PRED_DIAS:-7}
+      PRED_DIAS: ${PRED_DIAS:-14}
     depends_on:
       mariadb:
         condition: service_healthy

@@ -1931,27 +1931,56 @@ window.addEventListener("storage", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) restoreSession();
 });
-// --- Predicción de actividad (machine de 7 días, /api/prediccion) ---------------------------
+// --- Predicción de actividad (/api/prediccion) ----------------------------------------------
+// Ruleta de días: un día, un rango o todos; recorrido animado; confianza por día según el
+// error real que tuvo el método al predecir 1, 2, … días hacia adelante en la prueba.
 const PREDICTION_REFRESH_MS = 15 * 60 * 1000;
+const PREDICTION_PLAY_MS = 1600;
 const PREDICTION_GRADIENT = {0.2: "#3b4cc0", 0.45: "#2ec4b6", 0.65: "#9be15d", 0.82: "#f9c74f", 1: "#e63946"};
 const PREDICTION_METHODS = {
   lightgbm: "Modelo LightGBM",
   promedio_dia_semana: "Promedio por día de la semana",
   promedio_historico: "Promedio histórico"
 };
-const predictionState = {data: null, loadedAt: 0, loading: false, day: "ALL", map: null, layer: null};
+const CONFIDENCE_LABELS = {alta: "Confianza alta", media: "Confianza media", baja: "Confianza baja", na: "Sin evaluar"};
+const predictionState = {
+  data: null, loadedAt: 0, loading: false, map: null, layer: null, fitted: false,
+  mode: "day", index: 0, from: 0, to: 0, timer: null, scrollTimer: null, wheelBound: false
+};
+
+function predictionDate(iso) { return new Date(iso + "T12:00:00Z"); }
 
 function predictionDayLabel(iso, style = "short") {
-  const date = new Date(iso + "T12:00:00Z");
-  return new Intl.DateTimeFormat("es-CL", style === "short"
-    ? {weekday: "short", day: "numeric", timeZone: "UTC"}
-    : {weekday: "long", day: "numeric", month: "long", timeZone: "UTC"}).format(date);
+  const options = style === "short" ? {weekday: "short", day: "numeric"}
+    : style === "weekday" ? {weekday: "short"}
+      : style === "month" ? {month: "short"}
+        : {weekday: "long", day: "numeric", month: "long"};
+  return new Intl.DateTimeFormat("es-CL", {...options, timeZone: "UTC"}).format(predictionDate(iso));
 }
 
-function predictionCells(data, day) {
-  if (day !== "ALL") return (data.dias.find((item) => item.fecha === day) || {celdas: []}).celdas;
+function predictionConfidence(data, iso) {
+  const errors = (data.metricas || {}).error_por_dia || [];
+  const ahead = Math.round((predictionDate(iso) - predictionDate(data.base_hasta)) / 86400000) - 1;
+  const error = errors[ahead];
+  if (error === null || error === undefined || !errors[0]) return {level: "na", error: null};
+  const ratio = error / errors[0];
+  return {level: ratio <= 1.1 ? "alta" : ratio <= 1.3 ? "media" : "baja", error};
+}
+
+function predictionSelected() {
+  const days = predictionState.data ? predictionState.data.dias : [];
+  if (predictionState.mode === "all") return days;
+  if (predictionState.mode === "range") {
+    const [a, b] = [predictionState.from, predictionState.to].sort((x, y) => x - y);
+    return days.slice(a, b + 1);
+  }
+  return days.slice(predictionState.index, predictionState.index + 1);
+}
+
+function predictionCells(days) {
+  if (days.length === 1) return days[0].celdas;
   const sum = new Map();
-  for (const item of data.dias) {
+  for (const item of days) {
     for (const [lat, lon, value] of item.celdas) {
       const key = lat + "," + lon;
       sum.set(key, [lat, lon, (sum.get(key)?.[2] || 0) + value]);
@@ -1971,42 +2000,230 @@ function ensurePredictionMap() {
 
 function drawPrediction() {
   const data = predictionState.data;
+  if (!data || !data.dias.length) return;
+  const days = predictionSelected();
+  const total = days.reduce((sum, item) => sum + item.total, 0);
+  // Resumen de la selección
+  $("prediction-total").textContent = format(total);
+  $("prediction-total-detail").textContent = days.length === 1
+    ? predictionDayLabel(days[0].fecha, "long") : `En ${days.length} días · camiones en movimiento`;
+  const text = $("prediction-selection");
+  if (days.length === 1) {
+    const confidence = predictionConfidence(data, days[0].fecha);
+    text.innerHTML = "";
+    const strong = document.createElement("strong");
+    const label = predictionDayLabel(days[0].fecha, "long");
+    strong.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+    const badge = document.createElement("span");
+    badge.className = "confidence-badge " + confidence.level;
+    badge.textContent = CONFIDENCE_LABELS[confidence.level];
+    text.append(strong, ` · ${format(days[0].total)} reportes esperados `, badge,
+      confidence.error === null ? "" : ` · se equivoca ~${format(confidence.error, 2)} por zona`);
+  } else {
+    text.textContent = `${predictionDayLabel(days[0].fecha, "long")} → ${predictionDayLabel(days[days.length - 1].fecha, "long")}` +
+      ` · ${format(total)} reportes esperados en ${days.length} días`;
+  }
+  // Mapa de calor
   const map = ensurePredictionMap();
-  if (!data || !map) return;
-  map.invalidateSize();
-  if (predictionState.layer) map.removeLayer(predictionState.layer);
-  const cells = predictionCells(data, predictionState.day);
-  const max = cells.reduce((top, cell) => Math.max(top, cell[2]), 0);
-  // Escala logarítmica, igual que el mapa de calor del cuaderno (np.log1p).
-  const points = cells.map(([lat, lon, value]) => [lat, lon, max ? Math.log1p(value) / Math.log1p(max) : 0]);
-  predictionState.layer = L.heatLayer
-    ? L.heatLayer(points, {radius: 9, blur: 11, minOpacity: 0.3, max: 1, maxZoom: 18, gradient: PREDICTION_GRADIENT})
-    : L.layerGroup();
-  predictionState.layer.addTo(map);
-  if (!predictionState.fitted && cells.length) {
-    map.fitBounds(L.latLngBounds(cells.map((cell) => [cell[0], cell[1]])), {padding: [30, 30], maxZoom: 9});
-    predictionState.fitted = true;
+  if (map) {
+    map.invalidateSize();
+    if (predictionState.layer) map.removeLayer(predictionState.layer);
+    const cells = predictionCells(days);
+    const max = cells.reduce((top, cell) => Math.max(top, cell[2]), 0);
+    // Escala logarítmica, igual que el mapa de calor del cuaderno (np.log1p).
+    const points = cells.map(([lat, lon, value]) => [lat, lon, max ? Math.log1p(value) / Math.log1p(max) : 0]);
+    predictionState.layer = L.heatLayer
+      ? L.heatLayer(points, {radius: 9, blur: 11, minOpacity: 0.3, max: 1, maxZoom: 18, gradient: PREDICTION_GRADIENT})
+      : L.layerGroup();
+    predictionState.layer.addTo(map);
+    if (!predictionState.fitted && cells.length) {
+      map.fitBounds(L.latLngBounds(cells.map((cell) => [cell[0], cell[1]])), {padding: [30, 30], maxZoom: 9});
+      predictionState.fitted = true;
+    }
   }
-  for (const column of document.querySelectorAll("[data-prediction-column]")) {
-    column.classList.toggle("is-active", column.dataset.predictionColumn === predictionState.day);
+  // Marcar la selección en la ruleta y en las columnas
+  const selected = new Set(days.map((item) => item.fecha));
+  for (const node of document.querySelectorAll("[data-prediction-fecha]")) {
+    node.classList.toggle("is-selected", selected.has(node.dataset.predictionFecha));
   }
-  for (const button of document.querySelectorAll("[data-prediction-day]")) {
-    const selected = button.dataset.predictionDay === predictionState.day;
-    button.classList.toggle("is-active", selected);
-    button.setAttribute("aria-pressed", String(selected));
+  for (const button of document.querySelectorAll("[data-prediction-mode]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.predictionMode === predictionState.mode));
   }
+  $("prediction-range").hidden = predictionState.mode !== "range";
+  updatePredictionRange();
+}
+
+// --- Ruleta ---
+function buildPredictionWheel(data, today) {
+  const wheel = $("prediction-wheel");
+  wheel.replaceChildren(...data.dias.map((item, index) => {
+    const confidence = predictionConfidence(data, item.fecha);
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "wheel-day" + (item.fecha === today ? " is-today" : "");
+    card.dataset.predictionFecha = item.fecha;
+    card.dataset.index = String(index);
+    card.setAttribute("role", "option");
+    const weekday = document.createElement("small");
+    weekday.textContent = item.fecha === today ? "Hoy" : predictionDayLabel(item.fecha, "weekday");
+    const day = document.createElement("strong");
+    day.textContent = String(predictionDate(item.fecha).getUTCDate());
+    const month = document.createElement("small");
+    month.textContent = predictionDayLabel(item.fecha, "month");
+    const total = document.createElement("span");
+    total.textContent = format(item.total);
+    const dot = document.createElement("i");
+    dot.className = "confidence-dot " + confidence.level;
+    dot.title = CONFIDENCE_LABELS[confidence.level];
+    card.append(weekday, day, month, total, dot);
+    card.addEventListener("click", () => selectPredictionIndex(index, true));
+    return card;
+  }));
+  if (!predictionState.wheelBound) {
+    predictionState.wheelBound = true;
+    wheel.addEventListener("scroll", () => {
+      paintPredictionWheel();
+      clearTimeout(predictionState.scrollTimer);
+      predictionState.scrollTimer = setTimeout(() => {
+        if (predictionState.mode !== "day" || predictionState.timer) return;
+        const index = centeredPredictionIndex();
+        if (index !== predictionState.index) { predictionState.index = index; drawPrediction(); }
+      }, 140);
+    }, {passive: true});
+    // Rueda del mouse: avanza un día por movimiento, como una ruleta.
+    wheel.addEventListener("wheel", (event) => {
+      if (Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
+      event.preventDefault();
+      stopPredictionPlay();
+      selectPredictionIndex(predictionState.index + (event.deltaY > 0 ? 1 : -1), true);
+    }, {passive: false});
+    wheel.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+        event.preventDefault();
+        selectPredictionIndex(predictionState.index + (event.key === "ArrowRight" ? 1 : -1), true);
+      }
+    });
+    window.addEventListener("resize", () => centerPredictionWheel(false));
+  }
+  requestAnimationFrame(() => centerPredictionWheel(false));
+}
+
+function centeredPredictionIndex() {
+  const wheel = $("prediction-wheel");
+  const middle = wheel.scrollLeft + wheel.clientWidth / 2;
+  let best = 0, distance = Infinity;
+  for (const card of wheel.children) {
+    const gap = Math.abs(card.offsetLeft + card.offsetWidth / 2 - middle);
+    if (gap < distance) { distance = gap; best = Number(card.dataset.index); }
+  }
+  return best;
+}
+
+function paintPredictionWheel() {
+  // Efecto de ruleta: las tarjetas giran y se achican al alejarse del centro.
+  const wheel = $("prediction-wheel");
+  const middle = wheel.scrollLeft + wheel.clientWidth / 2;
+  for (const card of wheel.children) {
+    const offset = (card.offsetLeft + card.offsetWidth / 2 - middle) / (card.offsetWidth + 10);
+    const reach = Math.min(Math.abs(offset), 4);
+    card.style.transform = `perspective(700px) rotateY(${Math.max(-55, Math.min(55, -offset * 16))}deg) scale(${1 - reach * 0.07})`;
+    card.style.opacity = String(1 - reach * 0.16);
+    card.classList.toggle("is-center", reach < 0.5);
+  }
+}
+
+function centerPredictionWheel(smooth = true) {
+  const wheel = $("prediction-wheel");
+  const index = predictionState.mode === "range" ? predictionState.to : predictionState.index;
+  const card = wheel.children[index];
+  if (!card) return;
+  wheel.scrollTo({left: card.offsetLeft + card.offsetWidth / 2 - wheel.clientWidth / 2, behavior: smooth ? "smooth" : "auto"});
+  paintPredictionWheel();
+}
+
+function selectPredictionIndex(index, smooth) {
+  const days = predictionState.data ? predictionState.data.dias : [];
+  if (!days.length) return;
+  index = Math.max(0, Math.min(days.length - 1, index));
+  if (predictionState.mode === "range") {
+    // En modo rango, tocar un día mueve el extremo más cercano.
+    if (Math.abs(index - predictionState.from) <= Math.abs(index - predictionState.to)) predictionState.from = index;
+    else predictionState.to = index;
+  } else {
+    predictionState.mode = "day";
+    predictionState.index = index;
+  }
+  drawPrediction();
+  centerPredictionWheelTo(index, smooth);
+}
+
+function centerPredictionWheelTo(index, smooth) {
+  const wheel = $("prediction-wheel");
+  const card = wheel.children[index];
+  if (card) wheel.scrollTo({left: card.offsetLeft + card.offsetWidth / 2 - wheel.clientWidth / 2, behavior: smooth ? "smooth" : "auto"});
+}
+
+// --- Rango ---
+function updatePredictionRange() {
+  const days = predictionState.data ? predictionState.data.dias.length : 0;
+  const from = $("prediction-range-from"), to = $("prediction-range-to");
+  for (const input of [from, to]) input.max = String(Math.max(0, days - 1));
+  from.value = String(predictionState.from);
+  to.value = String(predictionState.to);
+  const [a, b] = [predictionState.from, predictionState.to].sort((x, y) => x - y);
+  const span = Math.max(1, days - 1);
+  const fill = $("prediction-range-fill");
+  fill.style.left = (a / span * 100) + "%";
+  fill.style.width = ((b - a) / span * 100) + "%";
+}
+
+function setPredictionMode(mode) {
+  stopPredictionPlay();
+  const days = predictionState.data ? predictionState.data.dias.length : 0;
+  if (mode === "range" && predictionState.mode !== "range") {
+    predictionState.from = predictionState.index;
+    predictionState.to = Math.min(days - 1, predictionState.index + 6);
+  }
+  predictionState.mode = mode;
+  drawPrediction();
+}
+
+// --- Recorrido animado ---
+function stopPredictionPlay() {
+  clearInterval(predictionState.timer);
+  predictionState.timer = null;
+  const button = $("prediction-play");
+  button.setAttribute("aria-pressed", "false");
+  button.textContent = "▶ Recorrer días";
+}
+
+function togglePredictionPlay() {
+  if (predictionState.timer) { stopPredictionPlay(); return; }
+  const days = predictionState.data ? predictionState.data.dias.length : 0;
+  if (!days) return;
+  predictionState.mode = "day";
+  const button = $("prediction-play");
+  button.setAttribute("aria-pressed", "true");
+  button.textContent = "❚❚ Pausar";
+  const step = () => {
+    predictionState.index = (predictionState.index + 1) % days;
+    drawPrediction();
+    centerPredictionWheelTo(predictionState.index, true);
+  };
+  if (predictionState.index >= days - 1) predictionState.index = -1;
+  step();
+  predictionState.timer = setInterval(step, PREDICTION_PLAY_MS);
 }
 
 function renderPrediction(data) {
   predictionState.data = data;
   const status = $("prediction-status");
-  const days = $("prediction-days");
   if (!data || data.status !== "ok" || !data.dias.length) {
     status.textContent = "Pendiente";
     status.className = "status neutral";
     $("prediction-intro").textContent = (data && data.message) ||
       "La predicción se calcula sola cuando hay al menos 21 días cerrados.";
-    days.replaceChildren();
+    $("prediction-wheel").replaceChildren();
     return;
   }
   const m = data.metricas || {};
@@ -2018,10 +2235,8 @@ function renderPrediction(data) {
   const first = data.dias[0].fecha, last = data.dias[data.dias.length - 1].fecha;
   $("prediction-intro").textContent =
     `Zonas donde se espera más movimiento de camiones entre el ${predictionDayLabel(first, "long")} y el ` +
-    `${predictionDayLabel(last, "long")}. Se recalcula sola cada noche con el cierre del día.`;
-  const total = data.dias.reduce((sum, item) => sum + item.total, 0);
-  $("prediction-total").textContent = format(total);
-  $("prediction-total-detail").textContent = `En ${data.dias.length} días · camiones en movimiento`;
+    `${predictionDayLabel(last, "long")} (${data.dias.length} días). Gira la ruleta para elegir un día, ` +
+    "elige un rango o recorre los días con ▶. Se recalcula sola cada noche.";
   const peak = data.dias.reduce((top, item) => item.total > top.total ? item : top, data.dias[0]);
   $("prediction-peak").textContent = predictionDayLabel(peak.fecha);
   $("prediction-peak-detail").textContent = format(peak.total) + " reportes esperados";
@@ -2032,53 +2247,45 @@ function renderPrediction(data) {
   $("prediction-error-detail").textContent = others.length
     ? others.join(" · ") + " · menor es mejor" : "Reportes por zona y día · menor es mejor";
   $("prediction-base").textContent = new Intl.DateTimeFormat("es-CL", {
-    day: "numeric", month: "short", timeZone: "UTC"}).format(new Date(data.base_hasta + "T12:00:00Z"));
+    day: "numeric", month: "short", timeZone: "UTC"}).format(predictionDate(data.base_hasta));
   $("prediction-base-detail").textContent = m.dias_historia
     ? `${format(m.dias_historia)} días de historia · ${format(m.camiones || 0)} camiones` : "—";
   $("prediction-method").textContent =
     "Cada zona es un cuadro de ~1 km. Para cada día se predice cuántos reportes de camiones en movimiento " +
-    "(sobre 2 km/h) habrá en cada zona, usando el día anterior, el mismo día de la semana pasada, el promedio " +
-    "de la última semana y el promedio de todo el período. Los días siguientes usan la predicción del día " +
-    "anterior, así que la confianza baja a medida que se aleja. " +
+    "(sobre 2 km/h) habrá en cada zona, usando el día anterior, el mismo día de las semanas pasadas y los " +
+    "promedios recientes. Los días siguientes se apoyan en la predicción del día anterior, por eso cada día " +
+    "muestra su confianza: es el error real que tuvo el método al predecir esa misma distancia hacia " +
+    "adelante en los días de prueba (alta: hasta 10 % más que el primer día; media: hasta 30 %; baja: más). " +
     `Compiten tres métodos en ${format(m.dias_prueba || 0)} días de prueba que ninguno vio: el modelo LightGBM, ` +
-    "el promedio del mismo día de la semana (últimas 4 semanas) y el promedio de todo el período. " +
+    "el promedio del mismo día de la semana y el promedio de todo el período. " +
     `Se publica el de menor error: ${PREDICTION_METHODS[m.metodo] || m.metodo}` +
     (error === undefined ? "." : ` (${format(error, 2)} reportes de error por zona y día).`) +
     (!usesModel && m.motivo ? ` ${m.motivo}.` : "");
-  const buttons = [["ALL", "Semana", "Todos los días"]].concat(data.dias.map((item) =>
-    [item.fecha, predictionDayLabel(item.fecha), item.fecha === today ? "Hoy" : format(item.total) + " rep."]));
-  days.replaceChildren(...buttons.map(([value, label, detail]) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "prediction-day" + (value === today ? " is-today" : "");
-    button.dataset.predictionDay = value;
-    const strong = document.createElement("span");
-    strong.textContent = label;
-    const small = document.createElement("small");
-    small.textContent = detail;
-    button.append(strong, small);
-    button.addEventListener("click", () => { predictionState.day = value; drawPrediction(); });
-    return button;
-  }));
+  // Mantener la selección si sigue existiendo; si no, hoy (o el primer día).
+  const count = data.dias.length;
+  const todayIndex = Math.max(0, data.dias.findIndex((item) => item.fecha === today));
+  if (predictionState.index >= count || !predictionState.loadedAt) predictionState.index = todayIndex;
+  predictionState.from = Math.min(predictionState.from, count - 1);
+  predictionState.to = Math.min(predictionState.to || count - 1, count - 1);
+  buildPredictionWheel(data, today);
   renderPredictionCharts(data, today);
-  if (predictionState.day !== "ALL" && !data.dias.some((item) => item.fecha === predictionState.day)) {
-    predictionState.day = "ALL";
-  }
   drawPrediction();
 }
 
 function renderPredictionCharts(data, today) {
-  // Columnas: total esperado por día (clic = ver ese día en el mapa).
+  // Columnas: total esperado por día (clic = ver ese día). La transparencia indica la confianza.
   const chart = $("prediction-daily-chart");
   const peak = Math.max(1, ...data.dias.map((item) => item.total));
-  chart.replaceChildren(...data.dias.map((item) => {
-    const weekday = new Date(item.fecha + "T12:00:00Z").getUTCDay();
+  chart.replaceChildren(...data.dias.map((item, index) => {
+    const weekday = predictionDate(item.fecha).getUTCDay();
+    const confidence = predictionConfidence(data, item.fecha);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "prediction-column" + (weekday === 0 || weekday === 6 ? " weekend" : "") +
-      (item.fecha === today ? " is-today" : "");
-    button.dataset.predictionColumn = item.fecha;
-    button.title = `${predictionDayLabel(item.fecha, "long")}: ${format(item.total)} reportes esperados`;
+    button.className = "prediction-column confidence-" + confidence.level +
+      (weekday === 0 || weekday === 6 ? " weekend" : "") + (item.fecha === today ? " is-today" : "");
+    button.dataset.predictionFecha = item.fecha;
+    button.title = `${predictionDayLabel(item.fecha, "long")}: ${format(item.total)} reportes esperados · ` +
+      CONFIDENCE_LABELS[confidence.level];
     const value = document.createElement("strong");
     value.textContent = format(item.total);
     const bar = document.createElement("i");
@@ -2086,10 +2293,7 @@ function renderPredictionCharts(data, today) {
     const label = document.createElement("span");
     label.textContent = item.fecha === today ? "Hoy" : predictionDayLabel(item.fecha);
     button.append(value, bar, label);
-    button.addEventListener("click", () => {
-      predictionState.day = predictionState.day === item.fecha ? "ALL" : item.fecha;
-      drawPrediction();
-    });
+    button.addEventListener("click", () => { stopPredictionPlay(); selectPredictionIndex(index, true); });
     return button;
   }));
   // Barras: error de cada método; el publicado en verde.
@@ -2114,6 +2318,7 @@ async function loadPrediction(force = false) {
   if (!token() || predictionState.loading) return;
   if (!force && predictionState.data && Date.now() - predictionState.loadedAt < PREDICTION_REFRESH_MS) {
     drawPrediction();
+    centerPredictionWheel(false);
     return;
   }
   predictionState.loading = true;
@@ -2131,6 +2336,21 @@ async function loadPrediction(force = false) {
   }
 }
 
+for (const button of document.querySelectorAll("[data-prediction-mode]")) {
+  button.addEventListener("click", () => setPredictionMode(button.dataset.predictionMode));
+}
+$("prediction-play").addEventListener("click", togglePredictionPlay);
+$("prediction-prev").addEventListener("click", () => { stopPredictionPlay(); selectPredictionIndex((predictionState.mode === "range" ? predictionState.to : predictionState.index) - 1, true); });
+$("prediction-next").addEventListener("click", () => { stopPredictionPlay(); selectPredictionIndex((predictionState.mode === "range" ? predictionState.to : predictionState.index) + 1, true); });
+for (const id of ["prediction-range-from", "prediction-range-to"]) {
+  $(id).addEventListener("input", () => {
+    predictionState.from = Number($("prediction-range-from").value);
+    predictionState.to = Number($("prediction-range-to").value);
+    drawPrediction();
+  });
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopPredictionPlay(); });
+window.addEventListener("hashchange", () => { if (window.location.hash !== "#prediccion") stopPredictionPlay(); });
 setInterval(() => { if (window.location.hash === "#prediccion") loadPrediction(); }, PREDICTION_REFRESH_MS);
 
 restoreSession();

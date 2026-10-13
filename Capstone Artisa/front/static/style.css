@@ -431,11 +431,6 @@
 
 /* Predicción de actividad (debajo del Mapa de rutas) */
 .prediction-panel{margin-top:0}
-.prediction-days{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0 12px}
-.prediction-day{display:grid;gap:2px;min-width:74px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);font-size:10px;font-weight:600;text-align:left}
-.prediction-day small{color:var(--muted);font-size:9px;font-weight:500}
-.prediction-day.is-today{border-color:#9db2a5}
-.prediction-day.is-active{border-color:var(--green);background:#edf5ee;color:var(--green)}
 .prediction-map{height:560px;border:1px solid var(--line);border-radius:8px;background:#e7eee8;z-index:0}
 .prediction-legend{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:11px;color:var(--muted);font-size:9px}
 .prediction-legend i{width:120px;height:8px;border-radius:4px;background:linear-gradient(90deg,#3b4cc0,#2ec4b6,#9be15d,#f9c74f,#e63946)}
@@ -451,7 +446,52 @@
 .prediction-column span{white-space:nowrap}
 .prediction-column.is-today span{font-weight:700}
 .prediction-column:hover i{background:#174b35}
-.prediction-column.is-active i{background:#f97316}
-.prediction-column.is-active strong{color:#c2410c}
 .prediction-methods .dashboard-bar-row.winner>div:first-child span{font-weight:700;color:var(--green)}
 @media(max-width:940px){.prediction-charts{grid-template-columns:minmax(0,1fr)}}
+
+/* Ruleta de días de la predicción */
+.prediction-control{margin:18px 0 12px;padding:14px 14px 12px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(180deg,#f7faf6,#fff)}
+.prediction-toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.prediction-modes{display:inline-flex;padding:3px;border-radius:8px;background:#e9efea}
+.prediction-modes button{padding:7px 12px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:10px;font-weight:700}
+.prediction-modes button[aria-pressed="true"]{background:#fff;color:var(--green);box-shadow:0 1px 4px rgba(20,45,40,.14)}
+.prediction-play{padding:8px 14px;border:1px solid var(--green);border-radius:20px;background:var(--green);color:#fff;font-size:10px;font-weight:700;letter-spacing:.3px}
+.prediction-play[aria-pressed="true"]{background:#fff;color:var(--green)}
+.prediction-wheel-wrap{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr) 34px;align-items:center;gap:4px;margin-top:12px}
+.prediction-wheel-wrap:before{content:"";position:absolute;left:50%;top:-4px;bottom:-4px;width:96px;transform:translateX(-50%);border:2px solid var(--green);border-radius:14px;background:rgba(213,238,156,.22);pointer-events:none}
+.wheel-arrow{height:34px;border:1px solid var(--line);border-radius:50%;background:#fff;color:var(--green);font-size:20px;line-height:1}
+.wheel-arrow:hover{border-color:var(--green)}
+.prediction-wheel{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;padding:10px calc(50% - 44px);outline:none;cursor:grab}
+.prediction-wheel::-webkit-scrollbar{display:none}
+.prediction-wheel:focus-visible{box-shadow:0 0 0 3px rgba(249,115,22,.45);border-radius:12px}
+.wheel-day{position:relative;display:grid;justify-items:center;gap:1px;flex:0 0 88px;padding:9px 4px 10px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);scroll-snap-align:center;transition:transform .18s ease,opacity .18s ease,box-shadow .2s;transform-origin:center}
+.wheel-day small{color:var(--muted);font-size:9px;text-transform:capitalize}
+.wheel-day strong{font-size:26px;font-weight:650;line-height:1.05;letter-spacing:-1px}
+.wheel-day span{margin-top:3px;font-size:9px;font-weight:700;color:var(--green)}
+.wheel-day .confidence-dot{position:absolute;top:8px;right:8px}
+.wheel-day.is-today small:first-child{color:#c2410c;font-weight:800}
+.wheel-day.is-center{box-shadow:0 8px 22px rgba(23,63,53,.18)}
+.wheel-day.is-selected{border-color:var(--green);background:#edf5ee}
+.confidence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#b8c6bf}
+.confidence-dot.alta{background:#16a34a}.confidence-dot.media{background:#f59e0b}.confidence-dot.baja{background:#dc2626}
+.confidence-badge{display:inline-flex;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:700;background:#edf0ee;color:#5f6f6c}
+.confidence-badge.alta{background:#dcfce7;color:#166534}.confidence-badge.media{background:#fef3c7;color:#92400e}.confidence-badge.baja{background:#fee2e2;color:#991b1b}
+.prediction-selection{min-height:18px;margin:12px 2px 6px;color:var(--muted);font-size:11px;text-align:center}
+.prediction-selection strong{color:var(--ink)}
+.confidence-legend{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 14px;color:var(--muted);font-size:9px}
+.confidence-legend span{display:inline-flex;align-items:center;gap:5px}
+.confidence-legend small{width:100%;text-align:center;font-size:8px}
+.prediction-range{position:relative;height:30px;margin:14px 46px 0}
+.prediction-range[hidden]{display:none}
+.range-track{position:absolute;left:0;right:0;top:13px;height:5px;border-radius:4px;background:#dfe7e2}
+.range-track i{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--green)}
+.prediction-range input{position:absolute;left:0;top:4px;width:100%;margin:0;background:none;pointer-events:none;-webkit-appearance:none;appearance:none}
+.prediction-range input::-webkit-slider-thumb{pointer-events:auto;-webkit-appearance:none;width:20px;height:20px;border:3px solid #fff;border-radius:50%;background:var(--green);box-shadow:0 1px 5px rgba(0,0,0,.3);cursor:pointer}
+.prediction-range input::-moz-range-thumb{pointer-events:auto;width:16px;height:16px;border:3px solid #fff;border-radius:50%;background:var(--green);box-shadow:0 1px 5px rgba(0,0,0,.3);cursor:pointer}
+.prediction-range input::-webkit-slider-runnable-track{background:none}
+.prediction-range input::-moz-range-track{background:none}
+.prediction-column.is-selected i{background:#f97316}
+.prediction-column.is-selected strong{color:#c2410c}
+.prediction-column.confidence-media i{opacity:.75}.prediction-column.confidence-baja i{opacity:.5}
+.prediction-columns{gap:5px}
+@media(max-width:690px){.wheel-day{flex-basis:74px}.prediction-wheel{padding:10px calc(50% - 37px)}.prediction-wheel-wrap:before{width:82px}.prediction-range{margin:14px 6px 0}}

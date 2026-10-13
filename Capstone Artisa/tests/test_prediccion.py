@@ -92,6 +92,14 @@ class PrediccionTests(unittest.TestCase):
         mismos = [len(lista) - 7 * k for k in range(1, 5)]  # mismo día de la semana, 4 semanas
         np.testing.assert_allclose(semana[futura], matriz[:, mismos].mean(axis=1), rtol=1e-5)
 
+    def test_error_by_horizon_covers_each_forecast_day(self):
+        matriz, lista = matriz_semanal(dias=70, celdas=50)
+        prueba = list(range(50, 70))
+        errores = prediccion.error_por_horizonte({"metodo": "promedio_dia_semana", "modelo": None},
+                                                 matriz, lista, prueba, 15)
+        self.assertEqual(len(errores), 15)
+        self.assertTrue(all(e is not None and e >= 0 for e in errores[:15]))
+
     def test_new_trucks_change_the_fingerprint(self):
         self.assertNotEqual(prediccion.huella(["A", "B"]), prediccion.huella(["A", "B", "C"]))
         self.assertEqual(prediccion.huella(["B", "A"]), prediccion.huella(["A", "B"]))

@@ -11,7 +11,7 @@ import pymysql
 ESCALA = 100  # celdas de 0,01° (igual que machine_learning/prediccion.py)
 METRICAS_PUBLICAS = ("metodo", "motivo", "errores", "correlaciones", "mae_publicado", "mae_modelo",
                      "mae_referencia", "objetivo", "dias_historia", "historia_desde", "historia_hasta",
-                     "dias_prueba", "celdas", "camiones")
+                     "dias_prueba", "celdas", "camiones", "error_por_dia")
 
 
 def _centro(c):

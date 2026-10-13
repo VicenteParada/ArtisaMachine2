@@ -102,7 +102,7 @@
       <a class="dataset-tab" data-dataset-tab="real" href="#datos-reales"><span class="dataset-icon">⌖</span><span><strong>Reportes</strong><small>Pendiente de API empresa</small></span></a>
       <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores y gráficos operativos</small></span></a>
       <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de rutas</strong><small>Rutas históricas y camiones</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="prediction" href="#prediccion"><span class="dataset-icon">◈</span><span><strong>Predicción</strong><small>Actividad de los próximos 7 días</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="prediction" href="#prediccion"><span class="dataset-icon">◈</span><span><strong>Predicción</strong><small>Actividad de los próximos 15 días</small></span></a>
     </nav>
     <div id="datos-reales" class="dataset-space" data-dataset-view="real">
       <section id="telemetria" class="panel telemetry-panel">
@@ -288,7 +288,28 @@
           <article><span>Error en días de prueba</span><strong id="prediction-error">—</strong><small id="prediction-error-detail">Reportes por zona y día</small></article>
           <article><span>Aprendió con datos hasta</span><strong id="prediction-base">—</strong><small id="prediction-base-detail">—</small></article>
         </div>
-        <div class="prediction-days" id="prediction-days" role="group" aria-label="Día a mostrar"></div>
+        <div class="prediction-control">
+          <div class="prediction-toolbar">
+            <div class="prediction-modes" role="group" aria-label="Qué días ver">
+              <button type="button" data-prediction-mode="day" aria-pressed="true">Un día</button>
+              <button type="button" data-prediction-mode="range" aria-pressed="false">Rango de días</button>
+              <button type="button" data-prediction-mode="all" aria-pressed="false">Todos</button>
+            </div>
+            <button type="button" id="prediction-play" class="prediction-play" aria-pressed="false">▶ Recorrer días</button>
+          </div>
+          <div class="prediction-wheel-wrap">
+            <button type="button" id="prediction-prev" class="wheel-arrow" aria-label="Día anterior">‹</button>
+            <div id="prediction-wheel" class="prediction-wheel" tabindex="0" role="listbox" aria-label="Ruleta de días: gira con la rueda del mouse, arrastra o usa las flechas"></div>
+            <button type="button" id="prediction-next" class="wheel-arrow" aria-label="Día siguiente">›</button>
+          </div>
+          <div id="prediction-range" class="prediction-range" hidden>
+            <div class="range-track"><i id="prediction-range-fill"></i></div>
+            <input type="range" id="prediction-range-from" min="0" max="14" step="1" value="0" aria-label="Desde">
+            <input type="range" id="prediction-range-to" min="0" max="14" step="1" value="6" aria-label="Hasta">
+          </div>
+          <p id="prediction-selection" class="prediction-selection" aria-live="polite"></p>
+          <div class="confidence-legend"><span><i class="confidence-dot alta"></i>Confianza alta</span><span><i class="confidence-dot media"></i>Media</span><span><i class="confidence-dot baja"></i>Baja</span><small>Según el error real al predecir esa misma cantidad de días hacia adelante.</small></div>
+        </div>
         <div id="prediction-map" class="prediction-map" role="application" aria-label="Mapa de calor de la actividad esperada"></div>
         <div class="prediction-legend"><span>Menos actividad</span><i aria-hidden="true"></i><span>Más actividad</span><small>Es una predicción: no son posiciones reales de los camiones.</small></div>
         <div class="prediction-charts">
