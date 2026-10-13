@@ -2,7 +2,7 @@
 
 Versión conectada a MariaDB del cuaderno guias_ml/prediccion_actividad.ipynb (LightGBM):
 predice cuántos reportes de camiones en movimiento habrá en cada celda del mapa, día por
-día, desde el día siguiente al último cierre hasta hoy + PRED_DIAS (por defecto 7).
+día, desde el día siguiente al último cierre hasta hoy + PRED_DIAS (por defecto 14).
 
 Cambios respecto del cuaderno (detectados al auditarlo):
 - Los datos salen de MariaDB (histórico + API en vivo), solo camiones del catálogo y por
@@ -193,9 +193,15 @@ def contar_dia(cursor, dia, lista_camiones):
     return contar_filas(leer_dia(cursor, dia, lista_camiones))
 
 
-def actualizar_actividad(connection, desde, hasta, lista_camiones, recontar=(), tipos=tuple(TIPOS)):
+def sin_latido():
+    pass
+
+
+def actualizar_actividad(connection, desde, hasta, lista_camiones, recontar=(), tipos=tuple(TIPOS),
+                         latido=sin_latido):
     """Cuenta los días cerrados de la ventana que faltan o que el cierre diario recalculó.
     Cada día se lee una sola vez y se cuentan todos los tipos que lo necesiten.
+    `latido` se llama tras cada día para que el servicio sepa que sigue vivo.
     Devuelve ({tipo: días contados}, lista de días cerrados de la ventana)."""
     pendientes = defaultdict(set)
     calculado = {}
@@ -217,7 +223,10 @@ def actualizar_actividad(connection, desde, hasta, lista_camiones, recontar=(), 
             if tipo in recontar or f["contado_en"] is None or f["contado_en"] < f["calculado_en"]:
                 pendientes[f["fecha"]].add(tipo)
     contados = Counter()
-    for fecha in sorted(pendientes):
+    if pendientes:
+        print(f"Predicción: contando {len(pendientes)} días ({', '.join(sorted({t for p in pendientes.values() for t in p}))})",
+              flush=True)
+    for numero, fecha in enumerate(sorted(pendientes), start=1):
         with connection.cursor() as cursor:
             filas = leer_dia(cursor, fecha, lista_camiones)
             for tipo in sorted(pendientes[fecha]):
@@ -239,6 +248,9 @@ def actualizar_actividad(connection, desde, hasta, lista_camiones, recontar=(), 
                 )
                 contados[tipo] += 1
         connection.commit()
+        latido()
+        if numero % 10 == 0:
+            print(f"Predicción: {numero} de {len(pendientes)} días contados", flush=True)
     return dict(contados), lista_dias
 
 
@@ -480,6 +492,12 @@ def version_activa(cursor, tipo="calor"):
     return version
 
 
+def horizonte(version):
+    """Último día que se intentó pronosticar. Puede ser posterior a lo publicado, porque
+    solo se publican los días confiables; sin esto se recalcularía cada 15 minutos."""
+    return str(version["metricas"].get("horizonte_hasta") or version["hasta"])
+
+
 def necesita_calculo(cursor, utc_now):
     """Tipos que necesitan calcularse: hay un cierre nuevo, cambió el catálogo de camiones o
     el pronóstico ya no llega a hoy + DIAS_ADELANTE. Lista vacía = nada que hacer."""
@@ -495,12 +513,12 @@ def necesita_calculo(cursor, utc_now):
         version = version_activa(cursor, tipo)
         if (version is None or version["base_hasta"] < hasta
                 or version["metricas"].get("huella_camiones") != huella_actual
-                or version["hasta"] < dias.hoy(utc_now) + timedelta(days=DIAS_ADELANTE)):
+                or horizonte(version) < str(dias.hoy(utc_now) + timedelta(days=DIAS_ADELANTE))):
             tipos.append(tipo)
     return tipos
 
 
-def ejecutar(connection, utc_now, tipos=None):
+def ejecutar(connection, utc_now, tipos=None, latido=sin_latido):
     """Calcula y publica los tipos indicados (por defecto, los que lo necesitan)."""
     comienzo = time.monotonic()
     with connection.cursor() as cursor:
@@ -514,7 +532,7 @@ def ejecutar(connection, utc_now, tipos=None):
     desde = base_hasta - timedelta(days=VENTANA_DIAS - 1)
     # Regla de camiones nuevos: si cambió el catálogo, se recuentan todos los días de ese tipo.
     recontar = {t for t, v in anteriores.items() if v and v["metricas"].get("huella_camiones") != huella(lista_camiones)}
-    contados, lista_dias = actualizar_actividad(connection, desde, base_hasta, lista_camiones, recontar, tipos)
+    contados, lista_dias = actualizar_actividad(connection, desde, base_hasta, lista_camiones, recontar, tipos, latido)
     if len(lista_dias) < MIN_DIAS:
         print(f"Predicción: faltan días cerrados ({len(lista_dias)} de {MIN_DIAS})", flush=True)
         return None
@@ -527,6 +545,7 @@ def ejecutar(connection, utc_now, tipos=None):
     resultados = {}
     for tipo in tipos:
         inicio_tipo = time.monotonic()
+        latido()
         with connection.cursor() as cursor:
             celdas, matriz = cargar_matriz(cursor, lista_dias, tipo)
         connection.commit()
@@ -538,13 +557,15 @@ def ejecutar(connection, utc_now, tipos=None):
         pronostico = pronosticar(predictor, matriz, lista_dias, publicar)
         metricas.update(
             huella_camiones=huella(lista_camiones), camiones=len(lista_camiones), dias_historia=len(lista_dias),
-            historia_desde=lista_dias[0], historia_hasta=lista_dias[-1], dias_recontados=contados.get(tipo, 0),
+            horizonte_hasta=str(futuras[-1]), historia_desde=lista_dias[0], historia_hasta=lista_dias[-1],
+            dias_recontados=contados.get(tipo, 0),
             segundos=round(time.monotonic() - inicio_tipo, 1),
         )
         version = guardar_version(connection, base_hasta, celdas, pronostico, metricas, len(lista_camiones), tipo)
         print(f"Predicción {tipo}: versión {version} · {publicar[0]}..{publicar[-1]} · método {metricas['metodo']} · "
               f"errores en prueba {metricas['errores']} en {metricas['segundos']} s", flush=True)
         resultados[tipo] = metricas
+        latido()
     print(f"Predicción: listo en {round(time.monotonic() - comienzo, 1)} s", flush=True)
     return resultados or None
 

@@ -133,6 +133,12 @@ class PrediccionTests(unittest.TestCase):
         self.assertEqual(prediccion.dias_confiables([1.0, 2.0, 3.0], 15), 7)   # mínimo 7 días
         self.assertEqual(prediccion.dias_confiables(None, 9), 9)
 
+    def test_horizon_counts_discarded_days(self):
+        # Se publicó hasta el 20, pero se intentó hasta el 27: no hay que recalcular cada 15 min.
+        version = {"hasta": date(2026, 10, 20), "metricas": {"horizonte_hasta": "2026-10-27"}}
+        self.assertEqual(prediccion.horizonte(version), "2026-10-27")
+        self.assertEqual(prediccion.horizonte({"hasta": date(2026, 10, 20), "metricas": {}}), "2026-10-20")
+
     def test_new_trucks_change_the_fingerprint(self):
         self.assertNotEqual(prediccion.huella(["A", "B"]), prediccion.huella(["A", "B", "C"]))
         self.assertEqual(prediccion.huella(["B", "A"]), prediccion.huella(["A", "B"]))

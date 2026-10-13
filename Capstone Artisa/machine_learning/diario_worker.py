@@ -46,6 +46,10 @@ STATE = {"estado": "iniciando", "error": None, "ultimo_ciclo": None, "dias_proce
 HEARTBEAT = {"value": time.monotonic()}
 
 
+def _latido():
+    HEARTBEAT["value"] = time.monotonic()
+
+
 def _utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -238,7 +242,8 @@ def publicar_prediccion(connection, utc_now):
         if calcular:
             STATE["estado"] = "prediciendo"
             HEARTBEAT["value"] = time.monotonic()
-            STATE["prediccion"] = prediccion.ejecutar(connection, utc_now)
+            # Contar 16 semanas puede tardar más que el límite de /health: cada día contado avisa.
+            STATE["prediccion"] = prediccion.ejecutar(connection, utc_now, latido=_latido)
             HEARTBEAT["value"] = time.monotonic()
     except Exception as error:
         try:
