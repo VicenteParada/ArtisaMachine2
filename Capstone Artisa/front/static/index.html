@@ -61,6 +61,7 @@
       <a data-dataset-link="real" href="#datos-reales"><span>⌖</span> Reportes</a>
       <a data-dataset-link="dashboard" href="#dashboard"><span>▥</span> Dashboard</a>
       <a data-dataset-link="heatmap" href="#mapa-calor"><span>◉</span> Mapa de rutas</a>
+      <a data-dataset-link="prediction" href="#prediccion"><span>◈</span> Predicción</a>
     </nav>
     <div class="sidebar-note"><span class="dot"></span> Entorno local<p>Origen, transformación y análisis en un mismo proyecto.</p><span class="tag">TELEMETRÍA REAL</span></div>
   </aside>
@@ -101,6 +102,7 @@
       <a class="dataset-tab" data-dataset-tab="real" href="#datos-reales"><span class="dataset-icon">⌖</span><span><strong>Reportes</strong><small>Pendiente de API empresa</small></span></a>
       <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores y gráficos operativos</small></span></a>
       <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de rutas</strong><small>Rutas históricas y camiones</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="prediction" href="#prediccion"><span class="dataset-icon">◈</span><span><strong>Predicción</strong><small>Actividad de los próximos 7 días</small></span></a>
     </nav>
     <div id="datos-reales" class="dataset-space" data-dataset-view="real">
       <section id="telemetria" class="panel telemetry-panel">
@@ -275,6 +277,8 @@
         </div>
         <details class="heatmap-method"><summary>¿Cómo se calcula este mapa?</summary><p id="heatmap-method">Esperando la metodología…</p></details>
       </section>
+    </div>
+    <div id="prediccion" class="dataset-space" data-dataset-view="prediction" hidden>
       <section class="panel prediction-panel" aria-labelledby="prediction-title">
         <div class="section-top"><div><span class="eyebrow">MACHINE LEARNING · PREDICCIÓN</span><h2 id="prediction-title">Actividad esperada de la flota</h2></div><span id="prediction-status" class="status neutral">Cargando…</span></div>
         <p id="prediction-intro" class="telemetry-intro">Zonas donde se espera más movimiento de camiones en los próximos días, según lo ocurrido en las últimas semanas.</p>

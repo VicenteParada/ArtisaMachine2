@@ -205,6 +205,7 @@ function syncDatasetView() {
   let view = "real";
   if (window.location.hash === "#mapa-calor") view = "heatmap";
   else if (window.location.hash === "#dashboard") view = "dashboard";
+  else if (window.location.hash === "#prediccion") view = "prediction";
   for (const space of document.querySelectorAll("[data-dataset-view]")) {
     space.hidden = space.dataset.datasetView !== view;
   }
@@ -219,7 +220,10 @@ function syncDatasetView() {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
   }
   if (view === "heatmap") {
-    window.setTimeout(() => { openExplorer(); loadPrediction(); }, 50);
+    window.setTimeout(openExplorer, 50);
+  }
+  if (view === "prediction") {
+    window.setTimeout(loadPrediction, 50);
   }
   if (view === "heatmap" && activeMapMode === "classified" && fleetMap) {
     window.setTimeout(fitPendingMap, 0);
@@ -2127,7 +2131,7 @@ async function loadPrediction(force = false) {
   }
 }
 
-setInterval(() => { if (window.location.hash === "#mapa-calor") loadPrediction(); }, PREDICTION_REFRESH_MS);
+setInterval(() => { if (window.location.hash === "#prediccion") loadPrediction(); }, PREDICTION_REFRESH_MS);
 
 restoreSession();
 setInterval(refresh, 300000);
