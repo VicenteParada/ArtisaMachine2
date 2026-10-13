@@ -275,6 +275,20 @@
         </div>
         <details class="heatmap-method"><summary>¿Cómo se calcula este mapa?</summary><p id="heatmap-method">Esperando la metodología…</p></details>
       </section>
+      <section class="panel prediction-panel" aria-labelledby="prediction-title">
+        <div class="section-top"><div><span class="eyebrow">MACHINE LEARNING · PREDICCIÓN</span><h2 id="prediction-title">Actividad esperada de la flota</h2></div><span id="prediction-status" class="status neutral">Cargando…</span></div>
+        <p id="prediction-intro" class="telemetry-intro">Zonas donde se espera más movimiento de camiones en los próximos días, según lo ocurrido en las últimas semanas.</p>
+        <div class="real-metrics prediction-metrics" aria-label="Resumen de la predicción">
+          <article><span>Reportes esperados</span><strong id="prediction-total">—</strong><small id="prediction-total-detail">Camiones en movimiento</small></article>
+          <article><span>Día con más actividad</span><strong id="prediction-peak">—</strong><small id="prediction-peak-detail">—</small></article>
+          <article><span>Error en días de prueba</span><strong id="prediction-error">—</strong><small id="prediction-error-detail">Reportes por zona y día</small></article>
+          <article><span>Aprendió con datos hasta</span><strong id="prediction-base">—</strong><small id="prediction-base-detail">—</small></article>
+        </div>
+        <div class="prediction-days" id="prediction-days" role="group" aria-label="Día a mostrar"></div>
+        <div id="prediction-map" class="prediction-map" role="application" aria-label="Mapa de calor de la actividad esperada"></div>
+        <div class="prediction-legend"><span>Menos actividad</span><i aria-hidden="true"></i><span>Más actividad</span><small>Es una predicción: no son posiciones reales de los camiones.</small></div>
+        <details class="heatmap-method"><summary>¿Cómo se calcula la predicción?</summary><p id="prediction-method">Esperando la primera predicción…</p></details>
+      </section>
     </div>
     <footer><span>ARTISA <span class="slash">/</span> Del origen al frontend</span><span>ETL · MariaDB · Machine Learning · Endpoints · Frontend</span></footer>
   </main>

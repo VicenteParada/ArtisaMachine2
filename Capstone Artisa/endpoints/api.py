@@ -14,7 +14,7 @@ import pymysql
 from common import dias
 from common.db import connect_db
 from common.http import JsonHandler, serve
-from endpoints import rutas_api
+from endpoints import prediccion_api, rutas_api
 
 
 STARTED_AT = time.monotonic()
@@ -42,7 +42,13 @@ PENDING_RESPONSES = {
         "operacion": {"viajes": None},
         "rutas": {"HIGH": None, "MEDIUM": None, "LOW": None},
     },
+    "/api/prediccion": {
+        "status": "pending", "dias": [],
+        "message": "La predicción se calcula con al menos 21 días cerrados.",
+    },
 }
+BUILDERS = {"/api/mapa": rutas_api.classified_map, "/api/dashboard": rutas_api.classified_dashboard,
+            "/api/prediccion": prediccion_api.prediction}
 
 
 # Telemetría actual (servicio telemetria). Mientras la API de la empresa no esté
@@ -455,8 +461,7 @@ def cached_result(path):
             return entry[1]  # otra petición lo calculó mientras esperábamos
         try:
             with connect_db(read_timeout=80) as connection, connection.cursor() as cursor:
-                build = rutas_api.classified_map if path == "/api/mapa" else rutas_api.classified_dashboard
-                result = build(cursor)
+                result = BUILDERS[path](cursor)
         except pymysql.MySQLError as error:
             print(f"Endpoints: no se pudo calcular {path} ({type(error).__name__}); se usa el último resultado",
                   flush=True)
@@ -493,7 +498,7 @@ class Handler(JsonHandler):
                                          "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
                                          *PENDING_RESPONSES]})
             return
-        if path in ("/api/mapa", "/api/dashboard"):
+        if path in BUILDERS:
             # Resultados de Machine si existe una clasificación activa; si no, "pendiente".
             result = cached_result(path)
             if result is None:

@@ -21,7 +21,7 @@ flowchart LR
 | Servicio | Qué hace |
 |---|---|
 | `telemetria` | Trae los reportes de la API de la empresa cada 30 s. Sobrevive a cortes de red y recupera lo pendiente sin duplicar. |
-| `machine-diario` | Cierra cada día, extrae viajes y clasifica las rutas (00:30). |
+| `machine-diario` | Cierra cada día, extrae viajes, clasifica las rutas y predice la actividad de los próximos 7 días (00:30). |
 | `mariadb` | Base de datos (volumen persistente). |
 | `endpoints` | API de solo lectura para la web (`/api/*`). |
 | `front` + `nginx` | Interfaz web; nginx es la única entrada (puerto 8080). |
@@ -38,6 +38,8 @@ flowchart LR
 - **Ruta:** viajes con el mismo origen y destino (faena o lugar frecuente) y la misma trayectoria (750 m). Ida y vuelta son la misma ruta. Mínimo 5 viajes y 2 camiones.
 - **Nivel de uso:** verde = más usada (sobre el percentil 67), naranja = uso medio, rojo = poco usada (percentil 33 o menos). Ventana: últimos 90 días.
 - **Línea de la ruta:** un viaje real observado (el más representativo), nunca un promedio inventado.
+- **Predicción (LightGBM):** reportes de camiones en movimiento esperados por zona de ~1 km, desde hoy hasta 7 días más. Aprende de las últimas 8 semanas (mínimo 21 días). Se compara siempre con el promedio histórico de cada zona en días de prueba y se publica el que se equivoque menos.
+- **Camiones nuevos:** cuando el catálogo de camiones cambia, la predicción vuelve a contar las 8 semanas con la lista nueva y se reentrena.
 - **Camiones:** solo los del catálogo `DB/vehiculos_data.sql`. La patente y el conductor vienen del GPS (no se guarda el RUT).
 
 ## Web
@@ -47,17 +49,18 @@ flowchart LR
 | Arquitectura | Estado de cada servicio. |
 | Reportes | Últimos 30 reportes en vivo e historial por día y por mes. |
 | Dashboard | Rutas por nivel de uso, ranking y estado de la flota. |
-| Mapa de rutas | **Rutas clasificadas** (filtros, camiones, recorrido del día, faenas, satélite y densidad GPS) y **Mapas de telemetría** (calor, rutas por camión, uso de rutas y puntos para un rango de hasta 14 días). |
+| Mapa de rutas | **Predicción** de actividad (debajo del mapa), **Rutas clasificadas** (filtros, camiones, recorrido del día, faenas, satélite y densidad GPS) y **Mapas de telemetría** (calor, rutas por camión, uso de rutas y puntos para un rango de hasta 14 días). |
 
 ## Estructura
 
 ```
 DB/                 esquema y catálogos (vehículos, faenas)
 telemetria_api/     conector de la API de la empresa
-machine_learning/   cierre diario, viajes y clasificación de rutas
+machine_learning/   cierre diario, viajes, clasificación de rutas y predicción
 endpoints/          API de la web
 front/  auth/  nginx/
 ETLs/               carga del JSON histórico (opcional)
+guias_ml/           cuadernos de experimentación (Colab), sin salidas ni datos
 scripts/            artisa.py (comandos), start.py, respaldo, comprobaciones
 tests/              pruebas: python3 -m unittest discover -s tests
 ```

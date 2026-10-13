@@ -4,7 +4,7 @@ from datetime import date, datetime
 import json
 import unittest
 
-from endpoints import rutas_api
+from endpoints import prediccion_api, rutas_api
 
 
 class FakeCursor:
@@ -116,6 +116,28 @@ class JourneyTests(unittest.TestCase):
         journey = rutas_api.truck_journey(cursor, "RJXS30")
         self.assertEqual(journey["cortes"], 2)
         self.assertEqual(journey["minutos_sin_senal"], 47.0)
+
+
+class PredictionApiTests(unittest.TestCase):
+    def test_pending_without_version(self):
+        cursor = FakeCursor([("FROM prediccion_version", [])])
+        self.assertIsNone(prediccion_api.prediction(cursor))
+
+    def test_groups_cells_by_day_with_cell_centers(self):
+        version = {"id": 2, "creado_en": datetime(2026, 10, 13, 4), "base_hasta": date(2026, 10, 12),
+                   "desde": date(2026, 10, 13), "hasta": date(2026, 10, 20), "camiones": 112,
+                   "metricas_json": json.dumps({"metodo": "lightgbm", "mae_modelo": 1.2, "mae_referencia": 1.5,
+                                                "huella_camiones": "x"})}
+        celdas = [{"fecha": date(2026, 10, 13), "celda_lat": -2246, "celda_lon": -6893, "valor": 12.0},
+                  {"fecha": date(2026, 10, 13), "celda_lat": -2245, "celda_lon": -6893, "valor": 3.5},
+                  {"fecha": date(2026, 10, 14), "celda_lat": -2246, "celda_lon": -6893, "valor": 10.0}]
+        cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_celda", celdas)])
+        data = prediccion_api.prediction(cursor)
+        self.assertEqual([d["fecha"] for d in data["dias"]], ["2026-10-13", "2026-10-14"])
+        self.assertEqual(data["dias"][0]["celdas"][0], [-22.455, -68.925, 12.0])
+        self.assertEqual(data["dias"][0]["total"], 16)
+        self.assertEqual(data["metricas"]["metodo"], "lightgbm")
+        self.assertNotIn("huella_camiones", data["metricas"])
 
 
 if __name__ == "__main__":

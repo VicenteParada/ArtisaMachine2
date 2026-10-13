@@ -6,6 +6,7 @@
     python3 scripts/artisa.py estado                  servicios, conexión con la API y clasificación
     python3 scripts/artisa.py cierre                  cierre diario ahora (sin esperar la hora programada)
     python3 scripts/artisa.py rutas                   recalcula la clasificación de rutas ahora
+    python3 scripts/artisa.py prediccion              recalcula la predicción de actividad (próximos 7 días)
     python3 scripts/artisa.py respaldo                respaldo de MariaDB ahora (carpeta respaldos/)
     python3 scripts/artisa.py logs [servicio]         registros en vivo (Ctrl+C para salir)
     python3 scripts/artisa.py contrasena              cambia la contraseña de la web
@@ -91,6 +92,10 @@ def rutas(_):
     return compose("exec", "machine-diario", "python", "-m", "machine_learning.validar_rutas", "--ahora", check=False)
 
 
+def prediccion(_):
+    return compose("exec", "machine-diario", "python", "-m", "machine_learning.prediccion", check=False)
+
+
 def respaldo(_):
     return compose("exec", "respaldo", "bash", "/scripts/respaldo.sh", "--ahora", check=False)
 
@@ -127,7 +132,7 @@ def main():
     api.add_argument("url")
     api.add_argument("--desde", help='primera conexión: traer reportes desde "AAAA-MM-DD HH:MM" (hora de Chile)')
     api.set_defaults(fn=conectar_api)
-    for name, fn in (("estado", estado), ("cierre", cierre), ("rutas", rutas), ("respaldo", respaldo),
+    for name, fn in (("estado", estado), ("cierre", cierre), ("rutas", rutas), ("prediccion", prediccion), ("respaldo", respaldo),
                      ("contrasena", contrasena), ("detener", detener)):
         sub.add_parser(name).set_defaults(fn=fn)
     red = sub.add_parser("acceso-red")

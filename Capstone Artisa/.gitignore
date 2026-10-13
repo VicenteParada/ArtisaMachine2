@@ -9,3 +9,5 @@ exports/
 .venv/
 # Respaldos de MariaDB (contienen datos de la empresa)
 respaldos/
+# Datos de prueba de los cuadernos (contienen datos de la empresa)
+guias_ml/*.csv

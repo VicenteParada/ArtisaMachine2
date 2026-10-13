@@ -219,7 +219,7 @@ function syncDatasetView() {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
   }
   if (view === "heatmap") {
-    window.setTimeout(() => openExplorer(), 50);
+    window.setTimeout(() => { openExplorer(); loadPrediction(); }, 50);
   }
   if (view === "heatmap" && activeMapMode === "classified" && fleetMap) {
     window.setTimeout(fitPendingMap, 0);
@@ -1927,6 +1927,154 @@ window.addEventListener("storage", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) restoreSession();
 });
+// --- Predicción de actividad (machine de 7 días, /api/prediccion) ---------------------------
+const PREDICTION_REFRESH_MS = 15 * 60 * 1000;
+const PREDICTION_GRADIENT = {0.2: "#3b4cc0", 0.45: "#2ec4b6", 0.65: "#9be15d", 0.82: "#f9c74f", 1: "#e63946"};
+const predictionState = {data: null, loadedAt: 0, loading: false, day: "ALL", map: null, layer: null};
+
+function predictionDayLabel(iso, style = "short") {
+  const date = new Date(iso + "T12:00:00Z");
+  return new Intl.DateTimeFormat("es-CL", style === "short"
+    ? {weekday: "short", day: "numeric", timeZone: "UTC"}
+    : {weekday: "long", day: "numeric", month: "long", timeZone: "UTC"}).format(date);
+}
+
+function predictionCells(data, day) {
+  if (day !== "ALL") return (data.dias.find((item) => item.fecha === day) || {celdas: []}).celdas;
+  const sum = new Map();
+  for (const item of data.dias) {
+    for (const [lat, lon, value] of item.celdas) {
+      const key = lat + "," + lon;
+      sum.set(key, [lat, lon, (sum.get(key)?.[2] || 0) + value]);
+    }
+  }
+  return [...sum.values()];
+}
+
+function ensurePredictionMap() {
+  if (predictionState.map || !window.L) return predictionState.map;
+  predictionState.map = L.map($("prediction-map"), {zoomControl: true}).setView([-24.5, -70], 6);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(predictionState.map);
+  return predictionState.map;
+}
+
+function drawPrediction() {
+  const data = predictionState.data;
+  const map = ensurePredictionMap();
+  if (!data || !map) return;
+  map.invalidateSize();
+  if (predictionState.layer) map.removeLayer(predictionState.layer);
+  const cells = predictionCells(data, predictionState.day);
+  const max = cells.reduce((top, cell) => Math.max(top, cell[2]), 0);
+  // Escala logarítmica, igual que el mapa de calor del cuaderno (np.log1p).
+  const points = cells.map(([lat, lon, value]) => [lat, lon, max ? Math.log1p(value) / Math.log1p(max) : 0]);
+  predictionState.layer = L.heatLayer
+    ? L.heatLayer(points, {radius: 9, blur: 11, minOpacity: 0.3, max: 1, maxZoom: 18, gradient: PREDICTION_GRADIENT})
+    : L.layerGroup();
+  predictionState.layer.addTo(map);
+  if (!predictionState.fitted && cells.length) {
+    map.fitBounds(L.latLngBounds(cells.map((cell) => [cell[0], cell[1]])), {padding: [30, 30], maxZoom: 9});
+    predictionState.fitted = true;
+  }
+  for (const button of document.querySelectorAll("[data-prediction-day]")) {
+    const selected = button.dataset.predictionDay === predictionState.day;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  }
+}
+
+function renderPrediction(data) {
+  predictionState.data = data;
+  const status = $("prediction-status");
+  const days = $("prediction-days");
+  if (!data || data.status !== "ok" || !data.dias.length) {
+    status.textContent = "Pendiente";
+    status.className = "status neutral";
+    $("prediction-intro").textContent = (data && data.message) ||
+      "La predicción se calcula sola cuando hay al menos 21 días cerrados.";
+    days.replaceChildren();
+    return;
+  }
+  const m = data.metricas || {};
+  const usesModel = m.metodo === "lightgbm";
+  status.textContent = usesModel ? "Modelo LightGBM" : "Promedio histórico";
+  status.className = "status " + (usesModel ? "" : "neutral");
+  const today = localToday();
+  const first = data.dias[0].fecha, last = data.dias[data.dias.length - 1].fecha;
+  $("prediction-intro").textContent =
+    `Zonas donde se espera más movimiento de camiones entre el ${predictionDayLabel(first, "long")} y el ` +
+    `${predictionDayLabel(last, "long")}. Se recalcula sola cada noche con el cierre del día.`;
+  const total = data.dias.reduce((sum, item) => sum + item.total, 0);
+  $("prediction-total").textContent = format(total);
+  $("prediction-total-detail").textContent = `En ${data.dias.length} días · camiones en movimiento`;
+  const peak = data.dias.reduce((top, item) => item.total > top.total ? item : top, data.dias[0]);
+  $("prediction-peak").textContent = predictionDayLabel(peak.fecha);
+  $("prediction-peak-detail").textContent = format(peak.total) + " reportes esperados";
+  const error = usesModel ? m.mae_modelo : m.mae_referencia;
+  $("prediction-error").textContent = error === undefined ? "—" : format(error, 1);
+  $("prediction-error-detail").textContent = usesModel
+    ? `Promedio histórico: ${format(m.mae_referencia, 1)} · menor es mejor`
+    : "Reportes por zona y día · menor es mejor";
+  $("prediction-base").textContent = new Intl.DateTimeFormat("es-CL", {
+    day: "numeric", month: "short", timeZone: "UTC"}).format(new Date(data.base_hasta + "T12:00:00Z"));
+  $("prediction-base-detail").textContent = m.dias_historia
+    ? `${format(m.dias_historia)} días de historia · ${format(m.camiones || 0)} camiones` : "—";
+  $("prediction-method").textContent =
+    "Cada zona es un cuadro de ~1 km. Para cada día se predice cuántos reportes de camiones en movimiento " +
+    "(sobre 2 km/h) habrá en cada zona, usando el día anterior, el mismo día de la semana pasada, el promedio " +
+    "de la última semana y el promedio de todo el período. Los días siguientes usan la predicción del día " +
+    "anterior, así que la confianza baja a medida que se aleja. " +
+    (usesModel
+      ? `En ${format(m.dias_prueba || 0)} días de prueba que el modelo no vio, su error fue ${format(m.mae_modelo, 2)} ` +
+        `contra ${format(m.mae_referencia, 2)} del promedio histórico de cada zona.`
+      : `Se muestra el promedio histórico de cada zona porque el modelo no lo superó en los días de prueba` +
+        (m.motivo ? ` (${m.motivo.toLowerCase()}).` : "."));
+  const buttons = [["ALL", "Semana", "Todos los días"]].concat(data.dias.map((item) =>
+    [item.fecha, predictionDayLabel(item.fecha), item.fecha === today ? "Hoy" : format(item.total) + " rep."]));
+  days.replaceChildren(...buttons.map(([value, label, detail]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "prediction-day" + (value === today ? " is-today" : "");
+    button.dataset.predictionDay = value;
+    const strong = document.createElement("span");
+    strong.textContent = label;
+    const small = document.createElement("small");
+    small.textContent = detail;
+    button.append(strong, small);
+    button.addEventListener("click", () => { predictionState.day = value; drawPrediction(); });
+    return button;
+  }));
+  if (predictionState.day !== "ALL" && !data.dias.some((item) => item.fecha === predictionState.day)) {
+    predictionState.day = "ALL";
+  }
+  drawPrediction();
+}
+
+async function loadPrediction(force = false) {
+  if (!token() || predictionState.loading) return;
+  if (!force && predictionState.data && Date.now() - predictionState.loadedAt < PREDICTION_REFRESH_MS) {
+    drawPrediction();
+    return;
+  }
+  predictionState.loading = true;
+  try {
+    renderPrediction(await api("/api/prediccion", {timeoutMs: 60000}));
+    predictionState.loadedAt = Date.now();
+  } catch (error) {
+    if (!predictionState.data) {
+      $("prediction-status").textContent = "No disponible";
+      $("prediction-status").className = "status warning";
+      $("prediction-intro").textContent = "No se pudo consultar la predicción: " + error.message;
+    }
+  } finally {
+    predictionState.loading = false;
+  }
+}
+
+setInterval(() => { if (window.location.hash === "#mapa-calor") loadPrediction(); }, PREDICTION_REFRESH_MS);
+
 restoreSession();
 setInterval(refresh, 300000);
 setInterval(refreshTelemetry, TELEMETRY_REFRESH_MS);

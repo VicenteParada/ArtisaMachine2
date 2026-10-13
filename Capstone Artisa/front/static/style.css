@@ -428,3 +428,16 @@
 .map-overlay-note[hidden]{display:none}
 #heatmap-map .leaflet-control-layers{font-size:11px;line-height:1.5}
 .route-filter-panel[hidden],.map-layer-panel[hidden]{display:none}
+
+/* Predicción de actividad (debajo del Mapa de rutas) */
+.prediction-panel{margin-top:22px}
+.prediction-days{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0 12px}
+.prediction-day{display:grid;gap:2px;min-width:74px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);font-size:10px;font-weight:600;text-align:left}
+.prediction-day small{color:var(--muted);font-size:9px;font-weight:500}
+.prediction-day.is-today{border-color:#9db2a5}
+.prediction-day.is-active{border-color:var(--green);background:#edf5ee;color:var(--green)}
+.prediction-map{height:560px;border:1px solid var(--line);border-radius:8px;background:#e7eee8;z-index:0}
+.prediction-legend{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:11px;color:var(--muted);font-size:9px}
+.prediction-legend i{width:120px;height:8px;border-radius:4px;background:linear-gradient(90deg,#3b4cc0,#2ec4b6,#9be15d,#f9c74f,#e63946)}
+.prediction-legend small{margin-left:auto}
+@media(max-width:690px){.prediction-map{height:420px}.prediction-legend small{margin-left:0;width:100%}}

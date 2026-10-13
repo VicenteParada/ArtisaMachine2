@@ -225,3 +225,44 @@ ALTER TABLE telemetria_api ADD COLUMN IF NOT EXISTS driver_name VARCHAR(64) NULL
 ALTER TABLE telemetria_api ADD COLUMN IF NOT EXISTS driver_last_name VARCHAR(128) NULL;
 -- Dirección que entrega el GPS (sirve para nombrar los lugares de las rutas por comuna).
 ALTER TABLE telemetria_api ADD COLUMN IF NOT EXISTS location VARCHAR(255) NULL;
+
+-- Predicción de actividad (machine_learning/prediccion.py). Datos derivados y recalculables.
+-- Actividad real por día local (Chile) y celda de 0,01° (~1 km): reportes de camiones en
+-- movimiento (velocidad > 2 km/h), sin repetidos entre tablas.
+CREATE TABLE IF NOT EXISTS actividad_celda_dia (
+    fecha DATE NOT NULL,
+    celda_lat INT NOT NULL,
+    celda_lon INT NOT NULL,
+    conteo INT UNSIGNED NOT NULL,
+    PRIMARY KEY (fecha, celda_lat, celda_lon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Con qué cálculo del cierre diario se contó cada día (si el día se recalcula, se recuenta).
+CREATE TABLE IF NOT EXISTS actividad_dia_estado (
+    fecha DATE NOT NULL,
+    calculado_en DATETIME(6) NOT NULL,
+    reportes INT UNSIGNED NOT NULL,
+    PRIMARY KEY (fecha)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS prediccion_version (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    creado_en DATETIME(6) NOT NULL,
+    base_hasta DATE NOT NULL,
+    desde DATE NOT NULL,
+    hasta DATE NOT NULL,
+    camiones INT UNSIGNED NOT NULL,
+    activa TINYINT(1) NOT NULL DEFAULT 0,
+    metricas_json TEXT NOT NULL,
+    PRIMARY KEY (id),
+    INDEX idx_prediccion_version_activa (activa)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS prediccion_celda (
+    version_id INT UNSIGNED NOT NULL,
+    fecha DATE NOT NULL,
+    celda_lat INT NOT NULL,
+    celda_lon INT NOT NULL,
+    valor FLOAT NOT NULL,
+    PRIMARY KEY (version_id, fecha, celda_lat, celda_lon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
