@@ -250,11 +250,24 @@ def publicar_prediccion(connection, utc_now):
 
 
 def _con_bloqueo(connection, funcion, espera=0):
-    """Evita que el servicio y una ejecución manual procesen a la vez."""
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT GET_LOCK(%s, %s) AS ok", (LOCK_NAME, espera))
-        if not (cursor.fetchone() or {}).get("ok"):
+    """Evita que el servicio y una ejecución manual procesen a la vez.
+
+    La espera se hace en tramos de 30 s: una sola espera larga en MariaDB superaría el
+    límite de lectura de la conexión y la cortaría (error 2013) aunque nada haya fallado.
+    """
+    limite = time.monotonic() + espera
+    intentos = 0
+    while True:
+        tramo = max(0, min(30, int(limite - time.monotonic())))
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s, %s) AS ok", (LOCK_NAME, tramo))
+            if (cursor.fetchone() or {}).get("ok"):
+                break
+        if time.monotonic() >= limite:
             return None
+        intentos += 1
+        if intentos % 10 == 0:
+            print(f"El servicio sigue trabajando; esperando… ({intentos // 2} min)", flush=True)
     try:
         return funcion()
     finally:

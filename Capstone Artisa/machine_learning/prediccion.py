@@ -556,7 +556,7 @@ if __name__ == "__main__":
     from machine_learning.diario_worker import _con_bloqueo
     initialize_db()
     with connect_db(autocommit=False, read_timeout=900) as conexion:
-        print("Esperando a que termine el trabajo en curso del cierre diario (si hay)…", flush=True)
+        print("Esperando a que el servicio termine lo que está calculando (si hay)…", flush=True)
         resultado = _con_bloqueo(conexion, lambda: ejecutar(conexion, datetime.now(timezone.utc).replace(tzinfo=None),
                                                             tipos=list(TIPOS)), espera=3600)
     raise SystemExit(0 if resultado else 1)

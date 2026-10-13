@@ -268,5 +268,27 @@ class ReclassificationTests(unittest.TestCase):
         self.assertIn("calculado_en=UTC_TIMESTAMP(6)", totales[0])  # rutas y predicción se recalculan
 
 
+class LockWaitTests(unittest.TestCase):
+    def test_waits_for_the_lock_in_short_steps(self):
+        esperas = []
+
+        class Cursor:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def execute(self, sql, args):
+                if "GET_LOCK" in sql:
+                    esperas.append(args[1])
+            def fetchone(self):
+                return {"ok": 1 if len(esperas) >= 3 else 0}
+
+        class Conexion:
+            def cursor(self): return Cursor()
+
+        resultado = diario_worker._con_bloqueo(Conexion(), lambda: "hecho", espera=3600)
+        self.assertEqual(resultado, "hecho")
+        self.assertEqual(len(esperas), 3)
+        self.assertTrue(all(e <= 30 for e in esperas))  # nunca supera el límite de lectura
+
+
 if __name__ == "__main__":
     unittest.main()
