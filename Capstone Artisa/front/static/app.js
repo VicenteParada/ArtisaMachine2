@@ -1983,6 +1983,9 @@ function drawPrediction() {
     map.fitBounds(L.latLngBounds(cells.map((cell) => [cell[0], cell[1]])), {padding: [30, 30], maxZoom: 9});
     predictionState.fitted = true;
   }
+  for (const column of document.querySelectorAll("[data-prediction-column]")) {
+    column.classList.toggle("is-active", column.dataset.predictionColumn === predictionState.day);
+  }
   for (const button of document.querySelectorAll("[data-prediction-day]")) {
     const selected = button.dataset.predictionDay === predictionState.day;
     button.classList.toggle("is-active", selected);
@@ -2053,10 +2056,54 @@ function renderPrediction(data) {
     button.addEventListener("click", () => { predictionState.day = value; drawPrediction(); });
     return button;
   }));
+  renderPredictionCharts(data, today);
   if (predictionState.day !== "ALL" && !data.dias.some((item) => item.fecha === predictionState.day)) {
     predictionState.day = "ALL";
   }
   drawPrediction();
+}
+
+function renderPredictionCharts(data, today) {
+  // Columnas: total esperado por día (clic = ver ese día en el mapa).
+  const chart = $("prediction-daily-chart");
+  const peak = Math.max(1, ...data.dias.map((item) => item.total));
+  chart.replaceChildren(...data.dias.map((item) => {
+    const weekday = new Date(item.fecha + "T12:00:00Z").getUTCDay();
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "prediction-column" + (weekday === 0 || weekday === 6 ? " weekend" : "") +
+      (item.fecha === today ? " is-today" : "");
+    button.dataset.predictionColumn = item.fecha;
+    button.title = `${predictionDayLabel(item.fecha, "long")}: ${format(item.total)} reportes esperados`;
+    const value = document.createElement("strong");
+    value.textContent = format(item.total);
+    const bar = document.createElement("i");
+    bar.style.height = Math.max(2, item.total / peak * 100) + "%";
+    const label = document.createElement("span");
+    label.textContent = item.fecha === today ? "Hoy" : predictionDayLabel(item.fecha);
+    button.append(value, bar, label);
+    button.addEventListener("click", () => {
+      predictionState.day = predictionState.day === item.fecha ? "ALL" : item.fecha;
+      drawPrediction();
+    });
+    return button;
+  }));
+  // Barras: error de cada método; el publicado en verde.
+  const m = data.metricas || {};
+  const errors = m.errores || (m.mae_referencia !== undefined ? {promedio_historico: m.mae_referencia} : {});
+  const order = ["lightgbm", "promedio_dia_semana", "promedio_historico"].filter((key) => key in errors);
+  renderDashboardBars("prediction-methods-chart", order.map((key) => ({
+    label: (PREDICTION_METHODS[key] || key) + (key === m.metodo ? " · publicado" : ""),
+    value: errors[key],
+    color: key === m.metodo ? "#246c55" : "#b8c6bf",
+    detail: key === m.metodo ? "El de menor error: es el que se ve en el mapa"
+      : `${format((errors[key] / errors[m.metodo] - 1) * 100, 1)} % más error que el publicado`
+  })), "#246c55");
+  for (const [index, row] of [...$("prediction-methods-chart").children].entries()) {
+    row.classList.toggle("winner", order[index] === m.metodo);
+    const strong = row.querySelector("strong");
+    if (strong) strong.textContent = format(errors[order[index]], 3);
+  }
 }
 
 async function loadPrediction(force = false) {

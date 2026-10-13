@@ -441,3 +441,17 @@
 .prediction-legend i{width:120px;height:8px;border-radius:4px;background:linear-gradient(90deg,#3b4cc0,#2ec4b6,#9be15d,#f9c74f,#e63946)}
 .prediction-legend small{margin-left:auto}
 @media(max-width:690px){.prediction-map{height:420px}.prediction-legend small{margin-left:0;width:100%}}
+.prediction-charts{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:14px;margin-top:16px}
+.prediction-charts .dashboard-card>p{margin:6px 0 16px;color:var(--muted);font-size:10px;line-height:1.6}
+.prediction-columns{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:end;gap:8px;height:190px;padding-top:6px}
+.prediction-column{display:grid;grid-template-rows:auto 1fr auto;align-items:end;gap:5px;height:100%;padding:0;border:0;background:none;color:var(--ink);font-size:9px;text-align:center}
+.prediction-column strong{font-size:9px;font-weight:600;color:var(--muted)}
+.prediction-column i{display:block;width:100%;min-height:3px;border-radius:5px 5px 2px 2px;background:#246c55;transition:height .35s ease,background .2s}
+.prediction-column.weekend i{background:#9fc3b0}
+.prediction-column span{white-space:nowrap}
+.prediction-column.is-today span{font-weight:700}
+.prediction-column:hover i{background:#174b35}
+.prediction-column.is-active i{background:#f97316}
+.prediction-column.is-active strong{color:#c2410c}
+.prediction-methods .dashboard-bar-row.winner>div:first-child span{font-weight:700;color:var(--green)}
+@media(max-width:940px){.prediction-charts{grid-template-columns:minmax(0,1fr)}}

@@ -287,6 +287,18 @@
         <div class="prediction-days" id="prediction-days" role="group" aria-label="Día a mostrar"></div>
         <div id="prediction-map" class="prediction-map" role="application" aria-label="Mapa de calor de la actividad esperada"></div>
         <div class="prediction-legend"><span>Menos actividad</span><i aria-hidden="true"></i><span>Más actividad</span><small>Es una predicción: no son posiciones reales de los camiones.</small></div>
+        <div class="prediction-charts">
+          <article class="dashboard-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">PRÓXIMOS DÍAS</span><h3>Actividad esperada por día</h3></div><span class="chart-unit">Reportes</span></div>
+            <p>Toca un día para verlo en el mapa. Los fines de semana suelen tener menos movimiento.</p>
+            <div id="prediction-daily-chart" class="prediction-columns" role="group" aria-label="Actividad esperada por día"></div>
+          </article>
+          <article class="dashboard-card">
+            <div class="dashboard-card-heading"><div><span class="eyebrow">EVALUACIÓN</span><h3>¿Qué método predice mejor?</h3></div><span class="chart-unit">Error · menor es mejor</span></div>
+            <p>Error promedio en días de prueba que ningún método vio. Se publica el de menor error.</p>
+            <div id="prediction-methods-chart" class="dashboard-bars prediction-methods" aria-label="Error de cada método"></div>
+          </article>
+        </div>
         <details class="heatmap-method"><summary>¿Cómo se calcula la predicción?</summary><p id="prediction-method">Esperando la primera predicción…</p></details>
       </section>
     </div>
