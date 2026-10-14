@@ -19,7 +19,7 @@ from endpoints import rutas_api
 RECIENTE_MIN = 15        # un dato más viejo es "sin señal reciente" (igual que la telemetría)
 EN_RUTA_KMH = 5          # sobre esto el camión va en ruta; si no, está detenido
 SERIE_DIAS = 14          # km por día en la tarjeta de cada camión
-HISTORIAL_DIAS = 30      # días que se muestran en la ficha
+HISTORIAL_DIAS = 30      # días que se muestran en la ficha: siempre los 30 que terminan hoy
 PARADA_MIN = 10          # igual que machine_learning/viajes.py (PARADA_MIN_MIN)
 
 
@@ -179,13 +179,24 @@ def truck_detail(cursor, asset_id, dia):
     try:
         cursor.execute("SELECT estado FROM reporte_diario_estado WHERE fecha=%s", (dia,))
         estado_dia = (cursor.fetchone() or {}).get("estado")
+        # La ventana de 30 días no se mueve al elegir otro día: termina siempre hoy.
+        hoy = dias.hoy()
         cursor.execute(
             """SELECT fecha, asset_name, reportes, primer_reporte, ultimo_reporte, km_observados, viajes,
                       paradas, minutos_detenido
                FROM reporte_diario WHERE fecha >= %s AND fecha <= %s AND asset_id = %s ORDER BY fecha""",
-            (dia - timedelta(days=HISTORIAL_DIAS - 1), dia, asset_id),
+            (hoy - timedelta(days=HISTORIAL_DIAS - 1), hoy, asset_id),
         )
         historial = cursor.fetchall()
+        del_dia = next((f for f in historial if f["fecha"] == dia), None)
+        if del_dia is None and dia < hoy - timedelta(days=HISTORIAL_DIAS - 1):
+            cursor.execute(
+                """SELECT fecha, asset_name, reportes, primer_reporte, ultimo_reporte, km_observados, viajes,
+                          paradas, minutos_detenido
+                   FROM reporte_diario WHERE fecha = %s AND asset_id = %s""",
+                (dia, asset_id),
+            )
+            del_dia = cursor.fetchone()
         cursor.execute(
             """SELECT inicio, fin, origen_lat, origen_lon, destino_lat, destino_lon, puntos, km, con_saltos,
                       abierto_inicio, abierto_fin, geometria
@@ -194,8 +205,7 @@ def truck_detail(cursor, asset_id, dia):
         )
         filas_viajes = cursor.fetchall()
     except pymysql.err.ProgrammingError:
-        estado_dia, historial, filas_viajes = None, [], []
-    del_dia = next((f for f in historial if f["fecha"] == dia), None)
+        estado_dia, historial, filas_viajes, del_dia = None, [], [], None
     viajes = [{"inicio": f["inicio"], "fin": f["fin"], "origen": _punto(f["origen_lat"], f["origen_lon"]),
                "destino": _punto(f["destino_lat"], f["destino_lon"]), "fila": f} for f in filas_viajes]
     eventos = linea_de_tiempo(viajes, del_dia and del_dia["primer_reporte"], del_dia and del_dia["ultimo_reporte"])

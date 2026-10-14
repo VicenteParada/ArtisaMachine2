@@ -575,39 +575,54 @@
 @media(max-width:940px){.truck-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* La cinta del día: 24 horas con viajes, paradas e intervalos sin datos */
-.truck-ribbon-wrap{margin:18px 0 16px;padding:16px 18px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
-.truck-ribbon-legend{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:10px;color:var(--muted);font-size:11px}
-.truck-ribbon-legend span{display:inline-flex;align-items:center;gap:6px}
-.truck-ribbon-legend i{display:inline-block;width:16px;height:8px;border-radius:2px}
-.truck-ribbon-legend .move,.ribbon-block.move{background:#1f6b4f}
+.truck-ribbon-wrap{margin:14px 0 14px;padding:10px 14px 6px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.truck-ribbon-legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;margin-bottom:7px;color:var(--muted);font-size:10px}
+.truck-ribbon-legend strong{margin-right:4px;color:var(--ink);font-size:11px}
+.truck-ribbon-legend span{display:inline-flex;align-items:center;gap:5px}
+.truck-ribbon-legend i{display:inline-block;width:14px;height:6px;border-radius:2px}
+.truck-ribbon-legend .move{background:linear-gradient(90deg,#1f6b4f 0 33%,#2563eb 33% 66%,#9333ea 66%)}
 .truck-ribbon-legend .stop,.ribbon-block.stop{background:#e07a1f}
-.truck-ribbon-legend .gap,.ribbon-block.gap{background:repeating-linear-gradient(135deg,#c9d2cf 0 4px,#e7ece9 4px 8px)}
-.truck-ribbon{position:relative;height:34px;border-radius:5px;background:repeating-linear-gradient(90deg,#f1f4f1 0,#f1f4f1 calc(25% - 1px),#dfe6e2 calc(25% - 1px),#dfe6e2 25%)}
-.ribbon-block{position:absolute;top:4px;bottom:4px;border-radius:3px}
-.ribbon-block.move{top:0;bottom:0}
-.ribbon-now{position:absolute;top:-5px;bottom:-5px;width:2px;background:#c0392b}
-.ribbon-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:11px}
-.truck-ribbon-hours{display:flex;justify-content:space-between;margin-top:5px;color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
+.truck-ribbon-legend .gap,.ribbon-block.gap{background:repeating-linear-gradient(135deg,#c9d2cf 0 3px,#eef2ef 3px 6px)}
+.truck-ribbon{position:relative;height:14px;border-radius:4px;background:repeating-linear-gradient(90deg,#f1f4f1 0,#f1f4f1 calc(25% - 1px),#dfe6e2 calc(25% - 1px),#dfe6e2 25%)}
+.ribbon-block{position:absolute;top:3px;bottom:3px;border-radius:2px}
+.ribbon-block.move{top:0;bottom:0;background:#1f6b4f;cursor:pointer}
+.ribbon-now{position:absolute;top:-3px;bottom:-3px;width:2px;background:#c0392b}
+.ribbon-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:9px}
+.truck-ribbon-hours{display:flex;justify-content:space-between;margin-top:3px;color:var(--muted);font-size:9px;font-variant-numeric:tabular-nums}
 
 .truck-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px}
 .truck-map-card{min-width:0}
-.truck-map{height:520px;border:1px solid var(--line);border-radius:8px;background:#e7eee8;z-index:0}
+.truck-map{height:540px;border:1px solid var(--line);border-radius:8px;background:#e7eee8;z-index:0}
 .truck-map-note{margin:8px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
 .truck-pin-icon{background:transparent;border:0}
-.truck-pin{display:grid;place-items:center;width:26px;height:26px;border:3px solid #fff;border-radius:50%;color:#fff;font-size:11px;font-weight:700;box-shadow:0 2px 6px rgba(23,45,50,.35)}
+.truck-pin{display:inline-grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border:3px solid #fff;border-radius:13px;background:var(--pin,#172d32);color:#fff;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 2px 6px rgba(23,45,50,.35);transform:translate(-50%,-50%)}
 .truck-pin.stop{background:#e07a1f}
 .truck-pin.start{background:#1f6b4f}
 .truck-pin.end{background:#172d32}
+.truck-pin.trip{height:22px;min-width:30px;border-width:2px;border-radius:5px;font-size:10px}
+.truck-pin.play{min-width:30px;height:30px;border-radius:50%;background:#172d32;font-size:15px}
+.truck-arrow{display:block;width:14px;height:14px;background:var(--pin);clip-path:polygon(100% 50%,0 0,28% 50%,0 100%);filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)}
+.truck-map-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}
+.truck-map-tools .button{padding:8px 12px;font-size:12px}
+.truck-play-status{color:var(--ink);font-size:12px;font-weight:600}
+.truck-map-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:9px;color:var(--muted);font-size:10px}
+.truck-map-legend span{display:inline-flex;align-items:center;gap:6px}
+.truck-map-legend .pin{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 4px;border-radius:9px;color:#fff;font-size:9px}
+.truck-map-legend .pin.start{background:#1f6b4f}.truck-map-legend .pin.end{background:#172d32}.truck-map-legend .pin.stop{background:#e07a1f}
+.truck-map-legend .pin.trip{border-radius:4px;background:#2563eb}
+.truck-map-legend .line{display:inline-block;width:20px;height:0;border-top:3px solid #9db5aa}
+.truck-map-legend .line.gap{border-top:2px dashed #71817e}
 .truck-itinerary{display:flex;flex-direction:column;min-width:0;max-height:560px;border:1px solid var(--line);border-radius:8px;background:#fff}
 .truck-itinerary h3{margin:0;padding:15px 16px 12px;border-bottom:1px solid var(--line);font-size:14px}
 .truck-events{flex:1;margin:0;padding:8px 0;overflow:auto;list-style:none}
-.truck-events .event{position:relative;display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;padding:9px 16px}
-.truck-events .event::before{content:"";position:absolute;left:66px;top:0;bottom:0;width:2px;background:#e3e9e6}
+.truck-events .event{position:relative;display:grid;grid-template-columns:40px 30px minmax(0,1fr);gap:8px;align-items:start;padding:8px 14px}
+.truck-events .event::before{content:"";position:absolute;left:76px;top:0;bottom:0;width:2px;background:#e3e9e6}
 .truck-events .event time{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;padding-top:2px}
-.truck-events .event div{position:relative;display:grid;gap:3px;padding-left:16px}
-.truck-events .event div::before{content:"";position:absolute;left:-6px;top:4px;width:10px;height:10px;border-radius:50%;border:2px solid #fff;background:#9aa8a6;box-shadow:0 0 0 1px #d5ddd9}
-.truck-events .event.move div::before{background:#1f6b4f}
-.truck-events .event.stop div::before{background:#e07a1f}
+.truck-events .event div{display:grid;gap:3px;min-width:0}
+.event-mark{position:relative;z-index:1;display:grid;place-items:center;min-width:30px;height:20px;padding:0 4px;border-radius:10px;background:#9aa8a6;color:#fff;font-size:10px;font-weight:700}
+.event-mark.trip{border-radius:4px;background:var(--trip)}
+.event-mark.stop{background:#e07a1f}
+.truck-events .event.is-selected,.truck-events .event.is-playing{background:#eef6e6;box-shadow:inset 3px 0 0 var(--trip,#1f6b4f)}
 .truck-events .event strong{font-size:12px}
 .truck-events .event small{color:var(--muted);font-size:11px;line-height:1.45}
 .truck-events .event.move{cursor:pointer}
@@ -615,7 +630,6 @@
 .truck-events .event.gap strong{color:var(--muted)}
 .truck-events .event.empty{display:block;padding:20px 16px;color:var(--muted);font-size:12px}
 .truck-events .event.empty::before{display:none}
-.event-stop-number{position:absolute;right:0;top:0;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#fbe9d8;color:#a5520f;font-size:10px;font-weight:700}
 @media(max-width:940px){.truck-layout{grid-template-columns:minmax(0,1fr)}.truck-map{height:420px}.truck-itinerary{max-height:420px}}
 
 .truck-history{margin-top:16px;padding:16px 18px;border:1px solid var(--line);border-radius:8px;background:#fff}
@@ -633,3 +647,9 @@
 .history-route-button{padding:5px 9px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--green);font-size:11px;font-weight:600;white-space:nowrap;cursor:pointer}
 .history-route-button:hover{border-color:var(--green)}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.truck-pin.group{display:inline-flex;gap:0;min-width:0;height:auto;padding:0;overflow:hidden;background:#fff;border-width:2px}
+.truck-pin.group b{display:grid;place-items:center;min-width:22px;height:22px;padding:0 6px;font-size:11px}
+.truck-pin.group b.start{background:#1f6b4f}
+.truck-pin.group b.stop{background:#e07a1f}
+.truck-pin.group b.end{background:#172d32}
+.truck-pin.group b+b{border-left:2px solid #fff}

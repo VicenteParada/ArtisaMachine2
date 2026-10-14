@@ -6,11 +6,11 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/style.css?v=20261014-camiones">
+  <link rel="stylesheet" href="/style.css?v=20261014-camiones2">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
   <script src="/map-data.js" defer></script>
-  <script src="/app.js?v=20261014-camiones" defer></script>
+  <script src="/app.js?v=20261014-camiones2" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -147,14 +147,27 @@
             <article><span>Primer y último reporte</span><strong id="truck-span">—</strong><small id="truck-span-note">&nbsp;</small></article>
           </div>
           <div class="truck-ribbon-wrap">
-            <div class="truck-ribbon-legend"><span><i class="move"></i>En viaje</span><span><i class="stop"></i>Detenido</span><span><i class="gap"></i>Sin datos</span></div>
+            <div class="truck-ribbon-legend"><strong>El día en 24 horas</strong><span><i class="move"></i>Viajes (cada uno con su color)</span><span><i class="stop"></i>Detenido</span><span><i class="gap"></i>Sin datos</span></div>
             <div id="truck-ribbon" class="truck-ribbon" role="img" aria-label="El día del camión en 24 horas"></div>
             <div class="truck-ribbon-hours" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
           </div>
           <div class="truck-layout">
             <div class="truck-map-card">
+              <div class="truck-map-tools">
+                <button type="button" class="button" id="truck-play" aria-pressed="false">▶ Reproducir el día</button>
+                <button type="button" class="button secondary" id="truck-show-all" hidden>Ver todo el día</button>
+                <span id="truck-play-status" class="truck-play-status" aria-live="polite"></span>
+              </div>
               <div id="truck-map" class="truck-map" role="application" aria-label="Recorrido del día"></div>
-              <p class="truck-map-note" id="truck-map-note">Línea verde: todo lo que el GPS registró en el día. Los saltos de GPS no se dibujan.</p>
+              <div class="truck-map-legend">
+                <span><b class="pin start">A</b>Primer punto</span>
+                <span><b class="pin trip">V1</b>Viaje y su número; la flecha marca el sentido</span>
+                <span><b class="pin stop">2</b>Parada (si hay varias en el mismo lugar, van juntas)</span>
+                <span><i class="line base"></i>Movimiento fuera de viajes</span>
+                <span><i class="line gap"></i>Sin señal: línea recta, no es el camino exacto</span>
+                <span><b class="pin end">B</b>Último punto</span>
+              </div>
+              <p class="truck-map-note" id="truck-signal-note"></p>
             </div>
             <aside class="truck-itinerary" aria-labelledby="truck-itinerary-title">
               <h3 id="truck-itinerary-title">El día, paso a paso</h3>

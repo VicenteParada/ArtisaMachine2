@@ -3,6 +3,7 @@
 from datetime import date, datetime, timedelta
 import json
 import unittest
+from unittest.mock import patch
 
 from endpoints import camiones_api
 from tests.test_rutas_api import FakeCursor
@@ -95,7 +96,8 @@ class FichaTests(unittest.TestCase):
             ("FROM telemetria_api WHERE asset_id=%s AND report_date", reportes),
             ("FROM raw_gps WHERE asset_id=%s AND report_date", []),
         ])
-        ficha = camiones_api.truck_detail(cursor, "AB1234", dia)
+        with patch.object(camiones_api.dias, "hoy", return_value=dia):
+            ficha = camiones_api.truck_detail(cursor, "AB1234", dia)
         self.assertEqual(ficha["nombre"], "906")
         self.assertEqual(ficha["conductor"], "Juan Pérez")
         self.assertEqual(ficha["resumen"]["km"], 123.5)
@@ -105,6 +107,24 @@ class FichaTests(unittest.TestCase):
                          [("parada", "Faena Calama"), ("parada", "Calama, Antofagasta")])
         self.assertEqual([h["km"] for h in ficha["historial"]], [80.0, 123.5])
         self.assertEqual(len(ficha["recorrido"]["lineas"]), 1)
+
+    def test_history_window_ends_today_whatever_day_is_shown(self):
+        hoy, dia = date(2026, 10, 14), date(2026, 10, 12)
+        consultas = []
+        def historial(params):
+            consultas.append(params)
+            return []
+        cursor = FakeCursor([
+            ("FROM vehiculos", [{"asset_id": "AB1234"}]),
+            ("FROM reporte_diario_estado", []),
+            ("FROM reporte_diario WHERE", historial),
+            ("FROM viajes_camion", []),
+            ("FROM telemetria_api WHERE asset_id=%s AND report_date", []),
+            ("FROM raw_gps WHERE asset_id=%s AND report_date", []),
+        ])
+        with patch.object(camiones_api.dias, "hoy", return_value=hoy):
+            camiones_api.truck_detail(cursor, "AB1234", dia)
+        self.assertEqual(consultas[0], (hoy - timedelta(days=29), hoy, "AB1234"))
 
     def test_unknown_truck(self):
         cursor = FakeCursor([("FROM vehiculos", [{"asset_id": "AB1234"}])])
