@@ -125,6 +125,26 @@ class PrediccionTests(unittest.TestCase):
         self.assertEqual(conteo[tramo], 2)  # A y B, aunque A aparezca dos veces
         self.assertEqual(max(conteo.values()), 2)
 
+    def test_route_pieces_follow_the_real_trip_and_join(self):
+        # Un viaje en diagonal suave: los trozos siguen sus puntos y empalman entre sí.
+        linea = [(-22.4551 - 0.0004 * k, -68.9249 + 0.003 * k) for k in range(12)]
+        piezas = prediccion.piezas_viaje(linea)
+        conteo = prediccion.contar_tramos([{"asset_id": "A", "report_date": datetime(2026, 10, 6, 15, k),
+                                            "latitude": la, "longitude": lo, "speed": 60}
+                                           for k, (la, lo) in enumerate(linea)])
+        self.assertEqual(set(piezas), set(conteo))  # mismos tramos que cuenta el modelo
+        orden = sorted(piezas.values(), key=lambda p: p[0][1])
+        for anterior, siguiente in zip(orden, orden[1:]):
+            self.assertEqual(anterior[-1], siguiente[0])  # sin cortes entre tramos
+        self.assertEqual(orden[0][0], linea[0])
+        self.assertEqual(orden[-1][-1], linea[-1])
+
+    def test_simplify_keeps_shape(self):
+        recta = [(0.0, 0.001 * k) for k in range(20)]
+        self.assertEqual(prediccion.simplificar(recta), [recta[0], recta[-1]])
+        curva = recta[:10] + [(0.001 * k, 0.009) for k in range(1, 10)]
+        self.assertEqual(prediccion.simplificar(curva), [curva[0], curva[9], curva[-1]])  # se queda la esquina
+
     def test_publishes_only_days_with_few_errors(self):
         # Error por distancia: se publica hasta el último día con error <= 1,3 x el primero.
         errores = [1.0, 1.05, 1.1, 1.2, 1.25, 1.28, 1.3, 1.35, 1.5, 1.6]

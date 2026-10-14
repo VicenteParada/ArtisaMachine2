@@ -2073,15 +2073,18 @@ function drawPrediction() {
     if (predictionState.layer) map.removeLayer(predictionState.layer);
     const max = cells.reduce((top, cell) => Math.max(top, cell[cell.length - 1]), 0);
     if (routes) {
-      // Tramos como líneas: de menos a más usados, para que los verdes queden encima.
+      // Tramos como líneas sobre el camino real de un viaje (data.trazos); sin trazo, recto
+      // y más tenue. De menos a más usados, para que los verdes queden encima.
       predictionState.renderer = predictionState.renderer || L.canvas({padding: 0.5});
       const layer = L.layerGroup();
+      const shapes = data.trazos || {};
       const sorted = [...cells].sort((a, b) => a[4] - b[4]);
       for (const [lat1, lon1, lat2, lon2, value] of sorted) {
         const ratio = max ? Math.sqrt(value / max) : 0;
-        L.polyline([[lat1, lon1], [lat2, lon2]], {
-          renderer: predictionState.renderer, color: routeHeatColor(ratio), weight: 2 + ratio * 4,
-          opacity: 0.55 + ratio * 0.4, lineCap: "round"
+        const shape = shapes[[lat1, lon1, lat2, lon2].join(",")];
+        L.polyline(shape || [[lat1, lon1], [lat2, lon2]], {
+          renderer: predictionState.renderer, color: routeHeatColor(ratio), weight: (shape ? 2.5 : 1.5) + ratio * 4,
+          opacity: (shape ? 0.6 : 0.35) + ratio * 0.4, lineCap: "round", lineJoin: "round"
         }).bindTooltip(`${format(value, 1)} camiones ${days.length > 1 ? "por día (promedio)" : "esperados"}`, {sticky: true})
           .addTo(layer);
       }

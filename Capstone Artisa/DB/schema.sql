@@ -300,3 +300,14 @@ CREATE TABLE IF NOT EXISTS prediccion_tramo (
     valor FLOAT NOT NULL,
     PRIMARY KEY (version_id, fecha, a_lat, a_lon, b_lat, b_lon)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Forma de cada tramo en el mapa: el trozo de un viaje real que lo cruzó ([[lat, lon], ...]).
+CREATE TABLE IF NOT EXISTS prediccion_trazo (
+    version_id INT UNSIGNED NOT NULL,
+    a_lat INT NOT NULL,
+    a_lon INT NOT NULL,
+    b_lat INT NOT NULL,
+    b_lon INT NOT NULL,
+    puntos TEXT NOT NULL,
+    PRIMARY KEY (version_id, a_lat, a_lon, b_lat, b_lon)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -148,10 +148,17 @@ class RoutePredictionApiTests(unittest.TestCase):
                    "metricas_json": json.dumps({"metodo": "promedio_dia_semana"})}
         tramos = [{"fecha": date(2026, 10, 13), "a_lat": -2246, "a_lon": -6893, "b_lat": -2246, "b_lon": -6892,
                    "valor": 4.0}]
-        cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_tramo", tramos)])
+        forma = [[-22.4551, -68.9249], [-22.4553, -68.9201], [-22.4549, -68.9151]]
+        trazos = [{"a_lat": -2246, "a_lon": -6893, "b_lat": -2246, "b_lon": -6892, "puntos": json.dumps(forma)}]
+        cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_tramo", tramos),
+                             ("FROM prediccion_trazo", trazos)])
         data = prediccion_api.prediction(cursor, "rutas")
         self.assertEqual(data["tipo"], "rutas")
-        self.assertEqual(data["dias"][0]["celdas"], [[-22.455, -68.925, -22.455, -68.915, 4.0]])
+        celda = data["dias"][0]["celdas"][0]
+        self.assertEqual(celda, [-22.455, -68.925, -22.455, -68.915, 4.0])
+        # La web busca la forma con los cuatro primeros valores unidos por comas (como JavaScript).
+        self.assertEqual(data["trazos"][",".join(repr(v) for v in celda[:4])], forma)
+        self.assertIn("-22.455,-68.925,-22.455,-68.915", data["trazos"])
 
 
 if __name__ == "__main__":
