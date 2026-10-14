@@ -60,7 +60,6 @@ function clearSessionWork() {
   pendingRequests.clear();
   refreshing = false;
   $("refresh").disabled = false;
-  journeyRequest++;
 }
 
 function clearPassword() {
@@ -258,18 +257,15 @@ function routeUsageSummary(route) {
 
 const ROUTE_DRAW_ORDER = ["LOW", "MEDIUM", "HIGH"];
 const ROUTE_COLORS = Object.freeze({HIGH: "#14532d", MEDIUM: "#f97316", LOW: "#dc2626"});
-const mapLayerVisibility = {routes: true, vehicles: true};
+// Mapa de rutas estudia el histórico: parte solo con las rutas; los camiones se encienden aparte.
+const mapLayerVisibility = {routes: true, vehicles: false};
 let activeRouteFilter = "ALL";
-let activeMonitorTab = "routes";
-let activeMapMode = "historical";
+let activeMapMode = "classified";
 let userChoseMapMode = false;
 let fleetMap = null;
 const routeLayers = {LOW: null, MEDIUM: null, HIGH: null};
 let truckLayer = null;
-let journeyLayer = null;
 let selectedRouteLayer = null;
-let journeyRequest = 0;
-let activeJourneyVehicleId = null;
 let pendingMapBounds = null;
 let mapHasFitted = false;
 let currentMapData = null;
@@ -282,7 +278,9 @@ let faenaLayer = null;
 let densityLayer = null;
 let densityDay = null;
 
-function setMapMode(mode, remember = false, pending = !currentMapData || machinePending(currentMapData)) {
+// Mientras llega la clasificación se muestra igual la vista de rutas (con «Cargando…»); solo
+// si Machine aún no tiene rutas se pasa a los mapas de telemetría.
+function setMapMode(mode, remember = false, pending = Boolean(currentMapData) && machinePending(currentMapData)) {
   activeMapMode = mode === "classified" && !pending ? "classified" : "historical";
   if (remember) userChoseMapMode = true;
   const historical = activeMapMode === "historical";
@@ -400,9 +398,6 @@ function refreshSelectionStyles() {
   for (const button of document.querySelectorAll("[data-route-select]")) {
     button.classList.toggle("is-active", button.dataset.routeSelect === selectedRouteId);
   }
-  for (const button of document.querySelectorAll("[data-vehicle-select]")) {
-    button.classList.toggle("is-active", button.dataset.vehicleSelect === selectedVehicleId);
-  }
 }
 
 function routeMatchesFilter(route) {
@@ -487,78 +482,14 @@ function vehicleStatus(vehicle) {
 
 const TRUCK_MARKUP = '<img class="truck-glyph" src="/artisa-truck-box-white-green.png?v=20261014" alt="" aria-hidden="true">';
 
-function renderLiveFleet(vehicles) {
-  const list = $("vehicle-live-list");
-  if (!list) return;
-  $("vehicle-live-count").textContent = format(vehicles.length);
-  const query = $("monitor-search").value.trim().toLocaleLowerCase("es");
-  const ordered = [...vehicles]
-    .filter((vehicle) => `${vehicle.vehicle_id} ${vehicle.vehicle_name} ${vehicleDriver(vehicle)}`.toLocaleLowerCase("es").includes(query))
-    .sort((first, second) => Number(second.speed_kmh || 0) - Number(first.speed_kmh || 0));
-  list.replaceChildren();
-  for (const vehicle of ordered) {
-    const status = vehicleStatus(vehicle);
-    const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "vehicle-live-row " + status.className;
-    button.dataset.vehicleSelect = vehicle.vehicle_id;
-    const icon = document.createElement("span");
-    icon.className = "vehicle-list-icon";
-    icon.innerHTML = TRUCK_MARKUP;
-    const copy = document.createElement("span");
-    const name = document.createElement("strong");
-    name.textContent = vehicle.vehicle_name || vehicle.vehicle_id;
-    const identity = document.createElement("small");
-    identity.className = "fleet-identity";
-    const driver = vehicleDriver(vehicle);
-    identity.append(...truckIdentity(vehicle.vehicle_id, driver === "No informado" ? null : driver, null));
-    copy.append(name, identity);
-    const state = document.createElement("em");
-    state.className = "vehicle-live-state";
-    state.textContent = status.className === "moving" && Number(vehicle.speed_kmh) > 3
-      ? format(vehicle.speed_kmh, 0) + " km/h" : status.label;
-    button.append(icon, copy, state);
-    button.addEventListener("click", () => selectVehicle(vehicle));
-    item.append(button);
-    list.append(item);
-  }
-  if (!ordered.length) {
-    const item = document.createElement("li");
-    item.className = "monitor-empty";
-    item.textContent = "No hay vehículos para esta búsqueda.";
-    list.append(item);
-  }
-  refreshSelectionStyles();
-}
-
 function renderMonitorLists() {
-  if (!currentMapData) return;
-  renderRouteMonitor(currentMapData.routes);
-  renderLiveFleet(currentMapData.vehicles);
-}
-
-function setMonitorTab(tab) {
-  activeMonitorTab = tab === "vehicles" ? "vehicles" : "routes";
-  for (const button of document.querySelectorAll("[data-monitor-tab]")) {
-    const selected = button.dataset.monitorTab === activeMonitorTab;
-    button.classList.toggle("is-active", selected);
-    button.setAttribute("aria-selected", selected ? "true" : "false");
-  }
-  for (const list of document.querySelectorAll("[data-monitor-list]")) {
-    list.hidden = list.dataset.monitorList !== activeMonitorTab;
-  }
-  $("monitor-search").value = "";
-  $("monitor-search").placeholder = activeMonitorTab === "routes"
-    ? "Buscar ruta…"
-    : "Buscar vehículo…";
-  renderMonitorLists();
+  if (currentMapData) renderRouteMonitor(currentMapData.routes);
 }
 
 function applyRouteFilter() {
   if (!fleetMap) return;
   for (const level of ROUTE_DRAW_ORDER) {
-    const visible = mapLayerVisibility.routes && !activeJourneyVehicleId && !selectedRouteId &&
+    const visible = mapLayerVisibility.routes && !selectedRouteId &&
       (activeRouteFilter === "ALL" || activeRouteFilter === level);
     setLayerVisibility(routeLayers[level], visible);
   }
@@ -573,17 +504,15 @@ function applyRouteFilter() {
 
 function applyMapLayerVisibility() {
   if (!fleetMap) return;
-  // Con un vehículo seleccionado se ve solo él y su recorrido; con una ruta seleccionada,
-  // solo esa ruta y los camiones cuyo último viaje fue por ella. "Vista general" muestra todo.
+  // Con una ruta seleccionada se ven solo esa ruta y los camiones cuyo último viaje fue por
+  // ella. "Vista general" muestra todo.
   const routeOf = new Map((currentMapData ? currentMapData.vehicles : []).map((v) => [v.vehicle_id, v.route_id]));
   for (const [vehicleId, marker] of truckMarkers) {
-    const visible = activeJourneyVehicleId
-      ? vehicleId === activeJourneyVehicleId
-      : selectedRouteId ? routeOf.get(vehicleId) === selectedRouteId : true;
+    const visible = selectedRouteId ? routeOf.get(vehicleId) === selectedRouteId : true;
     if (visible && !truckLayer.hasLayer(marker)) truckLayer.addLayer(marker);
     if (!visible && truckLayer.hasLayer(marker)) truckLayer.removeLayer(marker);
   }
-  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles || !!activeJourneyVehicleId);
+  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles);
   applyRouteFilter();
 }
 
@@ -634,16 +563,14 @@ function initializeFleetMap() {
 
   for (const [paneName, zIndex] of [
     ["routeLowPane", 410], ["routeMediumPane", 420],
-    ["routeHighPane", 430], ["routeSelectedPane", 440], ["journeyPane", 625], ["truckPane", 650]
+    ["routeHighPane", 430], ["routeSelectedPane", 440], ["truckPane", 650]
   ]) {
     fleetMap.createPane(paneName).style.zIndex = String(zIndex);
   }
 
   for (const level of ROUTE_DRAW_ORDER) routeLayers[level] = L.layerGroup();
   truckLayer = L.layerGroup();
-  journeyLayer = L.featureGroup().addTo(fleetMap);
   selectedRouteLayer = L.featureGroup().addTo(fleetMap);
-  $("journey-hide").addEventListener("click", resetMapSelection);
   applyMapLayerVisibility();
 }
 
@@ -728,7 +655,7 @@ function fitPendingMap(force = false) {
   fleetMap.invalidateSize();
   // Con un camión o una ruta seleccionados se respeta esa vista: volver a la pestaña o la
   // actualización automática no deben alejar el mapa a toda la flota.
-  if (activeJourneyVehicleId || selectedRouteId || selectedVehicleId) return;
+  if (selectedRouteId || selectedVehicleId) return;
   if ((force || !mapHasFitted) && pendingMapBounds && pendingMapBounds.isValid()) {
     fleetMap.fitBounds(pendingMapBounds, {padding: [28, 28], maxZoom: 11});
     mapHasFitted = true;
@@ -787,12 +714,15 @@ function truckPopup(vehicle) {
   date.textContent = "Última posición: " + formatUtc(vehicle.timestamp);
   const plate = document.createElement("small");
   plate.textContent = "Patente: " + (vehiclePlate(vehicle) || "No informada");
-  wrapper.append(title, identifier, state, details, plate, driver, route, date);
+  const link = document.createElement("a");
+  link.className = "truck-popup-link";
+  link.href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
+  link.textContent = "Ver su recorrido de hoy en Camiones en vivo";
+  wrapper.append(title, identifier, state, details, plate, driver, route, date, link);
   return wrapper;
 }
 
 function selectRoute(route, focus = true) {
-  hideJourney();
   const properties = routeProperties(route);
   const record = routeMapLayers.get(properties.route_id);
   if (!record || !fleetMap) return;
@@ -807,10 +737,11 @@ function selectRoute(route, focus = true) {
   applyMapLayerVisibility();
   refreshSelectionStyles();
   setSelectionDetail(
-    "RUTA SELECCIONADA · " + properties.usage_level,
+    "Ruta seleccionada · " + (ROUTE_LABELS[properties.usage_level] || properties.usage_level),
     routeLabel(route),
-    `${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} vehículos`,
-    `${format(properties.observed_points)} posiciones observadas · ${properties.geometry_source}`
+    `${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} camiones` +
+      (properties.km_mediana ? ` · ~${format(properties.km_mediana, 0)} km por recorrido` : ""),
+    `${format(properties.observed_points)} posiciones del viaje representativo`
   );
   if (focus) {
     fleetMap.fitBounds(record.bounds, {padding: [55, 55], maxZoom: 14});
@@ -821,8 +752,6 @@ function selectRoute(route, focus = true) {
 function selectVehicle(vehicle, focus = true) {
   const marker = truckMarkers.get(vehicle.vehicle_id);
   if (!marker || !fleetMap) return;
-  if (selectedVehicleId && selectedVehicleId !== vehicle.vehicle_id &&
-      (activeJourneyVehicleId || !$("journey-detail").hidden)) hideJourney();
   selectedVehicleId = vehicle.vehicle_id;
   selectedRouteId = null;
   for (const record of routeMapLayers.values()) record.line.closeTooltip();
@@ -838,16 +767,12 @@ function selectVehicle(vehicle, focus = true) {
     ? "Velocidad sin dato"
     : format(vehicle.speed_kmh, 1) + " km/h";
   setSelectionDetail(
-    "VEHÍCULO SELECCIONADO · " + status.label.toUpperCase(),
+    "Camión seleccionado · " + status.label,
     vehicle.vehicle_name || vehicle.vehicle_id,
     `${speed} · ${vehicle.event || "Sin evento"}`,
     `${Number(vehicle.latitude).toFixed(6)}, ${Number(vehicle.longitude).toFixed(6)} · ${formatUtc(vehicle.timestamp)}`
   );
-  if (focus) {
-    // Al elegir un vehículo se muestra directamente su recorrido del día; el mapa se encuadra
-    // una sola vez, cuando el recorrido llega, y deja espacio arriba para su ficha.
-    showVehicleJourney(vehicle);
-  }
+  if (focus) focusTruck(vehicle.vehicle_id);
 }
 
 function focusTruck(vehicleId) {
@@ -857,102 +782,14 @@ function focusTruck(vehicleId) {
   openTruckPopup(vehicleId);
 }
 
-function hideJourney() {
-  journeyRequest += 1;
-  if (journeyLayer) journeyLayer.clearLayers();
-  activeJourneyVehicleId = null;
-  applyMapLayerVisibility();
-  const detail = $("journey-detail");
-  if (detail) detail.hidden = true;
-}
-
-async function showVehicleJourney(vehicle) {
-  if (!currentMapData || machinePending(currentMapData)) {
-    focusTruck(vehicle.vehicle_id);
-    $("journey-detail").hidden = false;
-    $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
-    return;
-  }
-  if (!journeyLayer) return;
-  const request = ++journeyRequest;
-  activeJourneyVehicleId = vehicle.vehicle_id;
-  $("journey-open").href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
-  applyMapLayerVisibility();
-  journeyLayer.clearLayers();
-  const panel = $("journey-detail");
-  panel.hidden = false;
-  $("journey-note").textContent = "Cargando recorrido desde MariaDB…";
-  try {
-    const journey = await api("/api/vehiculos/" +
-      encodeURIComponent(vehicle.vehicle_id) + "/recorrido");
-    if (request !== journeyRequest) return;
-    const paths = journey.geometry && journey.geometry.coordinates || [];
-    for (const path of paths) {
-      if (path.length < 2) continue;
-      L.polyline(path.map((point) => [point[1], point[0]]), {
-        pane: "journeyPane", color: "#1964b5", weight: 7, opacity: 1,
-        lineCap: "round", lineJoin: "round"
-      }).addTo(journeyLayer);
-    }
-    const route = currentMapData && currentMapData.routes.find(
-      (item) => routeProperties(item).route_id === vehicle.route_id);
-    const category = route
-      ? routeProperties(route).usage_label + " · " + vehicle.route_id
-      : "Sin clasificar";
-    const driver = [journey.driver_name, journey.driver_last_name].filter(Boolean).join(" ");
-    $("journey-plate").textContent = journey.patente || vehiclePlate(vehicle) || "No informada";
-    $("journey-driver").textContent = driver || vehicleDriver(vehicle);
-    $("journey-start").textContent = journey.inicio.replace("T", " ");
-    $("journey-end").textContent = journey.termino_observado.replace("T", " ");
-    $("journey-distance").textContent = format(journey.distancia_km, 1) + " km";
-    $("journey-moving").textContent = format(journey.tiempo_movimiento_minutos || 0, 1) + " min estimados";
-    $("journey-gaps").textContent = journey.cortes
-      ? format(journey.cortes) + (journey.cortes === 1 ? " corte" : " cortes") +
-        " · " + format(journey.minutos_sin_senal || 0, 0) + " min sin reportes"
-      : "Sin cortes";
-    $("journey-route").textContent = category;
-    $("journey-note").textContent = journey.nota +
-      (journey.completo ? "" : " Hay más registros ese día; se muestran los últimos 20.000.");
-    setSelectionDetail(
-      "RECORRIDO OBSERVADO · " + journey.fecha, journey.asset_name,
-      format(journey.lecturas) + " posiciones · " +
-        format(journey.distancia_km, 1) + " km",
-      "Última posición: " + journey.termino_observado.replace("T", " ") +
-        " · " + category
-    );
-    // Se deja espacio arriba para que la ficha del camión no quede tapada.
-    if (journeyLayer.getLayers().length && journeyLayer.getBounds().isValid()) {
-      fleetMap.once("moveend", () => openTruckPopup(vehicle.vehicle_id));
-      fleetMap.fitBounds(journeyLayer.getBounds(), {
-        paddingTopLeft: [45, 250], paddingBottomRight: [45, 45], maxZoom: 13
-      });
-      window.setTimeout(() => openTruckPopup(vehicle.vehicle_id), 700);
-    } else {
-      focusTruck(vehicle.vehicle_id);
-    }
-  } catch (error) {
-    if (request === journeyRequest) {
-      activeJourneyVehicleId = null;
-      applyMapLayerVisibility();
-      $("journey-note").textContent = "No se pudo consultar el recorrido: " + error.message;
-      focusTruck(vehicle.vehicle_id);
-    }
-  }
-}
-
 function resetMapSelection() {
-  hideJourney();
   if (fleetMap) fleetMap.closePopup();
   for (const record of routeMapLayers.values()) record.line.closeTooltip();
   selectedRouteId = null;
   selectedVehicleId = null;
   applyMapLayerVisibility();
   refreshSelectionStyles();
-  setSelectionDetail(
-    "SELECCIÓN DEL MAPA",
-    "Selecciona una ruta o un vehículo",
-    "El mapa centrará el elemento y mostrará sus datos sin modificar la clasificación."
-  );
+  setSelectionDetail("Selección", "Elige una ruta", "El mapa la centra y muestra sus datos.");
   fitPendingMap(true);
 }
 
@@ -1039,7 +876,7 @@ function renderFleetMap(data) {
   $("heatmap-source-status").textContent = processingHistory
     ? "Rutas disponibles · histórico en procesamiento" : "Rutas clasificadas";
   $("heatmap-intro").textContent =
-    "Para estudiar el histórico: qué rutas usa la flota y cuánto, y dónde está cada camión ahora." +
+    "Para estudiar el histórico: qué rutas usó la flota y cuánto, con los viajes ya cerrados." +
     (processingHistory ? ` Clasificación parcial: ${coverage.dias_cerrados} de ${coverage.dias_ventana} días procesados en la ventana.` : "");
 
   const visibleBounds = L.latLngBounds([]);
@@ -1091,14 +928,11 @@ function renderHeatmap(data) {
   setMapMode(activeMapMode, false, pending);
   if (pending) {
     currentMapData = data;
-    journeyRequest++;
-    activeJourneyVehicleId = null;
     selectedVehicleId = null;
     selectedRouteId = null;
     if (fleetMap) {
       for (const level of ROUTE_DRAW_ORDER) routeLayers[level].clearLayers();
       truckLayer.clearLayers();
-      journeyLayer.clearLayers();
     }
     truckMarkers.clear();
     routeMapLayers.clear();
@@ -1115,15 +949,11 @@ function renderHeatmap(data) {
     pendingText(["heatmap-intro", "heatmap-zones", "map-last-update", "most-route-usage",
       "least-route-usage", "geo-model-detail", "heatmap-method", "map-selection-detail"],
       "Disponible cuando Machine genere resultados");
-    pendingText(["monitor-route-count", "vehicle-live-count"], "—");
+    pendingText(["monitor-route-count"], "—");
     for (const counter of document.querySelectorAll("[data-route-count]")) counter.textContent = "—";
-    for (const id of ["route-monitor-list", "vehicle-live-list"]) {
-      const item = document.createElement("li");
-      item.textContent = "Pendiente de procesamiento Machine.";
-      $(id).replaceChildren(item);
-    }
-    $("journey-detail").hidden = true;
-    $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
+    const item = document.createElement("li");
+    item.textContent = "Pendiente de procesamiento Machine.";
+    $("route-monitor-list").replaceChildren(item);
     return;
   }
   const pendingNote = $("map-pending-note");
@@ -1827,13 +1657,42 @@ $("history-detail-more").addEventListener("click", () => {
 });
 
 $("refresh").addEventListener("click", refresh);
+
+// «Actualizar datos»: corta las consultas que quedaron pegadas, libera cada sección y vuelve
+// a pedir todo lo que se está mirando, sin recargar la página ni cerrar la sesión.
+async function refreshAll() {
+  const button = $("refresh-all");
+  if (button.disabled) return;
+  button.disabled = true;
+  button.classList.add("is-busy");
+  for (const controller of pendingRequests) controller.abort();
+  pendingRequests.clear();
+  refreshing = false;
+  telemetryRefreshing = false;
+  predictionState.loading = false;
+  predictionState.cache = {};
+  try {
+    const onTruck = Boolean(truckHash()) && truckView.id && !$("truck-view").hidden;
+    await Promise.allSettled([
+      refresh(), refreshTelemetry(), loadFleet(),
+      onTruck ? loadTruckDay(truckView.id, truckView.day, true) : null,
+      truckView.boardDay ? setBoardDay(truckView.boardDay) : null,
+      window.location.hash === "#prediccion" ? loadPrediction(true) : null
+    ]);
+    button.title = "Actualizado a las " + new Intl.DateTimeFormat("es-CL", {timeStyle: "short", timeZone: HISTORY_ZONE}).format(new Date());
+  } finally {
+    button.disabled = false;
+    button.classList.remove("is-busy");
+  }
+}
+$("refresh-all").addEventListener("click", refreshAll);
 for (const button of document.querySelectorAll("[data-map-mode]")) {
   button.addEventListener("click", () => setMapMode(button.dataset.mapMode, true));
 }
 for (const button of document.querySelectorAll("[data-route-filter]")) {
   button.addEventListener("click", () => {
     activeRouteFilter = button.dataset.routeFilter || "ALL";
-    if (selectedRouteId || selectedVehicleId || activeJourneyVehicleId) resetMapSelection();
+    if (selectedRouteId || selectedVehicleId) resetMapSelection();
     applyRouteFilter();
   });
 }
@@ -1846,13 +1705,7 @@ for (const input of document.querySelectorAll("[data-map-layer]")) {
     }
   });
 }
-for (const button of document.querySelectorAll("[data-monitor-tab]")) {
-  button.addEventListener("click", () => setMonitorTab(button.dataset.monitorTab));
-}
-$("monitor-search").addEventListener("input", () => {
-  if (activeMonitorTab === "routes") renderRouteMonitor(currentMapData ? currentMapData.routes : []);
-  else renderLiveFleet(currentMapData ? currentMapData.vehicles : []);
-});
+$("monitor-search").addEventListener("input", () => renderRouteMonitor(currentMapData ? currentMapData.routes : []));
 $("reset-map-view").addEventListener("click", resetMapSelection);
 for (const [id, key] of [["most-route-card", "mostUsed"], ["least-route-card", "leastUsed"]]) {
   $(id).addEventListener("click", () => {

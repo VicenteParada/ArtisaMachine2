@@ -105,11 +105,10 @@ class JourneyTests(unittest.TestCase):
                 for i in range(10)]
         rows[5] = dict(rows[5], latitude=-20.0)  # salto de GPS
         cursor = FakeCursor([
-            ("MAX(report_date)", lambda p: [{"ultimo": base.replace(minute=9)}]),
             ("FROM telemetria_api WHERE asset_id=%s AND report_date", rows),
             ("FROM raw_gps WHERE asset_id=%s AND report_date", []),
         ])
-        journey = rutas_api.truck_journey(cursor, "RJXS30")
+        journey = rutas_api.truck_journey(cursor, "RJXS30", date(2026, 10, 6))
         self.assertEqual(journey["fecha"], "2026-10-06")
         self.assertEqual(journey["inicio"], "2026-10-06 12:00:00")
         self.assertEqual(journey["geometry"]["type"], "MultiLineString")
@@ -124,11 +123,10 @@ class JourneyTests(unittest.TestCase):
                  "latitude": -33.4 + m * 0.0001, "longitude": -70.6, "driver_name": None, "driver_last_name": None}
                 for m in minutos]
         cursor = FakeCursor([
-            ("MAX(report_date)", lambda p: [{"ultimo": base.replace(minute=50)}]),
             ("FROM telemetria_api WHERE asset_id=%s AND report_date", rows),
             ("FROM raw_gps WHERE asset_id=%s AND report_date", []),
         ])
-        journey = rutas_api.truck_journey(cursor, "RJXS30")
+        journey = rutas_api.truck_journey(cursor, "RJXS30", date(2026, 10, 6))
         self.assertEqual(journey["cortes"], 2)
         self.assertEqual(journey["minutos_sin_senal"], 47.0)
 

@@ -318,7 +318,6 @@ def gps_points(cursor, desde, hasta):
 # --- Historial diario (cierre de 00:00 a 00:00 hora Chile, machine_learning/diario.py) ---
 
 ASSET_RE = re.compile(r"[A-Za-z0-9_-]{1,16}")
-JOURNEY_RE = re.compile(r"/api/vehiculos/([A-Za-z0-9_-]{1,16})/recorrido")
 TRUCK_RE = re.compile(r"/api/camiones/([A-Za-z0-9_-]{1,16})")
 DETALLE_MAX = 1000
 
@@ -523,16 +522,6 @@ class Handler(JsonHandler):
                 self.respond(503, {"status": "error", "error": "No se pudo calcular el mapa; se reintentará."})
                 return
             self.respond(200, result)
-            return
-        journey = JOURNEY_RE.fullmatch(path)
-        if journey:
-            try:
-                with connect_db(read_timeout=60) as connection, connection.cursor() as cursor:
-                    result = rutas_api.truck_journey(cursor, journey.group(1))
-            except pymysql.MySQLError as error:
-                self.database_error(error)
-                return
-            self.respond(200 if result else 404, result or {"error": "Camión sin reportes"})
             return
         truck = TRUCK_RE.fullmatch(path)
         if truck:

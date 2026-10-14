@@ -6,11 +6,11 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/style.css?v=20261014-atlas">
+  <link rel="stylesheet" href="/style.css?v=20261014-historico">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
   <script src="/map-data.js" defer></script>
-  <script src="/app.js?v=20261014-atlas" defer></script>
+  <script src="/app.js?v=20261014-historico" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -69,6 +69,7 @@
     <header class="topbar">
       <span>Proyecto Artisa <span class="slash">/</span> <strong>Vista general</strong></span>
       <div class="topbar-actions">
+        <button type="button" id="refresh-all" class="topbar-refresh" title="Vuelve a pedir todos los datos sin recargar la página"><span aria-hidden="true">↻</span> Actualizar datos</button>
         <a href="/health" target="_blank" rel="noopener">Estado del sistema ↗</a>
         <div class="session-user" aria-label="Sesión del administrador">
           <span>Administrador</span>
@@ -270,8 +271,8 @@
           <span id="heatmap-source-status" class="status info">Cargando…</span>
         </div>
         <div class="atlas-modes map-view-selector" role="tablist" aria-label="Qué estudiar">
-          <button type="button" class="atlas-mode" data-map-mode="classified" aria-pressed="false" disabled><strong>Rutas clasificadas</strong><small>Rutas completas por nivel de uso y dónde está cada camión</small></button>
-          <button type="button" class="atlas-mode" data-map-mode="historical" aria-pressed="true"><strong>Mapas de telemetría</strong><small id="map-view-description">Reportes GPS guardados por día o rango</small></button>
+          <button type="button" class="atlas-mode" data-map-mode="classified" aria-pressed="true"><strong>Rutas clasificadas</strong><small>Rutas completas por nivel de uso y dónde está cada camión</small></button>
+          <button type="button" class="atlas-mode" data-map-mode="historical" aria-pressed="false"><strong>Mapas de telemetría</strong><small id="map-view-description">Reportes GPS guardados por día o rango</small></button>
         </div>
         <div class="atlas-stats" id="atlas-stats" aria-label="Resumen del período analizado">
           <div class="atlas-stat"><span>Período</span><strong id="geo-model-zones">—</strong><small id="geo-model-detail" hidden></small></div>
@@ -289,7 +290,7 @@
               <div id="explorer-routes" class="explorer-frame-wrap" hidden>
                 <iframe title="Mapas de telemetría histórica" data-explorer-frame="/exploracion-gps" referrerpolicy="no-referrer"></iframe>
               </div>
-              <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa interactivo de rutas históricas y camiones" hidden><span class="map-loading">Cargando cartografía…</span></div>
+              <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa interactivo de rutas históricas y camiones"><span class="map-loading">Cargando las rutas clasificadas…</span></div>
             </div>
             <div class="atlas-toolbar route-filter-panel">
               <div class="route-filter-actions" role="group" aria-label="Filtrar rutas por nivel de uso">
@@ -300,7 +301,7 @@
               </div>
               <div class="map-layer-panel map-layer-actions" role="group" aria-label="Capas del mapa">
                 <label class="map-layer-toggle routes"><input type="checkbox" data-map-layer="routes" checked> Rutas</label>
-                <label class="map-layer-toggle vehicles"><input type="checkbox" data-map-layer="vehicles" checked> Camiones</label>
+                <label class="map-layer-toggle vehicles" title="Última posición de cada camión"><input type="checkbox" data-map-layer="vehicles"> Camiones</label>
                 <button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button>
               </div>
             </div>
@@ -311,30 +312,11 @@
           </article>
           <aside class="route-insights atlas-side" aria-label="Explorador de rutas y camiones">
             <article class="monitor-panel">
-              <div class="monitor-tabs" role="tablist" aria-label="Elementos del mapa">
-                <button type="button" class="monitor-tab is-active" data-monitor-tab="routes" role="tab" aria-selected="true">Rutas <b id="monitor-route-count">—</b></button>
-                <button type="button" class="monitor-tab" data-monitor-tab="vehicles" role="tab" aria-selected="false">Camiones <b id="vehicle-live-count">—</b></button>
-              </div>
-              <label class="monitor-search"><span>⌕</span><input id="monitor-search" type="search" placeholder="Buscar ruta…" aria-label="Buscar rutas o camiones"></label>
+              <div class="monitor-heading"><strong>Rutas</strong><b id="monitor-route-count">—</b></div>
+              <label class="monitor-search"><span>⌕</span><input id="monitor-search" type="search" placeholder="Buscar ruta…" aria-label="Buscar ruta"></label>
               <ul id="route-monitor-list" class="monitor-list" data-monitor-list="routes"><li>Esperando rutas…</li></ul>
-              <ul id="vehicle-live-list" class="monitor-list" data-monitor-list="vehicles" hidden><li>Esperando posiciones…</li></ul>
               <div id="map-selection-detail" class="map-selection-detail" aria-live="polite">
-                <span>Selección</span><strong>Elige una ruta o un camión</strong><p>El mapa lo centra y muestra sus datos.</p>
-              </div>
-              <div id="journey-detail" class="journey-detail" hidden aria-live="polite">
-                <strong>Recorrido de hoy</strong>
-                <dl>
-                  <div><dt>Patente</dt><dd id="journey-plate">—</dd></div>
-                  <div><dt>Conductor</dt><dd id="journey-driver">—</dd></div>
-                  <div><dt>Inicio observado</dt><dd id="journey-start">—</dd></div>
-                  <div><dt>Última posición</dt><dd id="journey-end">—</dd></div>
-                  <div><dt>Distancia GPS</dt><dd id="journey-distance">—</dd></div>
-                  <div><dt>En movimiento</dt><dd id="journey-moving">—</dd></div>
-                  <div><dt>Cortes de señal</dt><dd id="journey-gaps">—</dd></div>
-                  <div><dt>Ruta histórica</dt><dd id="journey-route">—</dd></div>
-                </dl>
-                <small id="journey-note"></small>
-                <div class="journey-actions"><a id="journey-open" class="journey-open" href="#camiones">Ver ficha completa del día</a><button id="journey-hide" type="button">Volver a vista general</button></div>
+                <span>Selección</span><strong>Elige una ruta</strong><p>El mapa la centra y muestra sus datos.</p>
               </div>
             </article>
           </aside>
