@@ -4,7 +4,7 @@ from datetime import date, datetime
 import json
 import unittest
 
-from endpoints import rutas_api
+from endpoints import prediccion_api, rutas_api
 
 
 class FakeCursor:
@@ -105,11 +105,10 @@ class JourneyTests(unittest.TestCase):
                 for i in range(10)]
         rows[5] = dict(rows[5], latitude=-20.0)  # salto de GPS
         cursor = FakeCursor([
-            ("MAX(report_date)", lambda p: [{"ultimo": base.replace(minute=9)}]),
             ("FROM telemetria_api WHERE asset_id=%s AND report_date", rows),
             ("FROM raw_gps WHERE asset_id=%s AND report_date", []),
         ])
-        journey = rutas_api.truck_journey(cursor, "RJXS30")
+        journey = rutas_api.truck_journey(cursor, "RJXS30", date(2026, 10, 6))
         self.assertEqual(journey["fecha"], "2026-10-06")
         self.assertEqual(journey["inicio"], "2026-10-06 12:00:00")
         self.assertEqual(journey["geometry"]["type"], "MultiLineString")
@@ -124,14 +123,52 @@ class JourneyTests(unittest.TestCase):
                  "latitude": -33.4 + m * 0.0001, "longitude": -70.6, "driver_name": None, "driver_last_name": None}
                 for m in minutos]
         cursor = FakeCursor([
-            ("MAX(report_date)", lambda p: [{"ultimo": base.replace(minute=50)}]),
             ("FROM telemetria_api WHERE asset_id=%s AND report_date", rows),
             ("FROM raw_gps WHERE asset_id=%s AND report_date", []),
         ])
-        journey = rutas_api.truck_journey(cursor, "RJXS30")
+        journey = rutas_api.truck_journey(cursor, "RJXS30", date(2026, 10, 6))
         self.assertEqual(journey["cortes"], 2)
         self.assertEqual(journey["minutos_sin_senal"], 47.0)
 
+
+class PredictionApiTests(unittest.TestCase):
+    def test_pending_without_version(self):
+        cursor = FakeCursor([("FROM prediccion_version", [])])
+        self.assertIsNone(prediccion_api.prediction(cursor))
+
+    def test_groups_cells_by_day_with_cell_centers(self):
+        version = {"id": 2, "creado_en": datetime(2026, 10, 13, 4), "base_hasta": date(2026, 10, 12),
+                   "desde": date(2026, 10, 13), "hasta": date(2026, 10, 20), "camiones": 112,
+                   "metricas_json": json.dumps({"metodo": "lightgbm", "mae_modelo": 1.2, "mae_referencia": 1.5,
+                                                "huella_camiones": "x"})}
+        celdas = [{"fecha": date(2026, 10, 13), "celda_lat": -2246, "celda_lon": -6893, "valor": 12.0},
+                  {"fecha": date(2026, 10, 13), "celda_lat": -2245, "celda_lon": -6893, "valor": 3.5},
+                  {"fecha": date(2026, 10, 14), "celda_lat": -2246, "celda_lon": -6893, "valor": 10.0}]
+        cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_celda", celdas)])
+        data = prediccion_api.prediction(cursor)
+        self.assertEqual([d["fecha"] for d in data["dias"]], ["2026-10-13", "2026-10-14"])
+        self.assertEqual(data["dias"][0]["celdas"][0], [-22.455, -68.925, 12.0])
+        self.assertEqual(data["dias"][0]["total"], 16)
+        self.assertEqual(data["dias"][0]["elementos"], 2)
+        self.assertEqual(data["metricas"]["metodo"], "lightgbm")
+        self.assertNotIn("huella_camiones", data["metricas"])
+
+
+class RoutePredictionApiTests(unittest.TestCase):
+    def test_complete_routes_with_one_value_each(self):
+        version = {"id": 3, "creado_en": datetime(2026, 10, 13, 4), "base_hasta": date(2026, 10, 12),
+                   "desde": date(2026, 10, 13), "hasta": date(2026, 10, 27), "camiones": 116,
+                   "metricas_json": json.dumps({"metodo": "promedio_dia_semana", "rutas_publicadas": 1})}
+        valores = [{"fecha": date(2026, 10, 13), "route_id": "R-ABC123", "valor": 4.0}]
+        linea = [[[-22.4551, -68.9249], [-22.4549, -68.9151]]]
+        formas = [{"route_id": "R-ABC123", "label": "Calama ↔ Faena", "geometria": json.dumps(linea)}]
+        cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_ruta_forma", formas),
+                             ("FROM prediccion_ruta ", valores)])
+        data = prediccion_api.prediction(cursor, "rutas")
+        self.assertEqual(data["tipo"], "rutas")
+        self.assertEqual(data["dias"][0]["celdas"], [["R-ABC123", 4.0]])
+        self.assertEqual(data["rutas"]["R-ABC123"], {"label": "Calama ↔ Faena", "lineas": linea})
+        self.assertEqual(data["metricas"]["rutas_publicadas"], 1)
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,4 @@
-"""Respuestas de /api/mapa, /api/dashboard y /api/vehiculos/<id>/recorrido.
+"""Respuestas de /api/mapa y /api/dashboard, y el recorrido GPS de un camión en un día.
 
 Leen la versión activa de la clasificación de rutas (machine_learning/rutas_job.py).
 Si todavía no hay una, devuelven None y la API mantiene la respuesta "pendiente".
@@ -285,20 +285,8 @@ def _local(value):
     return value.replace(tzinfo=timezone.utc).astimezone(dias.zona()).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def truck_journey(cursor, asset_id):
-    """Recorrido observado del camión en su último día con datos (hora de Chile)."""
-    latest = None
-    for table in ("telemetria_api", "raw_gps"):
-        try:
-            cursor.execute(f"SELECT MAX(report_date) AS ultimo FROM {table} WHERE asset_id=%s", (asset_id,))
-        except pymysql.err.ProgrammingError:
-            continue
-        value = (cursor.fetchone() or {}).get("ultimo")
-        if value and (latest is None or value > latest):
-            latest = value
-    if latest is None:
-        return None
-    day = dias.dia_local(latest)
+def truck_journey(cursor, asset_id, day):
+    """Recorrido observado del camión en un día (hora de Chile)."""
     start, end = dias.limites_utc(day)
     rows = []
     for table, extra in (("telemetria_api", "driver_name, driver_last_name"),

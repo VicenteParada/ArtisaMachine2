@@ -14,7 +14,7 @@ import pymysql
 from common import dias
 from common.db import connect_db
 from common.http import JsonHandler, serve
-from endpoints import rutas_api
+from endpoints import camiones_api, prediccion_api, rutas_api
 
 
 STARTED_AT = time.monotonic()
@@ -42,7 +42,21 @@ PENDING_RESPONSES = {
         "operacion": {"viajes": None},
         "rutas": {"HIGH": None, "MEDIUM": None, "LOW": None},
     },
+    "/api/prediccion": {
+        "status": "pending", "dias": [],
+        "message": "La predicción se calcula con al menos 21 días cerrados.",
+    },
+    "/api/camiones": {"status": "pending", "camiones": [], "resumen": None},
+    "/api/prediccion-rutas": {
+        "status": "pending", "dias": [],
+        "message": "La predicción por ruta se está calculando (o faltan días cerrados: necesita al menos 21). "
+                   "Se actualiza sola en unos minutos.",
+    },
 }
+BUILDERS = {"/api/mapa": rutas_api.classified_map, "/api/dashboard": rutas_api.classified_dashboard,
+            "/api/prediccion": prediccion_api.prediction,
+            "/api/prediccion-rutas": lambda cursor: prediccion_api.prediction(cursor, "rutas"),
+            "/api/camiones": camiones_api.fleet}
 
 
 # Telemetría actual (servicio telemetria). Mientras la API de la empresa no esté
@@ -304,7 +318,7 @@ def gps_points(cursor, desde, hasta):
 # --- Historial diario (cierre de 00:00 a 00:00 hora Chile, machine_learning/diario.py) ---
 
 ASSET_RE = re.compile(r"[A-Za-z0-9_-]{1,16}")
-JOURNEY_RE = re.compile(r"/api/vehiculos/([A-Za-z0-9_-]{1,16})/recorrido")
+TRUCK_RE = re.compile(r"/api/camiones/([A-Za-z0-9_-]{1,16})")
 DETALLE_MAX = 1000
 
 
@@ -448,7 +462,9 @@ def history_request(path, query):
 # endpoint liviano independiente de esta caché.
 CACHE_SECONDS = 60
 _cache = {}
-_cache_lock = threading.Lock()
+# Un candado por ruta: el mapa, el dashboard y la predicción se calculan en paralelo; antes
+# compartían uno y la predicción esperaba al mapa hasta agotar el tiempo del navegador.
+_cache_locks = {}
 
 
 def cached_result(path):
@@ -456,14 +472,13 @@ def cached_result(path):
     entry = _cache.get(path)
     if entry and now - entry[0] < CACHE_SECONDS:
         return entry[1]
-    with _cache_lock:
+    with _cache_locks.setdefault(path, threading.Lock()):
         entry = _cache.get(path)
         if entry and time.monotonic() - entry[0] < CACHE_SECONDS:
             return entry[1]  # otra petición lo calculó mientras esperábamos
         try:
             with connect_db(read_timeout=80) as connection, connection.cursor() as cursor:
-                build = rutas_api.classified_map if path == "/api/mapa" else rutas_api.classified_dashboard
-                result = build(cursor)
+                result = BUILDERS[path](cursor)
         except pymysql.MySQLError as error:
             print(f"Endpoints: no se pudo calcular {path} ({type(error).__name__}); se usa el último resultado",
                   flush=True)
@@ -499,9 +514,10 @@ class Handler(JsonHandler):
                                          "/api/reportes/dia?fecha=YYYY-MM-DD", "/api/reportes/mes?mes=YYYY-MM",
                                          "/api/reportes/mes-completo?mes=YYYY-MM",
                                          "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
+                                         "/api/camiones/X?fecha=YYYY-MM-DD",
                                          *PENDING_RESPONSES]})
             return
-        if path in ("/api/mapa", "/api/dashboard"):
+        if path in BUILDERS:
             # Resultados de Machine si existe una clasificación activa; si no, "pendiente".
             result = cached_result(path)
             if result is None:
@@ -519,15 +535,23 @@ class Handler(JsonHandler):
             self.respond(200, {"status": "ok", "refresh_seconds": rutas_api.REFRESH_SECONDS,
                                "vehicles": vehicles})
             return
-        journey = JOURNEY_RE.fullmatch(path)
-        if journey:
+        truck = TRUCK_RE.fullmatch(path)
+        if truck:
+            try:
+                dia = date.fromisoformat(_param(parsed.query, "fecha") or dias.hoy().isoformat())
+            except ValueError:
+                self.respond(400, {"error": "Usa ?fecha=YYYY-MM-DD"})
+                return
+            if dia > dias.hoy():
+                self.respond(400, {"error": "La fecha no puede ser futura"})
+                return
             try:
                 with connect_db(read_timeout=60) as connection, connection.cursor() as cursor:
-                    result = rutas_api.truck_journey(cursor, journey.group(1))
+                    result = camiones_api.truck_detail(cursor, truck.group(1), dia)
             except pymysql.MySQLError as error:
                 self.database_error(error)
                 return
-            self.respond(200 if result else 404, result or {"error": "Camión sin reportes"})
+            self.respond(200 if result else 404, result or {"error": "No es un camión del catálogo"})
             return
         if path in PENDING_RESPONSES:
             self.respond(200, PENDING_RESPONSES[path])

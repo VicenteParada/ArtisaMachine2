@@ -5,32 +5,27 @@
 @media (max-width: 690px) {
   .flow{ grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1fr); }
   .metrics{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .node h3, .node p, .flow-explanation{ overflow-wrap: anywhere; }
-}
+  .node h3, .node p, .flow-explanation{ overflow-wrap: anywhere; }}
 @media (max-width: 380px) {
   .section-top{ flex-wrap: wrap; }
   .metrics article{ padding: 13px; }
   .metrics strong{ font-size: 25px; }
-  .pipeline-footer{ flex-direction: column; gap: 3px; }
-}
+  .pipeline-footer{ flex-direction: column; gap: 3px; }}
 @media (max-width: 690px) {
   /* La flecha diagonal conecta MariaDB con endpoints también en la vista móvil. */
-  .arrow-b{ grid-column: 2; grid-row: 2; transform: rotate(135deg); }
-}
+  .arrow-b{ grid-column: 2; grid-row: 2; transform: rotate(135deg); }}
 
-.telemetry-panel{margin:0 0 22px}.telemetry-intro{max-width:820px;margin:14px 0 20px;color:var(--muted);font-size:11px;line-height:1.7}.real-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.real-metrics article{min-width:0;border:1px solid var(--line);border-radius:7px;background:#f7faf5;padding:16px}.real-metrics article>span{display:block;color:var(--muted);font-size:10px}.real-metrics strong{display:block;margin:8px 0 5px;font-size:25px;font-weight:600;letter-spacing:-.8px}.real-metrics small{display:block;color:var(--muted);font-size:8px;line-height:1.5}.telemetry-range{display:flex;justify-content:space-between;gap:16px;margin-top:17px;padding:12px 2px;border-bottom:1px solid var(--line);color:var(--muted);font-size:9px;line-height:1.5}.telemetry-table{max-height:410px;margin-top:0}.telemetry-table td:nth-child(4){font-variant-numeric:tabular-nums}.telemetry-table td:first-child{white-space:normal;min-width:150px}
+.telemetry-intro{max-width:820px;margin:14px 0 20px;color:var(--muted);font-size:11px;line-height:1.7}.real-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.real-metrics article{min-width:0;border:1px solid var(--line);border-radius:7px;background:#f7faf5;padding:16px}.real-metrics article>span{display:block;color:var(--muted);font-size:10px}.real-metrics strong{display:block;margin:8px 0 5px;font-size:25px;font-weight:600;letter-spacing:-.8px}.real-metrics small{display:block;color:var(--muted);font-size:8px;line-height:1.5}.telemetry-table{max-height:410px;margin-top:0}.telemetry-table td:nth-child(4){font-variant-numeric:tabular-nums}.telemetry-table td:first-child{white-space:normal;min-width:150px}
 @media(max-width:940px){.real-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:690px){.telemetry-range{flex-direction:column;gap:4px}.telemetry-table{max-height:360px}}
+@media(max-width:690px){.telemetry-table{max-height:360px}}
 @media(max-width:380px){.real-metrics{grid-template-columns:minmax(0,1fr)}}
-.telemetry-panel .real-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
-@media(max-width:380px){.telemetry-panel .real-metrics{grid-template-columns:minmax(0,1fr)}}
 
-.dataset-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:22px 0 0;padding:0 14px;border-bottom:1px solid var(--line)}.dataset-tab{display:flex;align-items:center;gap:13px;position:relative;top:1px;padding:15px 18px;border:1px solid var(--line);border-bottom-color:var(--line);border-radius:9px 9px 0 0;background:#e9eeea;color:var(--muted)}.dataset-tab:hover{background:#f1f4ef;color:var(--ink)}.dataset-tab.is-active{background:#fff;color:var(--ink);border-bottom-color:#fff}.dataset-tab.is-active:after{content:"";position:absolute;inset:auto 14px -1px;height:3px;background:var(--green);border-radius:3px}.dataset-tab>span:last-child{display:grid;gap:4px}.dataset-tab strong{font-size:12px}.dataset-tab small{font-size:9px;color:var(--muted)}.dataset-icon{display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border-radius:6px;background:#dce6df;color:var(--green);font-size:20px}.dataset-tab.is-active .dataset-icon{background:var(--lime);color:#254e40}.dataset-space{padding-top:14px}.dataset-space .telemetry-panel{margin-bottom:0}
+.dataset-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:22px 0 0;padding:0 14px;border-bottom:1px solid var(--line)}.dataset-tab{display:flex;align-items:center;gap:13px;position:relative;top:1px;padding:15px 18px;border:1px solid var(--line);border-bottom-color:var(--line);border-radius:9px 9px 0 0;background:#e9eeea;color:var(--muted)}.dataset-tab:hover{background:#f1f4ef;color:var(--ink)}.dataset-tab.is-active{background:#fff;color:var(--ink);border-bottom-color:#fff}.dataset-tab.is-active:after{content:"";position:absolute;inset:auto 14px -1px;height:3px;background:var(--green);border-radius:3px}.dataset-tab>span:last-child{display:grid;gap:4px}.dataset-tab strong{font-size:12px}.dataset-tab small{font-size:9px;color:var(--muted)}.dataset-icon{display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border-radius:6px;background:#dce6df;color:var(--green);font-size:20px}.dataset-tab.is-active .dataset-icon{background:var(--lime);color:#254e40}.dataset-space{padding-top:14px}.dataset-space .telemetry-panel{margin-bottom:0}
 @media(max-width:690px){.dataset-tabs{padding:0;gap:5px}.dataset-tab{padding:11px 10px;gap:8px}.dataset-tab small{display:none}.dataset-icon{width:28px;height:28px;flex-basis:28px}.dataset-space{padding-top:10px}}
 
 .heatmap-layout{display:grid;grid-template-columns:minmax(0,1fr) 285px;gap:15px;margin-top:16px}.map-card{min-width:0;border:1px solid var(--line);border-radius:8px;padding:15px;background:#f8faf7}.map-title{display:flex;justify-content:space-between;gap:12px;align-items:start;margin-bottom:10px}.map-title>div{display:grid;gap:4px}.map-title strong{font-size:12px}.map-title small,.map-title>span{color:var(--muted);font-size:9px}.heatmap-map{display:block;width:100%;height:auto;min-height:300px;border-radius:7px;background:#e7eee8}.heat-legend{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:8px;margin-top:11px}.heat-legend i{width:18px;height:7px;border-radius:4px}.heat-legend i:nth-of-type(1){background:#dc2626}.heat-legend i:nth-of-type(2){background:#f97316}.heat-legend i:nth-of-type(3){background:#14532d}.heat-legend b{margin-left:auto;color:var(--ink);font-weight:500}.route-insights{display:grid;gap:12px}.route-highlight{border:1px solid var(--line);border-radius:7px;padding:16px;background:#fbfcfa}.route-highlight>span{font-size:8px;letter-spacing:1px;font-weight:700;color:var(--muted)}.route-highlight strong{display:block;margin:10px 0 7px;font-size:12px;line-height:1.55;overflow-wrap:anywhere}.route-highlight small{color:var(--muted);font-size:10px}.route-highlight.most{border-left:4px solid #14532d}.route-highlight.least{border-left:4px solid #dc2626}.heatmap-method{margin-top:18px}.heatmap-metrics strong{font-size:24px}
 @media(max-width:940px){.heatmap-layout{grid-template-columns:minmax(0,1fr)}.route-insights{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:690px){.sidebar nav a:first-child{display:none}.dataset-tab{display:grid;justify-items:center;text-align:center}.dataset-tab strong{font-size:9px}.heatmap-map{min-height:220px}.route-insights{grid-template-columns:minmax(0,1fr)}.heat-legend{flex-wrap:wrap}.heat-legend b{width:100%;margin:3px 0 0}}
+@media(max-width:690px){.sidebar nav a[data-dataset-link]{display:none}.dataset-tab{display:grid;justify-items:center;text-align:center}.dataset-tab strong{font-size:9px}.heatmap-map{min-height:220px}.route-insights{grid-template-columns:minmax(0,1fr)}.heat-legend{flex-wrap:wrap}.heat-legend b{width:100%;margin:3px 0 0}}
 /* Mapa operativo de telemetría */
 #heatmap-map.leaflet-container{height:540px;min-height:540px;background:#e7eee8;font-family:Inter,system-ui,sans-serif;z-index:0}
 .map-loading,.map-unavailable{display:grid;place-items:center;min-height:540px;color:var(--muted);font-size:11px;text-align:center;padding:24px}
@@ -39,7 +34,7 @@
 .truck-div-icon{background:transparent;border:0}
 .truck-marker{--truck-state:#d88632;position:relative;display:grid;place-items:center;width:56px;height:38px;border:0;background:transparent;filter:drop-shadow(0 3px 2px rgba(20,40,42,.28));transition:filter .15s,transform .15s}
 .truck-marker.moving{--truck-state:#288459}.truck-marker.off{--truck-state:#7d8c91}
-.truck-marker:after,.vehicle-list-icon:after{content:"";position:absolute;z-index:3;right:0;bottom:1px;width:11px;height:11px;border:2px solid #fff;border-radius:50%;background:var(--truck-state);box-shadow:0 1px 3px rgba(20,40,42,.18)}
+.truck-marker:after{content:"";position:absolute;z-index:3;right:0;bottom:1px;width:11px;height:11px;border:2px solid #fff;border-radius:50%;background:var(--truck-state);box-shadow:0 1px 3px rgba(20,40,42,.18)}
 .truck-glyph{position:relative;z-index:2;display:block;width:54px;height:40px;object-fit:contain;pointer-events:none;user-select:none}
 .truck-marker:after{width:9px;height:9px;border-width:1.5px}
 .truck-marker>.truck-glyph{width:52px;height:36px;transform:scaleX(var(--truck-facing,1));transform-origin:50% 50%;transition:transform .25s ease}
@@ -47,7 +42,7 @@
 .truck-direction:after{content:"";position:absolute;left:3px;top:2px;width:8px;height:10px;border-radius:2px;background:#d9f06b;clip-path:polygon(50% 0,100% 38%,68% 38%,68% 100%,32% 100%,32% 38%,0 38%);transform:rotate(var(--truck-heading,0deg));transform-origin:50% 6px}
 .truck-popup{display:grid;min-width:190px;gap:5px;color:#172d32}.truck-popup>strong{font-size:13px}.truck-popup>span,.truck-popup>small{color:#687b7c;font-size:10px}.truck-popup>b{width:max-content;border-radius:10px;padding:3px 7px;font-size:9px}.truck-popup>b.moving{color:#245c36;background:#dcefe0}.truck-popup>b.off{color:#4e5d60;background:#e1e7e8}.truck-popup>p{margin:3px 0;font-size:10px}
 .legend-truck{color:#245c36!important}
-.vehicle-live-row{display:flex;align-items:center;gap:9px;width:100%;padding:8px;border:1px solid transparent;border-radius:6px;background:#f2f5f2;color:var(--ink);text-align:left;cursor:pointer}.vehicle-live-row:hover{border-color:#b9c9be;background:#fff}.vehicle-live-row>span:nth-child(2){display:grid;min-width:0;gap:3px}.vehicle-live-row strong,.vehicle-live-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.vehicle-live-row strong{font-size:9px}.vehicle-live-row small{color:var(--muted);font-size:8px}
+
 @media(max-width:690px){#heatmap-map.leaflet-container,.map-loading,.map-unavailable{height:420px;min-height:420px}.map-title{flex-direction:column}.heat-legend{align-items:flex-start}}
 .geo-model{display:grid;gap:8px;border:1px solid #bdd5c3;border-left:4px solid #58a566;border-radius:7px;padding:16px;background:#f3faf4}.geo-model>strong{font-size:14px}.geo-model>small{color:var(--muted);font-size:9px;line-height:1.55}
 
@@ -62,9 +57,9 @@
 .heatmap-layout{grid-template-columns:minmax(0,1fr) 330px}
 #heatmap-map.leaflet-container{height:620px;min-height:620px}
 .map-title-actions{display:flex!important;align-items:flex-end;gap:9px;text-align:right}.map-title-actions>span{color:var(--muted);font-size:9px}.map-reset{border:1px solid #c8d4cd;border-radius:5px;padding:7px 9px;background:#fff;color:var(--green);font-size:9px;font-weight:700;white-space:nowrap}.map-reset:hover{border-color:var(--green);background:#eef6ef}
-.monitor-panel{min-width:0;border:1px solid var(--line);border-radius:8px;padding:12px;background:#fbfcfa}.monitor-tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px}.monitor-tab{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:6px;padding:9px 10px;background:#eef2ef;color:var(--muted);font-size:9px;font-weight:700}.monitor-tab b{border-radius:10px;padding:2px 6px;background:#fff;font-size:8px}.monitor-tab.is-active{border-color:#173f35;background:#173f35;color:#fff}.monitor-tab.is-active b{background:rgba(255,255,255,.18)}
+.monitor-panel{min-width:0;border:1px solid var(--line);border-radius:8px;padding:12px;background:#fbfcfa}
 .monitor-search{display:flex;align-items:center;gap:7px;margin:9px 0;border:1px solid var(--line);border-radius:6px;padding:0 9px;background:#fff;color:var(--muted)}.monitor-search input{min-width:0;width:100%;border:0;outline:0;padding:9px 0;background:transparent;font-size:9px}.monitor-list{list-style:none;margin:0;padding:0;display:grid;gap:5px;max-height:270px;overflow:auto;scrollbar-width:thin}.monitor-list[hidden]{display:none}.monitor-empty{padding:18px 8px;text-align:center;color:var(--muted);font-size:9px}
-.route-monitor-row,.vehicle-live-row{display:flex;align-items:center;gap:8px;width:100%;min-width:0;padding:8px;border:1px solid transparent;border-radius:6px;background:#f0f4f1;color:var(--ink);text-align:left;cursor:pointer}.route-monitor-row:hover,.vehicle-live-row:hover{border-color:#9db2a5;background:#fff}.route-monitor-row.is-active,.vehicle-live-row.is-active{border-color:#173f35;background:#e4efe8;box-shadow:inset 0 0 0 1px #173f35}.route-monitor-row>i{width:6px;height:30px;flex:0 0 6px;border-radius:4px}.route-monitor-row>span,.vehicle-live-row>span:nth-child(2){display:grid;min-width:0;flex:1;gap:3px}.route-monitor-row strong,.route-monitor-row small,.vehicle-live-row strong,.vehicle-live-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.route-monitor-row strong,.vehicle-live-row strong{font-size:9px}.route-monitor-row small,.vehicle-live-row small{color:var(--muted);font-size:8px}.route-monitor-row>b{border-radius:9px;padding:3px 5px;background:#fff;color:var(--muted);font-size:7px}
+.route-monitor-row{display:flex;align-items:center;gap:8px;width:100%;min-width:0;padding:8px;border:1px solid transparent;border-radius:6px;background:#f0f4f1;color:var(--ink);text-align:left;cursor:pointer}.route-monitor-row:hover{border-color:#9db2a5;background:#fff}.route-monitor-row.is-active{border-color:#173f35;background:#e4efe8;box-shadow:inset 0 0 0 1px #173f35}.route-monitor-row>i{width:6px;height:30px;flex:0 0 6px;border-radius:4px}.route-monitor-row>span{display:grid;min-width:0;flex:1;gap:3px}.route-monitor-row strong,.route-monitor-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.route-monitor-row strong{font-size:9px}.route-monitor-row small{color:var(--muted);font-size:8px}.route-monitor-row>b{border-radius:9px;padding:3px 5px;background:#fff;color:var(--muted);font-size:7px}
 .map-selection-detail{display:grid;gap:5px;margin-top:10px;border-left:4px solid var(--green);border-radius:6px;padding:11px;background:#edf5ee}.map-selection-detail>span{color:var(--green);font-size:7px;font-weight:800;letter-spacing:.8px}.map-selection-detail>strong{font-size:10px;overflow-wrap:anywhere}.map-selection-detail>p{margin:0;color:var(--muted);font-size:9px;line-height:1.45}.map-selection-detail>small{color:#4c625a;font-size:8px;line-height:1.45}.truck-div-icon.is-selected .truck-marker{filter:drop-shadow(0 0 5px rgba(184,224,91,.98)) drop-shadow(0 6px 5px rgba(20,40,42,.5));transform:scale(1.16)}
 @media(max-width:1100px){.heatmap-layout{grid-template-columns:minmax(0,1fr) 300px}}
 @media(max-width:940px){.heatmap-layout{grid-template-columns:minmax(0,1fr)}.route-insights{grid-template-columns:repeat(2,minmax(0,1fr))}.monitor-panel{grid-column:1/-1}.geo-model{grid-column:1/-1}}
@@ -86,7 +81,7 @@
 .dashboard-highlights{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr);gap:14px}.dashboard-highlights article{border:1px solid #cbd9cf;border-left:5px solid var(--green);border-radius:8px;padding:17px;background:#edf5ee}.dashboard-highlights span{display:block;color:var(--muted);font-size:8px;font-weight:750;letter-spacing:1px}.dashboard-highlights strong{display:block;margin:8px 0 5px;font-size:18px}.dashboard-highlights small{color:var(--muted);font-size:9px}
 .dashboard-method{display:flex;justify-content:space-between;gap:24px;margin-top:16px;border-top:1px solid var(--line);padding-top:14px;color:var(--muted);font-size:9px;line-height:1.55}.dashboard-method strong{flex:0 0 auto;color:var(--ink)}
 @media(max-width:1150px){.dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-donut-wrap{grid-template-columns:125px minmax(0,1fr);gap:16px}.dashboard-donut{width:125px}.dashboard-donut>div{inset:23px}}
-@media(max-width:940px){.dataset-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}.dashboard-grid{grid-template-columns:minmax(0,1fr)}.dashboard-wide,.dashboard-highlights{grid-column:auto}}
+@media(max-width:940px){.dataset-tabs{grid-template-columns:repeat(4,minmax(0,1fr))}.dashboard-grid{grid-template-columns:minmax(0,1fr)}.dashboard-wide,.dashboard-highlights{grid-column:auto}}
 @media(max-width:690px){.dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.dashboard-kpis article{padding:14px}.dashboard-kpis strong{font-size:23px}.dashboard-card{padding:15px}.dashboard-bars.routes{grid-template-columns:minmax(0,1fr)}.dashboard-highlights{grid-template-columns:minmax(0,1fr)}.dashboard-method{flex-direction:column;gap:5px}.dashboard-donut-wrap{grid-template-columns:115px minmax(0,1fr)}.dashboard-donut{width:115px}.dashboard-donut>div{inset:21px}}
 @media(max-width:380px){.dashboard-kpis{grid-template-columns:minmax(0,1fr)}.dashboard-donut-wrap{grid-template-columns:minmax(0,1fr);justify-items:center}.dashboard-donut-legend{width:100%}}
 /* Portada fotográfica de Transportes Artisa */
@@ -357,33 +352,30 @@
     border-radius: 26px 26px 0 0;
     box-shadow: 0 -20px 55px rgba(5, 20, 23, .23);
   }
-  .access-footer{ margin-top: 34px; }
-}
+  .access-footer{ margin-top: 34px; }}
 
 @media (max-width: 480px) {
   .landing-visual{ min-height: 62vh; min-height: 62svh; }
   .landing-copy{ padding-top: 15vh; }
   .landing-pill{ padding: 8px 11px; font-size: 8px; }
   .landing-footer span:last-child{ max-width: 185px; text-align: right; }
-  .access-card h2{ font-size: 34px; }
-}
+  .access-card h2{ font-size: 34px; }}
 
-.journey-detail{display:grid;gap:10px;margin-top:10px;padding:13px;border:1px solid #bed1d4;border-radius:8px;background:#f3f9fb;color:#17353d}.journey-detail[hidden]{display:none}.journey-detail>strong{font-size:11px}.journey-detail dl{display:grid;gap:7px;margin:0}.journey-detail dl>div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #dce8ea;padding-bottom:5px}.journey-detail dt{color:#637a7e;font-size:9px}.journey-detail dd{margin:0;text-align:right;font-size:9px;font-weight:700}.journey-detail small{font-size:8px;line-height:1.45;color:#667f82}.journey-detail button{border:1px solid #aac4cb;border-radius:5px;padding:7px;background:#fff;color:#205069;font-size:9px;font-weight:700;cursor:pointer}
+
 
 /* Conservar el detalle y los nombres del mapa base sin desaturar sus teselas. */
 #heatmap-map .leaflet-tile-pane{ filter: none; }
-.vehicle-list-icon{--truck-state:#d88632;position:relative;display:grid;place-items:center;width:62px;height:38px;flex:0 0 62px;border:0;background:transparent;filter:drop-shadow(0 2px 2px rgba(23,63,53,.2))}
-.vehicle-live-row.moving .vehicle-list-icon{--truck-state:#288459}.vehicle-live-row.off .vehicle-list-icon{--truck-state:#7d8c91}
-.vehicle-list-icon .truck-glyph{width:60px;height:32px}
-.vehicle-list-icon:after{width:10px;height:10px;right:-2px;bottom:-2px}
-.vehicle-live-row.is-active .vehicle-list-icon{filter:drop-shadow(0 0 4px rgba(151,194,79,.95)) drop-shadow(0 2px 2px rgba(23,63,53,.2))}
+
+
+
+
+
 .map-pending-note{ position:absolute;bottom:28px;left:12px;z-index:1000;max-width:calc(100% - 24px);padding:9px 12px;border:1px solid #c7d4ce;border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 2px 12px rgba(20,40,42,.18);color:#173f35;font-size:11px;font-weight:700;pointer-events:none; }
 
 /* La vista principal resume únicamente rutas y vehículos. */
 .heatmap-metrics{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 690px) {
-  .heatmap-metrics{ grid-template-columns: minmax(0, 1fr); }
-}
+  .heatmap-metrics{ grid-template-columns: minmax(0, 1fr); }}
 
 /* Sesión del administrador */
 .topbar-actions{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
@@ -412,9 +404,8 @@
 .map-card.showing-history .map-title-actions,.map-card.showing-history #heatmap-zones{display:none!important}
 @media(max-width:690px){.map-view-stage .explorer-frame-wrap iframe{height:600px}}
 .telemetry-connection{margin:0 0 14px;padding:12px 14px;border-radius:7px;font-size:11px;line-height:1.6;border:1px solid #ebcfbc;background:#fff4ec;color:#7a3f22}.telemetry-connection.info{border-color:#bed2f1;background:#eef4ff;color:#23538f}.telemetry-table td small.age-recent{color:var(--green);font-weight:600}.telemetry-table td small.age-old{color:#a6532d}
-.history-panel{margin-top:22px}.history-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 16px}.history-controls .button{padding:9px 12px}.history-controls input{padding:8px 10px;border:1px solid var(--line);border-radius:5px;font-size:12px;color:var(--ink);background:#fbfcfa}.history-note{color:var(--muted);font-size:10px}.history-panel .history-metrics{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:6px}.history-row{cursor:pointer}.history-row:hover td,.history-row.is-selected td{background:#f1f7ec}.history-detail{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}.history-detail .button{margin-top:10px}.history-month{margin-top:22px;padding-top:12px;border-top:1px solid var(--line)}.history-month-heading>div:first-child{display:grid;gap:5px}.history-month-heading h3{margin:0}.history-month-heading small{color:var(--muted);font-size:9px}.history-month-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.history-month input{padding:7px 9px;border:1px solid var(--line);border-radius:5px;font-size:11px}.history-month-actions .button{padding:8px 11px}.history-download-status{min-height:16px;margin:8px 0 0;color:var(--muted);font-size:9px;text-align:right}.history-download-status.is-error{color:#a6532d}.history-day-link{background:none;border:0;padding:0;color:var(--green);font-weight:600;cursor:pointer}
-@media(max-width:690px){.history-month-heading{align-items:stretch;flex-direction:column}.history-month-actions{justify-content:flex-start}.history-download-status{text-align:left}}
-@media(max-width:690px){.history-panel .history-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.history-month-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.history-month-actions input{padding:7px 9px;border:1px solid var(--line);border-radius:5px;font-size:11px}.history-month-actions .button{padding:8px 11px}.history-download-status{min-height:16px;margin:8px 0 0;color:var(--muted);font-size:9px;text-align:right}.history-download-status.is-error{color:#a6532d}.history-day-link{background:none;border:0;padding:0;color:var(--green);font-weight:600;cursor:pointer}
+@media(max-width:690px){.history-month-actions{justify-content:flex-start}.history-download-status{text-align:left}}
 .no-ignition .col-ignition{display:none}
 .leaflet-tooltip.route-endpoint{font-size:11px;font-weight:700;color:#0b1f1a;background:#fff;border:2px solid #0b1f1a;border-radius:6px;padding:3px 7px;box-shadow:0 2px 6px rgba(0,0,0,.25)}
 
@@ -431,3 +422,433 @@
 .map-overlay-note[hidden]{display:none}
 #heatmap-map .leaflet-control-layers{font-size:11px;line-height:1.5}
 .route-filter-panel[hidden],.map-layer-panel[hidden]{display:none}
+
+/* Predicción de actividad (debajo del Mapa de rutas) */
+.prediction-panel{margin-top:0}
+.prediction-map{height:560px;border:1px solid var(--line);border-radius:8px;background:#e7eee8;z-index:0}
+.prediction-legend{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:11px;color:var(--muted);font-size:9px}
+.prediction-legend i{width:120px;height:8px;border-radius:4px;background:linear-gradient(90deg,#3b4cc0,#2ec4b6,#9be15d,#f9c74f,#e63946)}
+.prediction-legend small{margin-left:auto}
+@media(max-width:690px){.prediction-map{height:420px}.prediction-legend small{margin-left:0;width:100%}}
+.prediction-charts{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:14px;margin-top:16px}
+.prediction-charts .dashboard-card>p{margin:6px 0 16px;color:var(--muted);font-size:10px;line-height:1.6}
+.prediction-columns{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:end;gap:8px;height:190px;padding-top:6px}
+.prediction-column{display:grid;grid-template-rows:auto 1fr auto;align-items:end;gap:5px;height:100%;padding:0;border:0;background:none;color:var(--ink);font-size:9px;text-align:center}
+.prediction-column strong{font-size:9px;font-weight:600;color:var(--muted)}
+.prediction-column i{display:block;width:100%;min-height:3px;border-radius:5px 5px 2px 2px;background:#246c55;transition:height .35s ease,background .2s}
+.prediction-column.weekend i{background:#9fc3b0}
+.prediction-column span{white-space:nowrap}
+.prediction-column.is-today span{font-weight:700}
+.prediction-column:hover i{background:#174b35}
+.prediction-methods .dashboard-bar-row.winner>div:first-child span{font-weight:700;color:var(--green)}
+@media(max-width:940px){.prediction-charts{grid-template-columns:minmax(0,1fr)}}
+
+/* Ruleta de días de la predicción */
+.prediction-control{margin:18px 0 12px;padding:14px 14px 12px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(180deg,#f7faf6,#fff)}
+.prediction-toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.prediction-modes{display:inline-flex;padding:3px;border-radius:8px;background:#e9efea}
+.prediction-modes button{padding:7px 12px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:10px;font-weight:700}
+.prediction-modes button[aria-pressed="true"]{background:#fff;color:var(--green);box-shadow:0 1px 4px rgba(20,45,40,.14)}
+.prediction-play{padding:8px 14px;border:1px solid var(--green);border-radius:20px;background:var(--green);color:#fff;font-size:10px;font-weight:700;letter-spacing:.3px}
+.prediction-play[aria-pressed="true"]{background:#fff;color:var(--green)}
+.prediction-wheel-wrap{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr) 34px;align-items:center;gap:4px;margin-top:12px}
+.prediction-wheel-wrap:before{content:"";position:absolute;left:50%;top:-4px;bottom:-4px;width:96px;transform:translateX(-50%);border:2px solid var(--green);border-radius:14px;background:rgba(213,238,156,.22);pointer-events:none}
+.wheel-arrow{height:34px;border:1px solid var(--line);border-radius:50%;background:#fff;color:var(--green);font-size:20px;line-height:1}
+.wheel-arrow:hover{border-color:var(--green)}
+.prediction-wheel{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;padding:10px calc(50% - 44px);outline:none;cursor:grab}
+.prediction-wheel::-webkit-scrollbar{display:none}
+.prediction-wheel:focus-visible{box-shadow:0 0 0 3px rgba(249,115,22,.45);border-radius:12px}
+.wheel-day{position:relative;display:grid;justify-items:center;gap:1px;flex:0 0 88px;padding:9px 4px 10px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);scroll-snap-align:center;transition:transform .18s ease,opacity .18s ease,box-shadow .2s;transform-origin:center}
+.wheel-day small{color:var(--muted);font-size:9px;text-transform:capitalize}
+.wheel-day strong{font-size:26px;font-weight:650;line-height:1.05;letter-spacing:-1px}
+.wheel-day span{margin-top:3px;font-size:9px;font-weight:700;color:var(--green)}
+.wheel-day .confidence-dot{position:absolute;top:8px;right:8px}
+.wheel-day.is-today small:first-child{color:#c2410c;font-weight:800}
+.wheel-day.is-center{box-shadow:0 8px 22px rgba(23,63,53,.18)}
+.wheel-day.is-selected{border-color:var(--green);background:#edf5ee}
+.confidence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#b8c6bf}
+.confidence-dot.alta{background:#16a34a}.confidence-dot.media{background:#f59e0b}.confidence-dot.baja{background:#dc2626}
+.confidence-badge{display:inline-flex;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:700;background:#edf0ee;color:#5f6f6c}
+.confidence-badge.alta{background:#dcfce7;color:#166534}.confidence-badge.media{background:#fef3c7;color:#92400e}.confidence-badge.baja{background:#fee2e2;color:#991b1b}
+.prediction-selection{min-height:18px;margin:12px 2px 6px;color:var(--muted);font-size:11px;text-align:center}
+.prediction-selection strong{color:var(--ink)}
+.confidence-legend{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 14px;color:var(--muted);font-size:9px}
+.confidence-legend span{display:inline-flex;align-items:center;gap:5px}
+.confidence-legend small{width:100%;text-align:center;font-size:8px}
+.prediction-range{position:relative;height:30px;margin:14px 46px 0}
+.prediction-range[hidden]{display:none}
+.range-track{position:absolute;left:0;right:0;top:13px;height:5px;border-radius:4px;background:#dfe7e2}
+.range-track i{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--green)}
+.prediction-range input{position:absolute;left:0;top:4px;width:100%;margin:0;background:none;pointer-events:none;-webkit-appearance:none;appearance:none}
+.prediction-range input::-webkit-slider-thumb{pointer-events:auto;-webkit-appearance:none;width:20px;height:20px;border:3px solid #fff;border-radius:50%;background:var(--green);box-shadow:0 1px 5px rgba(0,0,0,.3);cursor:pointer}
+.prediction-range input::-moz-range-thumb{pointer-events:auto;width:16px;height:16px;border:3px solid #fff;border-radius:50%;background:var(--green);box-shadow:0 1px 5px rgba(0,0,0,.3);cursor:pointer}
+.prediction-range input::-webkit-slider-runnable-track{background:none}
+.prediction-range input::-moz-range-track{background:none}
+.prediction-column.is-selected i{background:#f97316}
+.prediction-column.is-selected strong{color:#c2410c}
+.prediction-column.confidence-media i{opacity:.75}.prediction-column.confidence-baja i{opacity:.5}
+.prediction-columns{gap:5px}
+@media(max-width:690px){.wheel-day{flex-basis:74px}.prediction-wheel{padding:10px calc(50% - 37px)}.prediction-wheel-wrap:before{width:82px}.prediction-range{margin:14px 6px 0}}
+.prediction-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0 4px}
+.prediction-tab{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:#f2f5f2;color:var(--muted);text-align:left}
+.prediction-tab>span:first-child{display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border-radius:8px;background:#dce6df;color:var(--green);font-size:18px}
+.prediction-tab>span:last-child{display:grid;gap:3px}
+.prediction-tab strong{font-size:12px;color:var(--ink)}.prediction-tab small{font-size:9px}
+.prediction-tab:hover{border-color:#9db2a5;background:#fff}
+.prediction-tab.is-active{border-color:var(--green);background:#fff;box-shadow:inset 0 -3px 0 var(--green)}
+.prediction-tab.is-active>span:first-child{background:var(--lime);color:#254e40}
+.prediction-legend .level{display:inline-flex;align-items:center;gap:5px}
+.prediction-legend .level::before{content:"";width:18px;height:4px;border-radius:2px;background:currentColor}
+.prediction-legend .level.high::before{background:#14532d}
+.prediction-legend .level.medium::before{background:#f97316}
+.prediction-legend .level.low::before{background:#dc2626}
+.prediction-legend[hidden]{display:none}
+@media(max-width:690px){.prediction-tab small{display:none}}
+
+/* Camiones: tablero de la flota y ficha del día */
+.trucks-panel{--en-ruta:#1f8a5b;--detenido:#d98a1c;--sin-senal:#9aa8a6}
+.fleet-lede{margin:6px 0 0;max-width:620px;color:var(--muted);font-size:12px;line-height:1.6}
+.state-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--sin-senal);flex:0 0 9px}
+.state-dot.en_ruta,.state-en_ruta .state-dot{background:var(--en-ruta);box-shadow:0 0 0 3px rgba(31,138,91,.16)}
+.state-dot.detenido,.state-detenido .state-dot{background:var(--detenido)}
+.state-dot.sin_senal,.state-sin_senal .state-dot,.state-sin_datos .state-dot{background:var(--sin-senal)}
+.fleet-filters{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin:20px 0 12px}
+.fleet-filter{display:flex;align-items:center;gap:8px;padding:10px 14px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);cursor:pointer}
+.fleet-filter strong{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.fleet-filter span{color:var(--muted);font-size:12px}
+.fleet-filter[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:#fff}
+.fleet-filter[aria-pressed="true"] span{color:#d5e1dc}
+.fleet-filter:focus-visible,.fleet-row:focus-visible,.history-bar:focus-visible,.truck-events .event.move:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.fleet-day-totals{margin-left:auto;padding:10px 4px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.fleet-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+.fleet-tools input{flex:1 1 280px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);font-size:13px}
+.fleet-sort{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+.fleet-sort select{padding:9px 10px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);font:inherit;font-size:12px}
+.fleet-board-head,.fleet-row{display:grid;grid-template-columns:minmax(150px,1.3fr) minmax(140px,1fr) minmax(200px,1.4fr) 150px;gap:16px;align-items:center}
+.fleet-board-head{padding:0 16px 8px 20px;color:var(--muted);font-size:11px}
+.fleet-board{display:grid;gap:6px}
+.fleet-row{position:relative;width:100%;padding:12px 16px 12px 20px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);text-align:left;cursor:pointer;font:inherit}
+.fleet-row::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:4px;border-radius:0 3px 3px 0;background:var(--sin-senal)}
+.fleet-row.state-en_ruta::before{background:var(--en-ruta)}
+.fleet-row.state-detenido::before{background:var(--detenido)}
+.fleet-row:hover{border-color:#b9cbc4;background:#fbfdfa}
+.fleet-name,.fleet-state{display:grid;gap:3px;min-width:0}
+.fleet-name strong{font-size:15px}
+.fleet-name small,.fleet-state small{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fleet-state strong{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600}
+.fleet-today{display:flex;flex-wrap:wrap;gap:4px 16px;color:var(--muted);font-size:11px}
+.fleet-today b{color:var(--ink);font-size:14px;font-variant-numeric:tabular-nums}
+.fleet-today.is-empty{font-style:italic}
+.fleet-spark{width:150px;height:30px}
+.fleet-spark rect{fill:#a9c9b9}
+.fleet-spark rect.today{fill:var(--green)}
+.fleet-spark rect.empty{fill:#e3e9e6}
+.fleet-empty{margin:0;padding:30px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center;font-size:12px}
+@media(max-width:940px){.fleet-board-head{display:none}.fleet-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.fleet-spark{width:100%}}
+@media(max-width:560px){.fleet-row{grid-template-columns:minmax(0,1fr)}.fleet-day-totals{margin-left:0}}
+
+.truck-back{margin:0 0 14px;padding:0;border:0;background:none;color:var(--green);font-size:12px;font-weight:600;cursor:pointer}
+.truck-head{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
+.truck-head-glyph{width:72px;height:auto}
+.truck-head-name{flex:1 1 260px;min-width:0}
+.truck-head-name h2{margin:0;font-size:30px;letter-spacing:-.02em}
+.truck-head-name p{margin:6px 0 0;color:var(--muted);font-size:12px;white-space:pre-wrap}
+.truck-state{display:inline-flex;align-items:center;gap:8px;padding:8px 13px;border:1px solid var(--line);border-radius:20px;background:#fff;font-size:12px;font-weight:600}
+.truck-day-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:20px 0 8px}
+.truck-day-controls .button{padding:9px 12px}
+.truck-day-controls input{padding:8px 10px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:12px}
+.truck-image-button{margin-left:auto}
+.truck-day-note{min-height:18px;margin:4px 0 16px;color:var(--muted);font-size:12px}
+.truck-day-note::first-letter{text-transform:uppercase}
+.truck-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.truck-kpis article{min-width:0;padding:16px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.truck-kpis span{display:block;color:var(--muted);font-size:11px}
+.truck-kpis strong{display:block;margin:8px 0 6px;font-size:28px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.truck-kpis small{display:block;color:var(--muted);font-size:10px;line-height:1.5}
+@media(max-width:940px){.truck-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* La cinta del día: 24 horas con viajes, paradas e intervalos sin datos */
+.truck-ribbon-wrap{margin:14px 0 14px;padding:10px 14px 6px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.truck-ribbon-legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;margin-bottom:7px;color:var(--muted);font-size:10px}
+.truck-ribbon-legend strong{margin-right:4px;color:var(--ink);font-size:11px}
+.truck-ribbon-legend span{display:inline-flex;align-items:center;gap:5px}
+.truck-ribbon-legend i{display:inline-block;width:14px;height:6px;border-radius:2px}
+.truck-ribbon-legend .move{background:linear-gradient(90deg,#1f6b4f 0 33%,#2563eb 33% 66%,#9333ea 66%)}
+.truck-ribbon-legend .stop,.ribbon-block.stop{background:#e07a1f}
+.truck-ribbon-legend .gap,.ribbon-block.gap{background:repeating-linear-gradient(135deg,#c9d2cf 0 3px,#eef2ef 3px 6px)}
+.truck-ribbon{position:relative;height:12px;overflow:hidden;border-radius:6px;background:#eef2ef;box-shadow:inset 0 0 0 1px #e1e8e4}
+.truck-ribbon::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent calc(25% - .5px),#d6dfda calc(25% - .5px) calc(25% + .5px),transparent calc(25% + .5px) calc(50% - .5px),#d6dfda calc(50% - .5px) calc(50% + .5px),transparent calc(50% + .5px) calc(75% - .5px),#d6dfda calc(75% - .5px) calc(75% + .5px),transparent calc(75% + .5px))}
+.ribbon-block{position:absolute;top:0;bottom:0;box-shadow:inset 1px 0 0 rgba(255,255,255,.85),inset -1px 0 0 rgba(255,255,255,.85)}
+.ribbon-block.move{background:#1f6b4f;cursor:pointer}
+.ribbon-block.move:hover{filter:brightness(1.15)}
+.ribbon-now{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:#172d32;box-shadow:0 0 0 1px #fff}
+.ribbon-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:9px}
+.truck-ribbon-hours{display:flex;justify-content:space-between;margin-top:3px;color:var(--muted);font-size:9px;font-variant-numeric:tabular-nums}
+
+.truck-layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px}
+.truck-map-card{min-width:0}
+.truck-map{height:540px;border:1px solid var(--line);border-radius:8px;background:#e7eee8;z-index:0}
+.truck-map-note{margin:8px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
+.truck-pin-icon{background:transparent;border:0}
+.truck-pin{display:inline-grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border:3px solid #fff;border-radius:13px;background:var(--pin,#172d32);color:#fff;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 2px 6px rgba(23,45,50,.35);transform:translate(-50%,-50%)}
+.truck-pin.stop{background:#e07a1f}
+.truck-pin.start{background:#1f6b4f}
+.truck-pin.end{background:#172d32}
+.truck-pin.trip{height:22px;min-width:30px;border-width:2px;border-radius:5px;font-size:10px}
+.truck-pin.play{min-width:30px;height:30px;border-radius:50%;background:#172d32;font-size:15px}
+.truck-arrow{display:block;width:14px;height:14px;background:var(--pin);clip-path:polygon(100% 50%,0 0,28% 50%,0 100%);filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)}
+.truck-map-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}
+.truck-map-tools .button{padding:8px 12px;font-size:12px}
+.truck-play-status{color:var(--ink);font-size:12px;font-weight:600}
+.truck-map-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:9px;color:var(--muted);font-size:10px}
+.truck-map-legend span{display:inline-flex;align-items:center;gap:6px}
+.truck-map-legend .pin{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 4px;border-radius:9px;color:#fff;font-size:9px}
+.truck-map-legend .pin.start{background:#1f6b4f}.truck-map-legend .pin.end{background:#172d32}.truck-map-legend .pin.stop{background:#e07a1f}
+.truck-map-legend .pin.trip{border-radius:4px;background:#2563eb}
+.truck-map-legend .line{display:inline-block;width:20px;height:0;border-top:3px solid #9db5aa}
+.truck-map-legend .line.gap{border-top:2px dashed #71817e}
+.truck-itinerary{display:flex;flex-direction:column;min-width:0;max-height:560px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.truck-itinerary h3{margin:0;padding:15px 16px 12px;border-bottom:1px solid var(--line);font-size:14px}
+.truck-events{flex:1;margin:0;padding:8px 0;overflow:auto;list-style:none}
+.truck-events .event{position:relative;display:grid;grid-template-columns:40px 30px minmax(0,1fr);gap:8px;align-items:start;padding:8px 14px}
+.truck-events .event::before{content:"";position:absolute;left:76px;top:0;bottom:0;width:2px;background:#e3e9e6}
+.truck-events .event time{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums;padding-top:2px}
+.truck-events .event div{display:grid;gap:3px;min-width:0}
+.event-mark{position:relative;z-index:1;display:grid;place-items:center;min-width:30px;height:20px;padding:0 4px;border-radius:10px;background:#9aa8a6;color:#fff;font-size:10px;font-weight:700}
+.event-mark.trip{border-radius:4px;background:var(--trip)}
+.event-mark.stop{background:#e07a1f}
+.truck-events .event.is-selected,.truck-events .event.is-playing{background:#eef6e6;box-shadow:inset 3px 0 0 var(--trip,#1f6b4f)}
+.truck-events .event strong{font-size:12px}
+.truck-events .event small{color:var(--muted);font-size:11px;line-height:1.45}
+.truck-events .event.move{cursor:pointer}
+.truck-events .event.move:hover{background:#f3f8ef}
+.truck-events .event.gap strong{color:var(--muted)}
+.truck-events .event.empty{display:block;padding:20px 16px;color:var(--muted);font-size:12px}
+.truck-events .event.empty::before{display:none}
+@media(max-width:940px){.truck-layout{grid-template-columns:minmax(0,1fr)}.truck-map{height:420px}.truck-itinerary{max-height:420px}}
+
+.truck-history{margin-top:16px;padding:16px 18px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.truck-history-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;margin-bottom:12px}
+.truck-history-head h3{margin:0;font-size:14px}
+.truck-history-head span{color:var(--muted);font-size:11px}
+.truck-history-bars{display:grid;grid-template-columns:repeat(30,minmax(0,1fr));gap:4px;height:130px}
+.history-bar{display:grid;grid-template-rows:1fr auto;align-items:end;gap:4px;height:100%;padding:0;border:0;background:none;color:var(--muted);font-size:9px;cursor:pointer}
+.history-bar i{display:block;width:100%;border-radius:3px 3px 1px 1px;background:#9fc3b0}
+.history-bar.weekend i{background:#c4d8cd}
+.history-bar:hover i{background:#3d8a69}
+.history-bar.is-selected i{background:#172d32}
+.history-bar.is-selected span{color:var(--ink);font-weight:700}
+@media(max-width:560px){.truck-history-bars{gap:2px}.history-bar span{font-size:7px}}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.truck-pin.group{display:inline-flex;gap:0;min-width:0;height:auto;padding:0;overflow:hidden;background:#fff;border-width:2px}
+.truck-pin.group b{display:grid;place-items:center;min-width:22px;height:22px;padding:0 6px;font-size:11px}
+.truck-pin.group b.start{background:#1f6b4f}
+.truck-pin.group b.stop{background:#e07a1f}
+.truck-pin.group b.end{background:#172d32}
+.truck-pin.group b+b{border-left:2px solid #fff}
+
+/* Camiones en vivo: día del tablero y paneles plegables */
+.board-day{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:16px 0 4px}
+.board-day-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.board-day-controls .button{padding:9px 12px}
+.board-day-controls input{padding:8px 10px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:12px}
+.board-day-note{margin:0;color:var(--muted);font-size:12px}
+.board-day-note::first-letter{text-transform:uppercase}
+.fleet-api-pending{margin:12px 0 0;color:var(--muted);font-size:12px}
+.fleet-row.state-dia::before{background:#9fc3b0}
+.fleet-more{margin-top:14px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.fleet-more>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:14px 16px;cursor:pointer;list-style:none}
+.fleet-more>summary::-webkit-details-marker{display:none}
+.fleet-more>summary::before{content:"▸";color:var(--green);transition:transform .15s}
+.fleet-more[open]>summary::before{transform:rotate(90deg)}
+.fleet-more>summary span{font-size:14px;font-weight:600}
+.fleet-more>summary small{color:var(--muted);font-size:11px}
+.fleet-more>*:not(summary){margin-left:16px;margin-right:16px}
+.fleet-more>*:last-child{margin-bottom:16px}
+.fleet-more-note{margin-top:0;color:var(--muted);font-size:11px}
+.fleet-more-note strong{color:var(--ink)}
+.fleet-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin:18px 0 4px;padding:4px;border-radius:10px;background:#e9eeea}
+.fleet-tab{display:grid;gap:2px;padding:10px 14px;border:0;border-radius:7px;background:transparent;color:var(--muted);text-align:left;cursor:pointer;font:inherit}
+.fleet-tab strong{color:var(--ink);font-size:13px}
+.fleet-tab small{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fleet-tab:hover{background:#f4f7f4}
+.fleet-tab[aria-selected="true"]{background:#fff;box-shadow:0 1px 3px rgba(23,45,50,.12)}
+.fleet-tab[aria-selected="true"] strong{color:var(--green)}
+.fleet-tab:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.fleet-panel{padding-top:6px}
+.fleet-panel-head{margin:12px 0;color:var(--muted);font-size:12px}
+.fleet-panel .history-month-actions{justify-content:flex-start;margin-bottom:4px}
+.fleet-panel .history-download-status{text-align:left}
+#live-reports .telemetry-table,#month-panel .telemetry-table{max-height:calc(100vh - 330px);min-height:320px}
+@media(max-width:690px){.fleet-tab{padding:9px 8px}.fleet-tab small{display:none}}
+#history-detail .button{margin-top:10px}
+.report-row{cursor:pointer}
+.report-row:hover td,.report-row:focus-visible td{background:#f1f7ec}
+.report-row:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
+.report-pin{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;gap:6px}
+.report-pin b{display:block;width:16px;height:16px;border:3px solid #fff;border-radius:50%;background:#c0392b;box-shadow:0 0 0 6px rgba(192,57,43,.25),0 2px 6px rgba(23,45,50,.35);animation:report-pulse 1.6s ease-out infinite}
+.report-pin em{position:absolute;left:16px;padding:2px 7px;border-radius:9px;background:#c0392b;color:#fff;font-size:11px;font-style:normal;font-weight:700;white-space:nowrap;box-shadow:0 2px 6px rgba(23,45,50,.3)}
+@keyframes report-pulse{0%{box-shadow:0 0 0 0 rgba(192,57,43,.45),0 2px 6px rgba(23,45,50,.35)}100%{box-shadow:0 0 0 14px rgba(192,57,43,0),0 2px 6px rgba(23,45,50,.35)}}
+@media(prefers-reduced-motion:reduce){.report-pin b{animation:none}}
+.ribbon-pin{position:absolute;top:0;bottom:0;width:3px;margin-left:-1.5px;background:#c0392b;box-shadow:0 0 0 1px #fff}
+.truck-events .event.is-report{background:#fdf0ee;box-shadow:inset 3px 0 0 #c0392b}
+.truck-events .event.is-report strong::after{content:" · aquí estaba en el reporte";color:#c0392b;font-weight:600}
+
+/* Botón «Reproducir el día» */
+#truck-play{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border:0;border-radius:20px;background:#1f6b4f;color:#fff;font-weight:600;box-shadow:0 2px 6px rgba(31,107,79,.25)}
+#truck-play:hover{background:#185a42}
+#truck-play[aria-pressed="true"]{background:#172d32}
+#truck-play:disabled{background:#b9c7c1;box-shadow:none}
+
+/* Identidad del camión: placa, conductor y última ruta */
+.truck-identity{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0 0!important;white-space:normal!important}
+.plate{display:inline-flex;align-items:center;padding:3px 9px 3px 8px;border:1.5px solid #172d32;border-radius:5px;background:#fff;color:#172d32;font-size:12px;font-weight:700;letter-spacing:.08em;font-variant-numeric:tabular-nums;box-shadow:inset 3px 0 0 #2f6db5}
+.driver,.last-route{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:14px;font-size:12px}
+.driver{background:#e8f1ec;color:#174532;font-weight:600}
+.driver::before{content:"";width:13px;height:13px;flex:0 0 13px;background:currentColor;-webkit-mask:radial-gradient(circle at 50% 30%,#000 26%,transparent 28%),radial-gradient(ellipse 60% 45% at 50% 100%,#000 98%,transparent 100%);mask:radial-gradient(circle at 50% 30%,#000 26%,transparent 28%),radial-gradient(ellipse 60% 45% at 50% 100%,#000 98%,transparent 100%)}
+.driver.is-empty{background:#f0f2f1;color:var(--muted);font-weight:500}
+.last-route{background:#fff;border:1px solid var(--line);color:var(--ink)}
+.last-route::before{content:"";width:16px;height:4px;border-radius:2px;background:var(--route)}
+.fleet-identity{display:flex!important;flex-wrap:wrap;align-items:center;gap:6px;margin-top:3px;white-space:normal!important;overflow:visible!important}
+.fleet-identity .plate{padding:1px 6px 1px 6px;font-size:10px;border-width:1px;box-shadow:inset 2px 0 0 #2f6db5}
+.fleet-identity .driver{padding:2px 8px;font-size:10px}
+.fleet-identity .driver::before{width:10px;height:10px;flex-basis:10px}
+.truck-image-button{border:1px solid #b9cbc4!important;border-radius:20px!important;background:#fff!important;color:var(--green)!important;font-weight:600}
+.truck-image-button:hover{border-color:var(--green)!important}
+
+/* Mapa de rutas como atlas: el mapa al centro, herramientas encima y el explorador al lado */
+.atlas .atlas-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.atlas .atlas-head h2{margin:0}
+.atlas-lede{margin:6px 0 0;max-width:640px;color:var(--muted);font-size:12px;line-height:1.6}
+.atlas .atlas-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin:16px 0 14px;padding:4px;border-radius:10px;background:#e9eeea}
+.atlas .atlas-modes .atlas-mode{display:grid;gap:2px;padding:10px 14px;border:0;border-radius:7px;background:transparent;color:var(--muted);text-align:left;font-size:inherit;font-weight:400;cursor:pointer}
+.atlas .atlas-modes .atlas-mode strong{color:var(--ink);font-size:13px}
+.atlas .atlas-modes .atlas-mode small{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.atlas .atlas-modes .atlas-mode[aria-pressed="true"]{background:#fff;color:var(--muted);box-shadow:0 1px 3px rgba(23,45,50,.12)}
+.atlas .atlas-modes .atlas-mode[aria-pressed="true"] strong{color:var(--green)}
+.atlas .atlas-modes .atlas-mode:disabled{opacity:.5}
+.atlas .atlas-modes .atlas-mode:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+
+.atlas-stats{display:grid;grid-template-columns:repeat(4,minmax(0,.8fr)) repeat(2,minmax(0,1.3fr));margin-bottom:14px;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}
+.atlas-stat{display:grid;align-content:start;gap:4px;min-width:0;padding:12px 16px;border:0;border-right:1px solid var(--line);background:none;color:var(--ink);text-align:left;font:inherit}
+.atlas-stat:last-child{border-right:0}
+.atlas-stat span{color:var(--muted);font-size:11px}
+.atlas-stat strong{font-size:20px;letter-spacing:-.01em;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.atlas-stat small{color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.atlas-levels span b{color:var(--ink);font-size:20px;margin-left:4px}
+.level-bar{display:flex;gap:2px;height:8px;margin-top:6px;border-radius:4px;overflow:hidden;background:#eef2ef}
+.level-bar i{display:block;flex:1 1 0;min-width:2px}
+.level-bar .high,.route-filter.high i,.atlas-foot .high,.level-pill.high{background:#14532d}
+.level-bar .medium,.route-filter.medium i,.atlas-foot .medium,.level-pill.medium{background:#f97316}
+.level-bar .low,.route-filter.low i,.atlas-foot .low,.level-pill.low{background:#dc2626}
+.atlas-pick{cursor:pointer;position:relative}
+.atlas-pick strong{font-size:14px}
+.atlas-pick::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:0 3px 3px 0;background:#14532d}
+.atlas-pick.least::before{background:#dc2626}
+.atlas-pick:hover{background:#f6faf3}
+@media(max-width:1100px){.atlas-stats{grid-template-columns:repeat(4,minmax(0,1fr))}.atlas-pick{grid-column:span 2;border-top:1px solid var(--line)}}
+@media(max-width:600px){.atlas-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.atlas-stat{border-bottom:1px solid var(--line)}}
+
+.atlas .atlas-stage{grid-template-columns:minmax(0,1fr) 340px;gap:14px;margin-top:0}
+.atlas .map-card{position:relative;padding:0;border:0;background:none}
+.atlas #heatmap-map.leaflet-container{height:min(72vh,720px);min-height:480px;border-radius:10px}
+.atlas .atlas-toolbar{position:absolute;z-index:500;top:10px;left:56px;right:10px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;pointer-events:none;margin:0;padding:0;border:0;background:none}
+.atlas .atlas-toolbar>*{pointer-events:auto}
+.atlas .route-filter-actions,.atlas .map-layer-actions{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:4px;border-radius:10px;background:rgba(255,255,255,.94);box-shadow:0 4px 16px rgba(23,45,50,.16);backdrop-filter:blur(4px)}
+.atlas .route-filter{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:0;border-radius:7px;background:none;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer}
+.atlas .route-filter i{width:10px;height:10px;border-radius:50%}
+.atlas .route-filter b{padding:1px 6px;border-radius:9px;background:#eef2ef;color:var(--muted);font-size:10px}
+.atlas .route-filter[aria-pressed="true"]{background:#172d32;color:#fff}
+.atlas .route-filter[aria-pressed="true"] b{background:rgba(255,255,255,.18);color:#fff}
+.atlas .map-layer-toggle{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer}
+.atlas .map-layer-toggle input{accent-color:var(--green)}
+.atlas .map-reset{padding:6px 10px;border:0;border-radius:7px;background:#e8f1ec;color:var(--green);font-size:12px;font-weight:600;cursor:pointer}
+.atlas .atlas-foot{position:absolute;z-index:500;left:10px;bottom:22px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;max-width:calc(100% - 20px);padding:7px 12px;border-radius:9px;background:rgba(255,255,255,.94);box-shadow:0 4px 16px rgba(23,45,50,.14);font-size:11px;color:var(--ink)}
+.atlas .atlas-foot span{display:inline-flex;align-items:center;gap:6px}
+.atlas .atlas-foot i{display:inline-block;width:18px;height:4px;border-radius:2px}
+.atlas .atlas-foot small{color:var(--muted);font-size:10px}
+.atlas .route-insights.atlas-side{display:block}
+.atlas .atlas-side .monitor-panel{display:flex;flex-direction:column;height:min(72vh,720px);min-height:480px;padding:12px;border-radius:10px;background:#fff}
+.atlas .atlas-side .monitor-list{flex:1;max-height:none;min-height:120px}
+.atlas .route-monitor-row{width:100%;border-radius:8px}
+.atlas .route-monitor-row strong{font-size:12px}
+.atlas .route-monitor-row small{font-size:10px}
+.level-pill{padding:2px 7px;border-radius:9px;color:#fff;font-size:9px;font-weight:700;white-space:nowrap}
+
+
+
+
+.atlas .map-selection-detail{margin-top:10px}
+
+
+
+.atlas .heatmap-layout.is-historical{grid-template-columns:minmax(0,1fr)}
+.atlas .map-view-stage .explorer-frame-wrap iframe{height:min(78vh,760px)}
+.atlas #heatmap-map .leaflet-control-layers{margin-top:10px}
+@media(max-width:1100px){.atlas .atlas-stage{grid-template-columns:minmax(0,1fr)}.atlas .atlas-side .monitor-panel{height:auto;max-height:640px}}
+@media(max-width:690px){.atlas .atlas-toolbar{position:static;margin-bottom:8px}.atlas .atlas-modes .atlas-mode small{display:none}.atlas .atlas-foot{position:static;margin-top:8px}}
+.atlas .route-filter::before{display:none!important}
+.atlas .atlas-stat:first-child strong{font-size:16px;white-space:normal}
+.atlas .atlas-stats{grid-template-columns:minmax(0,1fr) repeat(3,minmax(0,.8fr)) repeat(2,minmax(0,1.3fr))}
+.atlas .atlas-side .monitor-panel{overflow-y:auto}
+.atlas .atlas-side .monitor-list{flex:1 0 260px}
+
+
+
+
+
+
+@media(max-width:1100px){.atlas .atlas-stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:690px){.atlas .atlas-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.atlas .map-card{display:flex;flex-direction:column}.atlas .atlas-toolbar{order:-1}.atlas #heatmap-map.leaflet-container{height:60vh;min-height:380px}}
+
+.topbar-refresh{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:0;border-radius:18px;background:#1f6b4f;color:#fff;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 2px 6px rgba(31,107,79,.22)}
+.topbar-refresh:hover{background:#185a42}
+.topbar-refresh:disabled{opacity:.75;cursor:progress}
+.topbar-refresh.is-busy span{display:inline-block;animation:refresh-spin 0.9s linear infinite}
+@keyframes refresh-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.topbar-refresh.is-busy span{animation:none}}
+.monitor-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.monitor-heading strong{font-size:14px}
+.monitor-heading b{padding:2px 8px;border-radius:10px;background:#eef2ef;color:var(--muted);font-size:11px}
+.truck-popup-link{margin-top:6px;color:var(--green)!important;font-size:11px;font-weight:600}
+
+/* Lista de camiones del mapa de rutas */
+.vehicle-list-icon:after{content:"";position:absolute;z-index:3;right:0;bottom:1px;width:11px;height:11px;border:2px solid #fff;border-radius:50%;background:var(--truck-state);box-shadow:0 1px 3px rgba(20,40,42,.18)}
+.vehicle-live-row{display:flex;align-items:center;gap:9px;width:100%;padding:8px;border:1px solid transparent;border-radius:6px;background:#f2f5f2;color:var(--ink);text-align:left;cursor:pointer}
+.vehicle-live-row:hover{border-color:#b9c9be;background:#fff}
+.vehicle-live-row>span:nth-child(2){display:grid;min-width:0;gap:3px}
+.vehicle-live-row strong,.vehicle-live-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vehicle-live-row strong{font-size:9px}
+.vehicle-live-row small{color:var(--muted);font-size:8px}
+.monitor-tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.monitor-tab{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:6px;padding:9px 10px;background:#eef2ef;color:var(--muted);font-size:9px;font-weight:700}
+.monitor-tab b{border-radius:10px;padding:2px 6px;background:#fff;font-size:8px}
+.monitor-tab.is-active{border-color:#173f35;background:#173f35;color:#fff}
+.monitor-tab.is-active b{background:rgba(255,255,255,.18)}
+.vehicle-live-row{display:flex;align-items:center;gap:8px;width:100%;min-width:0;padding:8px;border:1px solid transparent;border-radius:6px;background:#f0f4f1;color:var(--ink);text-align:left;cursor:pointer}
+.vehicle-live-row:hover{border-color:#9db2a5;background:#fff}
+.vehicle-live-row.is-active{border-color:#173f35;background:#e4efe8;box-shadow:inset 0 0 0 1px #173f35}
+.vehicle-live-row>span:nth-child(2){display:grid;min-width:0;flex:1;gap:3px}
+.vehicle-live-row strong,.vehicle-live-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vehicle-live-row strong{font-size:9px}
+.vehicle-live-row small{color:var(--muted);font-size:8px}
+.vehicle-list-icon{--truck-state:#d88632;position:relative;display:grid;place-items:center;width:62px;height:38px;flex:0 0 62px;border:0;background:transparent;filter:drop-shadow(0 2px 2px rgba(23,63,53,.2))}
+.vehicle-live-row.moving .vehicle-list-icon{--truck-state:#288459}
+.vehicle-live-row.off .vehicle-list-icon{--truck-state:#7d8c91}
+.vehicle-list-icon .truck-glyph{width:60px;height:32px}
+.vehicle-list-icon:after{width:10px;height:10px;right:-2px;bottom:-2px}
+.vehicle-live-row.is-active .vehicle-list-icon{filter:drop-shadow(0 0 4px rgba(151,194,79,.95)) drop-shadow(0 2px 2px rgba(23,63,53,.2))}
+.atlas .vehicle-live-row{width:100%;border-radius:8px}
+.atlas .vehicle-live-row strong{font-size:12px}
+.atlas .vehicle-live-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px;padding:8px 10px}
+.atlas .vehicle-live-row .fleet-identity{margin-top:4px}
+.vehicle-live-state{color:var(--green);font-size:11px;font-style:normal;font-weight:700;white-space:nowrap}
+.vehicle-live-row.off .vehicle-live-state{color:var(--muted);font-weight:500}
+.atlas .vehicle-live-row .fleet-identity .driver{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.selection-link{display:inline-block;margin-top:8px;color:var(--green)!important;font-size:11px;font-weight:700}
+.atlas .vehicle-live-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:8px}
+.atlas .vehicle-live-row strong{font-size:12px}
+.atlas .vehicle-live-row .fleet-identity{margin-top:4px}
+.atlas .vehicle-live-row .fleet-identity .driver{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vehicle-live-state{color:var(--green);font-size:11px;font-style:normal;font-weight:700;white-space:nowrap}
+.vehicle-live-row.off .vehicle-live-state{color:var(--muted);font-weight:500}

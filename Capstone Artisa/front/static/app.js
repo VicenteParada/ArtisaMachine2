@@ -62,7 +62,6 @@ function clearSessionWork() {
   refreshing = false;
   liveVehiclesRefreshing = false;
   $("refresh").disabled = false;
-  journeyRequest++;
 }
 
 function clearPassword() {
@@ -74,7 +73,7 @@ function clearPassword() {
 
 function logout(message = "") {
   clearSessionWork();
-  if (typeof historyState !== "undefined") Object.assign(historyState, {day: null, month: null, detail: null, loadedOnce: false});
+  if (typeof historyState !== "undefined") Object.assign(historyState, {month: null, detail: null});
   activeMapMode = "historical";
   userChoseMapMode = false;
   for (const wrapper of document.querySelectorAll(".explorer-frame-wrap")) {
@@ -112,7 +111,7 @@ function restoreSession() {
   activeToken = saved;
   $("login-error").textContent = "";
   $("login-error").hidden = true;
-  if (!location.hash) history.replaceState(null, "", "#datos-reales");
+  if (!location.hash) history.replaceState(null, "", "#camiones");
   syncDatasetView();
   if (appShell.hidden) showApp();
   scheduleExpiration();
@@ -143,7 +142,7 @@ loginForm.addEventListener("submit", async (event) => {
     try { localStorage.setItem(TOKEN_KEY, payload.token); }
     catch { throw new Error("Permite el almacenamiento local para mantener tu sesión."); }
     clearPassword();
-    history.replaceState(null, "", "#datos-reales");
+    history.replaceState(null, "", "#camiones");
     restoreSession();
   } catch (loginError) {
     clearPassword();
@@ -204,24 +203,37 @@ async function api(path, options = {}) {
 }
 
 function syncDatasetView() {
-  let view = "real";
-  if (window.location.hash === "#mapa-calor") view = "heatmap";
+  let view = "trucks";
+  if (window.location.hash === "#datos-reales") { history.replaceState(null, "", "#camiones"); }
+  else if (window.location.hash === "#mapa-calor") view = "heatmap";
   else if (window.location.hash === "#dashboard") view = "dashboard";
+  else if (window.location.hash === "#prediccion") view = "prediction";
+  // Arquitectura es una vista aparte; el resto de las vistas parte directo en su contenido.
+  const overview = window.location.hash === "#flujo";
+  document.querySelector(".heading").hidden = !overview;
+  $("flujo").hidden = !overview;
+  document.querySelector(".dataset-tabs").hidden = overview;
   for (const space of document.querySelectorAll("[data-dataset-view]")) {
-    space.hidden = space.dataset.datasetView !== view;
+    space.hidden = overview || space.dataset.datasetView !== view;
   }
   for (const tab of document.querySelectorAll("[data-dataset-tab]")) {
     const selected = tab.dataset.datasetTab === view;
     tab.classList.toggle("is-active", selected);
     tab.setAttribute("aria-current", selected ? "page" : "false");
   }
-  const overview = window.location.hash === "#flujo";
   $("overview-link").classList.toggle("active", overview);
+  document.querySelector(".topbar strong").textContent = overview ? "Arquitectura"
+    : {trucks: "Camiones en vivo", heatmap: "Mapa de rutas", prediction: "Predicción", dashboard: "Dashboard"}[view];
   for (const link of document.querySelectorAll(".sidebar [data-dataset-link]")) {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
   }
+  if (overview) return;
+  if (view === "trucks") syncTruckView();
   if (view === "heatmap") {
-    window.setTimeout(() => openExplorer(), 50);
+    window.setTimeout(openExplorer, 50);
+  }
+  if (view === "prediction") {
+    window.setTimeout(() => { loadPrediction(); if (predictionState.map) predictionState.map.invalidateSize(); }, 50);
   }
   if (view === "heatmap" && activeMapMode === "classified" && fleetMap) {
     window.setTimeout(fitPendingMap, 0);
@@ -241,25 +253,22 @@ function routeUsageSummary(route) {
   const properties = routeProperties(route);
   return route
     ? format(properties.usage_count || 0) + " recorridos · " +
-      format(properties.unique_vehicle_count || 0) + " vehículos · " +
-      (properties.usage_level || "Sin nivel")
+      format(properties.unique_vehicle_count || 0) + " camiones"
     : "Sin información";
 }
 
 const ROUTE_DRAW_ORDER = ["LOW", "MEDIUM", "HIGH"];
 const ROUTE_COLORS = Object.freeze({HIGH: "#14532d", MEDIUM: "#f97316", LOW: "#dc2626"});
-const mapLayerVisibility = {routes: true, vehicles: true};
+// Mapa de rutas estudia el histórico: parte solo con las rutas; los camiones se encienden aparte.
+const mapLayerVisibility = {routes: true, vehicles: false};
 let activeRouteFilter = "ALL";
 let activeMonitorTab = "routes";
-let activeMapMode = "historical";
+let activeMapMode = "classified";
 let userChoseMapMode = false;
 let fleetMap = null;
 const routeLayers = {LOW: null, MEDIUM: null, HIGH: null};
 let truckLayer = null;
-let journeyLayer = null;
 let selectedRouteLayer = null;
-let journeyRequest = 0;
-let activeJourneyVehicleId = null;
 let pendingMapBounds = null;
 let mapHasFitted = false;
 let currentMapData = null;
@@ -272,7 +281,9 @@ let faenaLayer = null;
 let densityLayer = null;
 let densityDay = null;
 
-function setMapMode(mode, remember = false, pending = !currentMapData || machinePending(currentMapData)) {
+// Mientras llega la clasificación se muestra igual la vista de rutas (con «Cargando…»); solo
+// si Machine aún no tiene rutas se pasa a los mapas de telemetría.
+function setMapMode(mode, remember = false, pending = Boolean(currentMapData) && machinePending(currentMapData)) {
   activeMapMode = mode === "classified" && !pending ? "classified" : "historical";
   if (remember) userChoseMapMode = true;
   const historical = activeMapMode === "historical";
@@ -290,9 +301,7 @@ function setMapMode(mode, remember = false, pending = !currentMapData || machine
     button.setAttribute("aria-pressed", String(button.dataset.mapMode === activeMapMode));
     if (button.dataset.mapMode === "classified") button.disabled = pending;
   }
-  $("map-view-description").textContent = historical
-    ? "Reportes GPS guardados, día por día o en un rango de fechas. No cambia la clasificación de rutas."
-    : "Rutas completas clasificadas por uso y última posición de cada camión.";
+  $("atlas-stats").hidden = historical;
   for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer], [data-monitor-tab], #monitor-search, #reset-map-view")) {
     control.disabled = pending || historical;
   }
@@ -320,7 +329,15 @@ function updateRouteFilterCounts(routes) {
   for (const counter of document.querySelectorAll("[data-route-count]")) {
     counter.textContent = format(counts[counter.dataset.routeCount] || 0);
   }
+  // Barra de niveles del resumen: cuánto pesa cada nivel en el total de rutas.
+  for (const bar of document.querySelectorAll("[data-level-bar]")) {
+    const level = bar.dataset.levelBar;
+    bar.style.flexGrow = String(counts[level] || 0);
+    bar.title = `${ROUTE_LABELS[level]}: ${format(counts[level] || 0)} rutas`;
+  }
 }
+
+const ROUTE_LABELS = Object.freeze({HIGH: "Más usada", MEDIUM: "Uso medio", LOW: "Poco usada"});
 
 function setSelectionDetail(kind, title, description, metadata) {
   const detail = $("map-selection-detail");
@@ -417,10 +434,11 @@ function renderRouteMonitor(routes) {
     const name = document.createElement("strong");
     name.textContent = properties.label || properties.route_id;
     const label = document.createElement("small");
-    label.textContent = `${properties.route_id} · ${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} vehículos`;
+    label.textContent = `${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} camiones`;
     copy.append(name, label);
     const level = document.createElement("b");
-    level.textContent = properties.usage_level;
+    level.className = "level-pill " + String(properties.usage_level || "").toLowerCase();
+    level.textContent = ROUTE_LABELS[properties.usage_level] || properties.usage_level;
     button.append(color, copy, level);
     button.addEventListener("click", () => selectRoute(route));
     item.append(button);
@@ -469,7 +487,6 @@ function vehicleStatus(vehicle) {
 }
 
 const TRUCK_MARKUP = '<img class="truck-glyph" src="/artisa-truck-box-white-green.png?v=20261014" alt="" aria-hidden="true">';
-const TRUCK_LIST_MARKUP = TRUCK_MARKUP;
 
 function renderLiveFleet(vehicles) {
   const list = $("vehicle-live-list");
@@ -489,17 +506,20 @@ function renderLiveFleet(vehicles) {
     button.dataset.vehicleSelect = vehicle.vehicle_id;
     const icon = document.createElement("span");
     icon.className = "vehicle-list-icon";
-    icon.innerHTML = TRUCK_LIST_MARKUP;
+    icon.innerHTML = TRUCK_MARKUP;
     const copy = document.createElement("span");
     const name = document.createElement("strong");
     name.textContent = vehicle.vehicle_name || vehicle.vehicle_id;
-    const detail = document.createElement("small");
-    const speed = vehicle.speed_kmh === null || vehicle.speed_kmh === undefined
-      ? "s/d"
-      : format(vehicle.speed_kmh, 1) + " km/h";
-    detail.textContent = status.label + " · " + speed + " · " + vehicleDriver(vehicle);
-    copy.append(name, detail);
-    button.append(icon, copy);
+    const identity = document.createElement("small");
+    identity.className = "fleet-identity";
+    const driver = vehicleDriver(vehicle);
+    identity.append(...truckIdentity(vehicle.vehicle_id, driver === "No informado" ? null : driver, null));
+    copy.append(name, identity);
+    const state = document.createElement("em");
+    state.className = "vehicle-live-state";
+    state.textContent = status.className === "moving" && Number(vehicle.speed_kmh) > 3
+      ? format(vehicle.speed_kmh, 0) + " km/h" : status.label;
+    button.append(icon, copy, state);
     button.addEventListener("click", () => selectVehicle(vehicle));
     item.append(button);
     list.append(item);
@@ -507,7 +527,7 @@ function renderLiveFleet(vehicles) {
   if (!ordered.length) {
     const item = document.createElement("li");
     item.className = "monitor-empty";
-    item.textContent = "No hay vehículos para esta búsqueda.";
+    item.textContent = "No hay camiones para esta búsqueda.";
     list.append(item);
   }
   refreshSelectionStyles();
@@ -532,14 +552,14 @@ function setMonitorTab(tab) {
   $("monitor-search").value = "";
   $("monitor-search").placeholder = activeMonitorTab === "routes"
     ? "Buscar ruta…"
-    : "Buscar vehículo…";
+    : "Buscar camión…";
   renderMonitorLists();
 }
 
 function applyRouteFilter() {
   if (!fleetMap) return;
   for (const level of ROUTE_DRAW_ORDER) {
-    const visible = mapLayerVisibility.routes && !activeJourneyVehicleId && !selectedRouteId &&
+    const visible = mapLayerVisibility.routes && !selectedRouteId &&
       (activeRouteFilter === "ALL" || activeRouteFilter === level);
     setLayerVisibility(routeLayers[level], visible);
   }
@@ -554,17 +574,17 @@ function applyRouteFilter() {
 
 function applyMapLayerVisibility() {
   if (!fleetMap) return;
-  // Con un vehículo seleccionado se ve solo él y su recorrido; con una ruta seleccionada,
-  // solo esa ruta y los camiones cuyo último viaje fue por ella. "Vista general" muestra todo.
+  // Con una ruta seleccionada se ven solo esa ruta y los camiones cuyo último viaje fue por
+  // ella. "Vista general" muestra todo.
   const routeOf = new Map((currentMapData ? currentMapData.vehicles : []).map((v) => [v.vehicle_id, v.route_id]));
   for (const [vehicleId, marker] of truckMarkers) {
-    const visible = activeJourneyVehicleId
-      ? vehicleId === activeJourneyVehicleId
+    // Con la casilla «Camiones» apagada solo se ve el camión elegido en la lista.
+    const visible = !mapLayerVisibility.vehicles ? vehicleId === selectedVehicleId
       : selectedRouteId ? routeOf.get(vehicleId) === selectedRouteId : true;
     if (visible && !truckLayer.hasLayer(marker)) truckLayer.addLayer(marker);
     if (!visible && truckLayer.hasLayer(marker)) truckLayer.removeLayer(marker);
   }
-  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles || !!activeJourneyVehicleId);
+  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles || Boolean(selectedVehicleId));
   applyRouteFilter();
 }
 
@@ -603,7 +623,7 @@ function initializeFleetMap() {
   L.control.layers(
     {"Calles y lugares (OpenStreetMap)": streets, "Satélite (Esri)": satellite},
     {"Faenas": faenaLayer, "Densidad GPS (día anterior)": densityLayer},
-    {collapsed: false, position: "topright"}
+    {collapsed: true, position: "topleft"}
   ).addTo(fleetMap);
   faenaLayer.addTo(fleetMap);
   const pendingNote = document.createElement("div");
@@ -615,16 +635,14 @@ function initializeFleetMap() {
 
   for (const [paneName, zIndex] of [
     ["routeLowPane", 410], ["routeMediumPane", 420],
-    ["routeHighPane", 430], ["routeSelectedPane", 440], ["journeyPane", 625], ["truckPane", 650]
+    ["routeHighPane", 430], ["routeSelectedPane", 440], ["truckPane", 650]
   ]) {
     fleetMap.createPane(paneName).style.zIndex = String(zIndex);
   }
 
   for (const level of ROUTE_DRAW_ORDER) routeLayers[level] = L.layerGroup();
   truckLayer = L.layerGroup();
-  journeyLayer = L.featureGroup().addTo(fleetMap);
   selectedRouteLayer = L.featureGroup().addTo(fleetMap);
-  $("journey-hide").addEventListener("click", resetMapSelection);
   applyMapLayerVisibility();
 }
 
@@ -709,7 +727,7 @@ function fitPendingMap(force = false) {
   fleetMap.invalidateSize();
   // Con un camión o una ruta seleccionados se respeta esa vista: volver a la pestaña o la
   // actualización automática no deben alejar el mapa a toda la flota.
-  if (activeJourneyVehicleId || selectedRouteId || selectedVehicleId) return;
+  if (selectedRouteId || selectedVehicleId) return;
   if ((force || !mapHasFitted) && pendingMapBounds && pendingMapBounds.isValid()) {
     fleetMap.fitBounds(pendingMapBounds, {padding: [28, 28], maxZoom: 11});
     mapHasFitted = true;
@@ -768,12 +786,15 @@ function truckPopup(vehicle) {
   date.textContent = "Última posición: " + formatLocal(vehicle.timestamp) + " (hora de Chile)";
   const plate = document.createElement("small");
   plate.textContent = "Patente: " + (vehiclePlate(vehicle) || "No informada");
-  wrapper.append(title, identifier, state, details, plate, driver, route, date);
+  const link = document.createElement("a");
+  link.className = "truck-popup-link";
+  link.href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
+  link.textContent = "Ver su recorrido de hoy en Camiones en vivo";
+  wrapper.append(title, identifier, state, details, plate, driver, route, date, link);
   return wrapper;
 }
 
 function selectRoute(route, focus = true) {
-  hideJourney();
   const properties = routeProperties(route);
   const record = routeMapLayers.get(properties.route_id);
   if (!record || !fleetMap) return;
@@ -788,10 +809,11 @@ function selectRoute(route, focus = true) {
   applyMapLayerVisibility();
   refreshSelectionStyles();
   setSelectionDetail(
-    "RUTA SELECCIONADA · " + properties.usage_level,
+    "Ruta seleccionada · " + (ROUTE_LABELS[properties.usage_level] || properties.usage_level),
     routeLabel(route),
-    `${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} vehículos`,
-    `${format(properties.observed_points)} posiciones observadas · ${properties.geometry_source}`
+    `${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} camiones` +
+      (properties.km_mediana ? ` · ~${format(properties.km_mediana, 0)} km por recorrido` : ""),
+    `${format(properties.observed_points)} posiciones del viaje representativo`
   );
   if (focus) {
     fleetMap.fitBounds(record.bounds, {padding: [55, 55], maxZoom: 14});
@@ -802,16 +824,9 @@ function selectRoute(route, focus = true) {
 function selectVehicle(vehicle, focus = true) {
   const marker = truckMarkers.get(vehicle.vehicle_id);
   if (!marker || !fleetMap) return;
-  if (selectedVehicleId && selectedVehicleId !== vehicle.vehicle_id &&
-      (activeJourneyVehicleId || !$("journey-detail").hidden)) hideJourney();
   selectedVehicleId = vehicle.vehicle_id;
   selectedRouteId = null;
   for (const record of routeMapLayers.values()) record.line.closeTooltip();
-  if (!mapLayerVisibility.vehicles) {
-    mapLayerVisibility.vehicles = true;
-    const toggle = document.querySelector('[data-map-layer="vehicles"]');
-    if (toggle) toggle.checked = true;
-  }
   applyMapLayerVisibility();
   refreshSelectionStyles();
   const status = vehicleStatus(vehicle);
@@ -819,16 +834,18 @@ function selectVehicle(vehicle, focus = true) {
     ? "Velocidad sin dato"
     : format(vehicle.speed_kmh, 1) + " km/h";
   setSelectionDetail(
-    "VEHÍCULO SELECCIONADO · " + status.label.toUpperCase(),
+    "Camión seleccionado · " + status.label,
     vehicle.vehicle_name || vehicle.vehicle_id,
     `${speed} · ${vehicle.event || "Sin evento"}`,
     `${Number(vehicle.latitude).toFixed(6)}, ${Number(vehicle.longitude).toFixed(6)} · ${formatLocal(vehicle.timestamp)} (hora de Chile)`
   );
-  if (focus) {
-    // Al elegir un vehículo se muestra directamente su recorrido del día; el mapa se encuadra
-    // una sola vez, cuando el recorrido llega, y deja espacio arriba para su ficha.
-    showVehicleJourney(vehicle);
-  }
+  // El recorrido del día está en Camiones en vivo: aquí solo se enlaza.
+  const link = document.createElement("a");
+  link.className = "selection-link";
+  link.href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
+  link.textContent = "Ver su recorrido de hoy en Camiones en vivo";
+  $("map-selection-detail").append(link);
+  if (focus) focusTruck(vehicle.vehicle_id);
 }
 
 function focusTruck(vehicleId) {
@@ -838,101 +855,14 @@ function focusTruck(vehicleId) {
   openTruckPopup(vehicleId);
 }
 
-function hideJourney() {
-  journeyRequest += 1;
-  if (journeyLayer) journeyLayer.clearLayers();
-  activeJourneyVehicleId = null;
-  applyMapLayerVisibility();
-  const detail = $("journey-detail");
-  if (detail) detail.hidden = true;
-}
-
-async function showVehicleJourney(vehicle) {
-  if (!currentMapData || machinePending(currentMapData)) {
-    focusTruck(vehicle.vehicle_id);
-    $("journey-detail").hidden = false;
-    $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
-    return;
-  }
-  if (!journeyLayer) return;
-  const request = ++journeyRequest;
-  activeJourneyVehicleId = vehicle.vehicle_id;
-  applyMapLayerVisibility();
-  journeyLayer.clearLayers();
-  const panel = $("journey-detail");
-  panel.hidden = false;
-  $("journey-note").textContent = "Cargando recorrido desde MariaDB…";
-  try {
-    const journey = await api("/api/vehiculos/" +
-      encodeURIComponent(vehicle.vehicle_id) + "/recorrido");
-    if (request !== journeyRequest) return;
-    const paths = journey.geometry && journey.geometry.coordinates || [];
-    for (const path of paths) {
-      if (path.length < 2) continue;
-      L.polyline(path.map((point) => [point[1], point[0]]), {
-        pane: "journeyPane", color: "#1964b5", weight: 7, opacity: 1,
-        lineCap: "round", lineJoin: "round"
-      }).addTo(journeyLayer);
-    }
-    const route = currentMapData && currentMapData.routes.find(
-      (item) => routeProperties(item).route_id === vehicle.route_id);
-    const category = route
-      ? routeProperties(route).usage_label + " · " + vehicle.route_id
-      : "Sin clasificar";
-    const driver = [journey.driver_name, journey.driver_last_name].filter(Boolean).join(" ");
-    $("journey-plate").textContent = journey.patente || vehiclePlate(vehicle) || "No informada";
-    $("journey-driver").textContent = driver || vehicleDriver(vehicle);
-    $("journey-start").textContent = journey.inicio.replace("T", " ");
-    $("journey-end").textContent = journey.termino_observado.replace("T", " ");
-    $("journey-distance").textContent = format(journey.distancia_km, 1) + " km";
-    $("journey-moving").textContent = format(journey.tiempo_movimiento_minutos || 0, 1) + " min estimados";
-    $("journey-gaps").textContent = journey.cortes
-      ? format(journey.cortes) + (journey.cortes === 1 ? " corte" : " cortes") +
-        " · " + format(journey.minutos_sin_senal || 0, 0) + " min sin reportes"
-      : "Sin cortes";
-    $("journey-route").textContent = category;
-    $("journey-note").textContent = journey.nota +
-      (journey.completo ? "" : " Hay más registros ese día; se muestran los últimos 20.000.");
-    setSelectionDetail(
-      "RECORRIDO OBSERVADO · " + journey.fecha, journey.asset_name,
-      format(journey.lecturas) + " posiciones · " +
-        format(journey.distancia_km, 1) + " km",
-      "Última posición: " + journey.termino_observado.replace("T", " ") +
-        " · " + category
-    );
-    // Se deja espacio arriba para que la ficha del camión no quede tapada.
-    if (journeyLayer.getLayers().length && journeyLayer.getBounds().isValid()) {
-      fleetMap.once("moveend", () => openTruckPopup(vehicle.vehicle_id));
-      fleetMap.fitBounds(journeyLayer.getBounds(), {
-        paddingTopLeft: [45, 250], paddingBottomRight: [45, 45], maxZoom: 13
-      });
-      window.setTimeout(() => openTruckPopup(vehicle.vehicle_id), 700);
-    } else {
-      focusTruck(vehicle.vehicle_id);
-    }
-  } catch (error) {
-    if (request === journeyRequest) {
-      activeJourneyVehicleId = null;
-      applyMapLayerVisibility();
-      $("journey-note").textContent = "No se pudo consultar el recorrido: " + error.message;
-      focusTruck(vehicle.vehicle_id);
-    }
-  }
-}
-
 function resetMapSelection() {
-  hideJourney();
   if (fleetMap) fleetMap.closePopup();
   for (const record of routeMapLayers.values()) record.line.closeTooltip();
   selectedRouteId = null;
   selectedVehicleId = null;
   applyMapLayerVisibility();
   refreshSelectionStyles();
-  setSelectionDetail(
-    "SELECCIÓN DEL MAPA",
-    "Selecciona una ruta o un vehículo",
-    "El mapa centrará el elemento y mostrará sus datos sin modificar la clasificación."
-  );
+  setSelectionDetail("Selección", "Elige una ruta o un camión", "El mapa lo centra y muestra sus datos.");
   fitPendingMap(true);
 }
 
@@ -1019,7 +949,7 @@ function renderFleetMap(data) {
   $("heatmap-source-status").textContent = processingHistory
     ? "Rutas disponibles · histórico en procesamiento" : "Rutas clasificadas";
   $("heatmap-intro").textContent =
-    "Verde: rutas más usadas · naranja: uso medio · rojo: poco usadas. Cada camión aparece en su última posición recibida." +
+    "Para estudiar el histórico: qué rutas usó la flota y cuánto, con los viajes ya cerrados." +
     (processingHistory ? ` Clasificación parcial: ${coverage.dias_cerrados} de ${coverage.dias_ventana} días procesados en la ventana.` : "");
 
   const visibleBounds = L.latLngBounds([]);
@@ -1071,14 +1001,11 @@ function renderHeatmap(data) {
   setMapMode(activeMapMode, false, pending);
   if (pending) {
     currentMapData = data;
-    journeyRequest++;
-    activeJourneyVehicleId = null;
     selectedVehicleId = null;
     selectedRouteId = null;
     if (fleetMap) {
       for (const level of ROUTE_DRAW_ORDER) routeLayers[level].clearLayers();
       truckLayer.clearLayers();
-      journeyLayer.clearLayers();
     }
     truckMarkers.clear();
     routeMapLayers.clear();
@@ -1097,13 +1024,10 @@ function renderHeatmap(data) {
       "Disponible cuando Machine genere resultados");
     pendingText(["monitor-route-count", "vehicle-live-count"], "—");
     for (const counter of document.querySelectorAll("[data-route-count]")) counter.textContent = "—";
-    for (const id of ["route-monitor-list", "vehicle-live-list"]) {
-      const item = document.createElement("li");
-      item.textContent = "Pendiente de procesamiento Machine.";
-      $(id).replaceChildren(item);
-    }
-    $("journey-detail").hidden = true;
-    $("journey-note").textContent = "Recorrido disponible después del procesamiento Machine.";
+    const item = document.createElement("li");
+    item.textContent = "Pendiente de procesamiento Machine.";
+    $("route-monitor-list").replaceChildren(item);
+    $("vehicle-live-list").replaceChildren(item.cloneNode(true));
     return;
   }
   const pendingNote = $("map-pending-note");
@@ -1129,9 +1053,10 @@ function renderHeatmap(data) {
   ].filter(Boolean).join(" ");
 
   const window_ = metadata.window || {};
+  const shortDay = (iso) => new Intl.DateTimeFormat("es-CL", {day: "numeric", month: "short", timeZone: "UTC"})
+    .format(new Date(String(iso).slice(0, 10) + "T12:00:00Z"));
   $("geo-model-zones").textContent = window_.desde
-    ? "Viajes del " + formatDataDay(window_.desde) + " al " + formatDataDay(window_.hasta)
-    : "Clasificación vigente";
+    ? shortDay(window_.desde) + " – " + shortDay(window_.hasta) : "Clasificación vigente";
   $("geo-model-detail").textContent = metadata.road_matching ||
     "Rutas calculadas con la telemetría disponible.";
   renderFleetMap(data);
@@ -1412,7 +1337,6 @@ async function refreshTelemetry() {
     if (version !== sessionVersion || !token()) return;
     renderTelemetry(telemetrySummary, telemetryDataset, {});
     telemetryLastOk = new Date();
-    refreshHistory();
   } catch (error) {
     if (version !== sessionVersion || !token()) return;
     if (!$("telemetry-content").hidden) {
@@ -1454,10 +1378,12 @@ function renderTelemetry(summary, dataset, state) {
   $("telemetry-count").textContent = format(summary.reportes || 0);
   $("vehicle-count").textContent = summary.vehiculos === null || summary.vehiculos === undefined
     ? "Sin dato" : format(summary.vehiculos);
-  $("vehicle-count-note").textContent = `Camiones con reportes en las últimas ${format(summary.vehiculos_ventana_horas || 24)} h`;
+  $("vehicle-count-note").textContent = `camiones con reportes en las últimas ${format(summary.vehiculos_ventana_horas || 24)} h`;
   $("telemetry-range").textContent = connection.ultimo_dato
-    ? `Último reporte recibido: ${formatLocal(connection.ultimo_dato)} · último contacto con la API: ${connection.ultimo_exito ? formatLocal(connection.ultimo_exito) : "sin contacto aún"} (hora de Chile)`
+    ? `Último reporte ${formatLocal(connection.ultimo_dato)} · contacto con la API ${connection.ultimo_exito ? formatLocal(connection.ultimo_exito) : "sin contacto aún"}`
     : "La API está configurada, pero todavía no entrega reportes.";
+  $("fleet-tab-reportes-note").textContent = connection.ultimo_dato
+    ? "Último reporte " + formatAge((Date.now() - new Date(connection.ultimo_dato)) / 1000) : "Lo último que llegó de la API";
   $("telemetry-quality").textContent =
     `${format(connection.guardados || 0)} guardados · ${format(connection.rechazados || 0)} rechazados de ${format(connection.leidos || 0)} leídos`;
 
@@ -1480,6 +1406,15 @@ function renderTelemetry(summary, dataset, state) {
   body.replaceChildren();
   for (const report of reports) {
     const tr = document.createElement("tr");
+    // Cada reporte lleva a la ficha del camión ese día, marcando dónde estaba en ese momento.
+    if (report.asset_id && report.report_date) {
+      tr.className = "report-row";
+      tr.tabIndex = 0;
+      tr.title = "Ver el recorrido de este camión y dónde estaba en este reporte";
+      const open = () => openTruckAtReport(report);
+      tr.addEventListener("click", open);
+      tr.addEventListener("keydown", (event) => { if (event.key === "Enter") open(); });
+    }
     const vehicle = document.createElement("td");
     vehicle.textContent = report.asset_name || "Vehículo sin nombre";
     const assetId = document.createElement("small");
@@ -1593,8 +1528,7 @@ async function refresh() {
     if (state) renderState(state); else problems.push("estado del sistema");
     if (summaryResult.status === "fulfilled" && datasetResult.status === "fulfilled") {
       renderTelemetry(summaryResult.value, datasetResult.value, state || {});
-      refreshHistory();
-    } else problems.push("reportes");
+      } else problems.push("reportes");
     if (mapResult.status === "fulfilled" && window.ArtisaMapData) {
       const mapData = window.ArtisaMapData.adaptMapPayload(mapResult.value);
       if (currentMapData) {
@@ -1660,7 +1594,7 @@ async function refreshMapVehicles() {
 }
 
 // --- Historial diario (00:00 a 00:00 hora de Chile) ---
-var historyState = {day: null, month: null, detail: null, loadedOnce: false};
+var historyState = {month: null, detail: null};
 const isoDayIn = (date, zone = HISTORY_ZONE) =>
   new Intl.DateTimeFormat("en-CA", {timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit"}).format(date);
 const localToday = () => isoDayIn(new Date());
@@ -1701,85 +1635,10 @@ function cell(text, small) {
   return td;
 }
 
-async function loadHistoryDay(day, quiet = false) {
-  if (!day) return;
-  const today = localToday();
-  if (day > today) day = today;
-  historyState.day = day;
-  $("history-date").value = day;
-  $("history-date").max = today;
-  $("history-next").disabled = day >= today;
-  if (!quiet) { $("history-status").textContent = "Consultando…"; $("history-status").className = "status neutral"; }
-  try {
-    const data = await api(`/api/reportes/dia?fecha=${day}`);
-    if (historyState.day !== day) return;
-    renderHistoryDay(data);
-    const month = day.slice(0, 7);
-    if (historyState.month !== month || quiet) loadHistoryMonth(month);
-  } catch (error) {
-    if (historyState.day !== day) return;
-    $("history-status").textContent = "No se pudo consultar";
-    $("history-status").className = "status warning";
-    $("history-note").textContent = error.message + " Se mantienen los últimos datos mostrados.";
-  }
-}
-
-function renderHistoryDay(data) {
-  const zone = data.zona || HISTORY_ZONE;
-  const state = data.estado;
-  const [label, className] = state ? (HISTORY_STATES[state.estado] || [state.estado, "status neutral"])
-    : ["Sin datos para este día", "status neutral"];
-  $("history-status").textContent = label;
-  $("history-status").className = className;
-  $("history-trucks").textContent = state ? format(state.camiones) : "—";
-  $("history-reports").textContent = state ? format(state.reportes) : "—";
-  $("history-discarded").textContent = state && state.descartados
-    ? `${format(state.descartados)} descartados por coordenadas inválidas` : "Reportes GPS válidos";
-  $("history-km").textContent = state ? format(state.km_observados, 1) : "—";
-  $("history-calculated").textContent = state ? formatLocalTime(state.calculado_en, zone) : "—";
-  $("history-calculated-note").textContent = state && state.recalculos
-    ? `Recalculado ${format(state.recalculos)} ${state.recalculos === 1 ? "vez" : "veces"} por reportes atrasados`
-    : "Hora de Chile";
-  $("history-note").textContent = state && state.estado === "esperando_datos"
-    ? "Las cifras son provisorias: el día se cierra cuando la API confirme los reportes hasta las 00:00."
-    : state && state.estado === "en_curso" ? "Cifras parciales del día de hoy; se actualizan cada pocos minutos." : "";
-
-  const body = $("history-rows");
-  body.replaceChildren();
-  for (const truck of data.camiones || []) {
-    const tr = document.createElement("tr");
-    tr.className = "history-row";
-    tr.tabIndex = 0;
-    tr.title = "Ver los reportes de este camión en el día";
-    tr.append(
-      cell(truck.asset_name || "Camión sin nombre", truck.asset_id),
-      cell(format(truck.reportes)),
-      cell(formatLocalTime(truck.primer_reporte, zone)),
-      cell(formatLocalTime(truck.ultimo_reporte, zone)),
-      cell(format(truck.km_observados, 1)),
-      cell(format(truck.viajes), "recorridos entre paradas"),
-      cell(formatMinutes(truck.minutos_detenido), `${format(truck.paradas || 0)} ${Number(truck.paradas) === 1 ? "parada" : "paradas"} de 10 min o más`)
-    );
-    const open = () => {
-      for (const row of body.querySelectorAll(".is-selected")) row.classList.remove("is-selected");
-      tr.classList.add("is-selected");
-      loadTruckDetail(truck.asset_id, truck.asset_name, data.fecha);
-    };
-    tr.addEventListener("click", open);
-    tr.addEventListener("keydown", (event) => { if (event.key === "Enter") open(); });
-    body.append(tr);
-  }
-  if (!(data.camiones || []).length) {
-    emptyRow(body, 7, state ? "Ningún camión reportó este día." : "Este día todavía no tiene resumen calculado.");
-  }
-  if (historyState.detail && historyState.detail.day !== data.fecha) closeTruckDetail();
-}
-
 async function loadTruckDetail(assetId, assetName, day, after = null) {
   const detail = after ? historyState.detail : {assetId, assetName, day, next: null, hasIgnition: false};
   historyState.detail = detail;
-  $("history-detail").hidden = false;
-  $("history-detail-title").textContent = `Reportes de ${assetName || assetId} · ${day} (hora de Chile)`;
+  $("history-detail-title").textContent = `${assetName || assetId} · ${predictionDayLabel(day, "long")} · hora de Chile`;
   const body = $("history-detail-rows");
   if (!after) { body.replaceChildren(); emptyRow(body, 4, "Cargando reportes…"); }
   $("history-detail-more").hidden = true;
@@ -1813,12 +1672,6 @@ async function loadTruckDetail(assetId, assetName, day, after = null) {
   }
 }
 
-function closeTruckDetail() {
-  historyState.detail = null;
-  $("history-detail").hidden = true;
-  for (const row of document.querySelectorAll("#history-rows .is-selected")) row.classList.remove("is-selected");
-}
-
 async function loadHistoryMonth(month) {
   historyState.month = month;
   $("history-month").value = month;
@@ -1833,7 +1686,7 @@ async function loadHistoryMonth(month) {
       const link = document.createElement("button");
       link.type = "button"; link.className = "history-day-link";
       link.textContent = day.fecha;
-      link.addEventListener("click", () => loadHistoryDay(day.fecha));
+      link.addEventListener("click", () => { setFleetTab("flota"); setBoardDay(day.fecha); });
       const first = document.createElement("td"); first.append(link);
       const [label] = HISTORY_STATES[day.estado] || [day.estado];
       tr.append(first, cell(label), cell(format(day.camiones)), cell(format(day.reportes)), cell(format(day.km_observados, 1)));
@@ -1906,37 +1759,50 @@ async function downloadHistoryMonth() {
   }
 }
 
-function refreshHistory() {
-  if (!token()) return;
-  if (!historyState.loadedOnce) {
-    historyState.loadedOnce = true;
-    loadHistoryDay(shiftDay(localToday(), -1));
-  } else if (historyState.day === localToday()) {
-    loadHistoryDay(historyState.day, true);  // hoy en curso: se mantiene al día
-  }
-}
-
-$("history-date").addEventListener("change", () => loadHistoryDay($("history-date").value));
-$("history-prev").addEventListener("click", () => loadHistoryDay(shiftDay(historyState.day || localToday(), -1)));
-$("history-next").addEventListener("click", () => loadHistoryDay(shiftDay(historyState.day || localToday(), 1)));
-$("history-yesterday").addEventListener("click", () => loadHistoryDay(shiftDay(localToday(), -1)));
-$("history-today").addEventListener("click", () => loadHistoryDay(localToday()));
 $("history-month").addEventListener("change", () => { if ($("history-month").value) loadHistoryMonth($("history-month").value); });
 $("history-month-download").addEventListener("click", downloadHistoryMonth);
-$("history-detail-close").addEventListener("click", closeTruckDetail);
 $("history-detail-more").addEventListener("click", () => {
   const detail = historyState.detail;
   if (detail && detail.next) loadTruckDetail(detail.assetId, detail.assetName, detail.day, detail.next);
 });
 
 $("refresh").addEventListener("click", refresh);
+
+// «Actualizar datos»: corta las consultas que quedaron pegadas, libera cada sección y vuelve
+// a pedir todo lo que se está mirando, sin recargar la página ni cerrar la sesión.
+async function refreshAll() {
+  const button = $("refresh-all");
+  if (button.disabled) return;
+  button.disabled = true;
+  button.classList.add("is-busy");
+  for (const controller of pendingRequests) controller.abort();
+  pendingRequests.clear();
+  refreshing = false;
+  telemetryRefreshing = false;
+  predictionState.loading = false;
+  predictionState.cache = {};
+  try {
+    const onTruck = Boolean(truckHash()) && truckView.id && !$("truck-view").hidden;
+    await Promise.allSettled([
+      refresh(), refreshTelemetry(), loadFleet(),
+      onTruck ? loadTruckDay(truckView.id, truckView.day, true) : null,
+      truckView.boardDay ? setBoardDay(truckView.boardDay) : null,
+      window.location.hash === "#prediccion" ? loadPrediction(true) : null
+    ]);
+    button.title = "Actualizado a las " + new Intl.DateTimeFormat("es-CL", {timeStyle: "short", timeZone: HISTORY_ZONE}).format(new Date());
+  } finally {
+    button.disabled = false;
+    button.classList.remove("is-busy");
+  }
+}
+$("refresh-all").addEventListener("click", refreshAll);
 for (const button of document.querySelectorAll("[data-map-mode]")) {
   button.addEventListener("click", () => setMapMode(button.dataset.mapMode, true));
 }
 for (const button of document.querySelectorAll("[data-route-filter]")) {
   button.addEventListener("click", () => {
     activeRouteFilter = button.dataset.routeFilter || "ALL";
-    if (selectedRouteId || selectedVehicleId || activeJourneyVehicleId) resetMapSelection();
+    if (selectedRouteId || selectedVehicleId) resetMapSelection();
     applyRouteFilter();
   });
 }
@@ -1957,6 +1823,13 @@ $("monitor-search").addEventListener("input", () => {
   else renderLiveFleet(currentMapData ? currentMapData.vehicles : []);
 });
 $("reset-map-view").addEventListener("click", resetMapSelection);
+for (const [id, key] of [["most-route-card", "mostUsed"], ["least-route-card", "leastUsed"]]) {
+  $(id).addEventListener("click", () => {
+    const target = currentMapData && currentMapData.ranking[key];
+    const route = target && currentMapData.routes.find((item) => routeProperties(item).route_id === routeProperties(target).route_id);
+    if (route && activeMapMode === "classified") selectRoute(route);
+  });
+}
 // Retirar el almacenamiento de la implementación anterior sin persistir el usuario.
 try {
   sessionStorage.removeItem("artisa_token");
@@ -1972,6 +1845,1742 @@ window.addEventListener("storage", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) restoreSession();
 });
+// --- Predicción de actividad (/api/prediccion) ----------------------------------------------
+// Ruleta de días: un día, un rango o todos; recorrido animado; confianza por día según el
+// error real que tuvo el método al predecir 1, 2, … días hacia adelante en la prueba.
+const PREDICTION_REFRESH_MS = 15 * 60 * 1000;
+const PREDICTION_PLAY_MS = 1600;
+const PREDICTION_GRADIENT = {0.2: "#3b4cc0", 0.45: "#2ec4b6", 0.65: "#9be15d", 0.82: "#f9c74f", 1: "#e63946"};
+const PREDICTION_METHODS = {
+  lightgbm: "Modelo LightGBM",
+  promedio_dia_semana: "Promedio por día de la semana",
+  promedio_historico: "Promedio histórico"
+};
+const CONFIDENCE_LABELS = {alta: "Confianza alta", media: "Confianza media", baja: "Confianza baja", na: "Sin evaluar"};
+// Dos modelos en pestañas: mapa de calor (zonas) y rutas completas.
+const PREDICTION_TYPES = {
+  calor: {
+    endpoint: "/api/prediccion", unit: "reportes", totalLabel: "Reportes esperados",
+    chartUnit: "Reportes", errorUnit: "reportes por zona y día",
+    value: (item) => item.total, cardText: (item) => format(item.total),
+    intro: "Zonas donde se espera más movimiento de camiones",
+    method: "Cada zona es un cuadro de ~1 km. Para cada día se predice cuántos reportes de camiones en movimiento " +
+      "(sobre 2 km/h) habrá en cada zona"
+  },
+  rutas: {
+    endpoint: "/api/prediccion-rutas", unit: "rutas", totalLabel: "Rutas con camiones esperados",
+    chartUnit: "Rutas", errorUnit: "camiones por tramo y día",
+    value: (item) => item.elementos, cardText: (item) => format(item.elementos) + " rutas",
+    intro: "Rutas por las que se espera que pasen camiones",
+    method: "El modelo predice cuántos camiones distintos pasarán por cada tramo de ~1 km. Cada ruta completa " +
+      "(de la clasificación de rutas) recibe un solo valor: la mediana de lo predicho en los tramos que recorre"
+  }
+};
+const predictionState = {
+  tipo: "calor", cache: {}, data: null, loadedAt: 0, loading: false, map: null, layer: null, fitted: false,
+  mode: "day", index: 0, from: 0, to: 0, timer: null, scrollTimer: null, wheelBound: false, renderer: null
+};
+
+function predictionConfig() { return PREDICTION_TYPES[predictionState.tipo]; }
+
+// Nivel de cada ruta predicha con la misma regla que la clasificación de rutas:
+// verde sobre el percentil 67, rojo en el percentil 33 o menos, naranja entre ambos.
+function predictionRouteLevels(cells) {
+  const values = cells.map((cell) => cell[1]).sort((a, b) => a - b);
+  const percentile = (q) => {
+    if (!values.length) return 0;
+    const position = (values.length - 1) * q;
+    const low = Math.floor(position);
+    return values[low] + (values[Math.min(low + 1, values.length - 1)] - values[low]) * (position - low);
+  };
+  const p33 = percentile(1 / 3), p67 = percentile(2 / 3);
+  const levels = new Map();
+  for (const [id, value] of cells) {
+    levels.set(id, values[0] === values[values.length - 1] ? "MEDIUM" : value > p67 ? "HIGH" : value <= p33 ? "LOW" : "MEDIUM");
+  }
+  return levels;
+}
+
+function predictionDate(iso) { return new Date(iso + "T12:00:00Z"); }
+
+function predictionDayLabel(iso, style = "short") {
+  const options = style === "short" ? {weekday: "short", day: "numeric"}
+    : style === "weekday" ? {weekday: "short"}
+      : style === "month" ? {month: "short"}
+        : {weekday: "long", day: "numeric", month: "long"};
+  return new Intl.DateTimeFormat("es-CL", {...options, timeZone: "UTC"}).format(predictionDate(iso));
+}
+
+function predictionConfidence(data, iso) {
+  const errors = (data.metricas || {}).error_por_dia || [];
+  const ahead = Math.round((predictionDate(iso) - predictionDate(data.base_hasta)) / 86400000) - 1;
+  const error = errors[ahead];
+  if (error === null || error === undefined || !errors[0]) return {level: "na", error: null};
+  const ratio = error / errors[0];
+  return {level: ratio <= 1.1 ? "alta" : ratio <= 1.3 ? "media" : "baja", error};
+}
+
+function predictionSelected() {
+  const days = predictionState.data ? predictionState.data.dias : [];
+  if (predictionState.mode === "all") return days;
+  if (predictionState.mode === "range") {
+    const [a, b] = [predictionState.from, predictionState.to].sort((x, y) => x - y);
+    return days.slice(a, b + 1);
+  }
+  return days.slice(predictionState.index, predictionState.index + 1);
+}
+
+function predictionCells(days) {
+  // Calor: suma de los días. Rutas: promedio de camiones por día en cada tramo.
+  if (days.length === 1) return days[0].celdas;
+  const routes = predictionState.tipo === "rutas";
+  const sum = new Map();
+  for (const item of days) {
+    for (const cell of item.celdas) {
+      const key = cell.slice(0, -1).join(",");
+      const previous = sum.get(key);
+      sum.set(key, [...cell.slice(0, -1), (previous ? previous[previous.length - 1] : 0) + cell[cell.length - 1]]);
+    }
+  }
+  const result = [...sum.values()];
+  if (routes) for (const cell of result) cell[cell.length - 1] /= days.length;
+  return result;
+}
+
+function predictionRouteTip(label, value, dayCount) {
+  const tip = document.createElement("div");
+  const name = document.createElement("strong");
+  name.textContent = label;
+  tip.append(name, document.createElement("br"),
+    `~${format(value, 1)} camiones ${dayCount > 1 ? "por día (promedio)" : "esperados"}`);
+  return tip;
+}
+
+function ensurePredictionMap() {
+  if (predictionState.map || !window.L) return predictionState.map;
+  predictionState.map = L.map($("prediction-map"), {zoomControl: true}).setView([-24.5, -70], 6);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(predictionState.map);
+  return predictionState.map;
+}
+
+function drawPrediction() {
+  const data = predictionState.data;
+  if (!data || !data.dias.length) return;
+  const days = predictionSelected();
+  const config = predictionConfig();
+  const routes = predictionState.tipo === "rutas";
+  const cells = predictionCells(days);
+  const total = routes ? cells.length : days.reduce((sum, item) => sum + item.total, 0);
+  // Resumen de la selección
+  $("prediction-total").textContent = format(total);
+  $("prediction-total-detail").textContent = days.length === 1
+    ? predictionDayLabel(days[0].fecha, "long") : `En ${days.length} días · camiones en movimiento`;
+  const text = $("prediction-selection");
+  if (days.length === 1) {
+    const confidence = predictionConfidence(data, days[0].fecha);
+    text.innerHTML = "";
+    const strong = document.createElement("strong");
+    const label = predictionDayLabel(days[0].fecha, "long");
+    strong.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+    const badge = document.createElement("span");
+    badge.className = "confidence-badge " + confidence.level;
+    badge.textContent = CONFIDENCE_LABELS[confidence.level];
+    const amount = routes ? `${format(days[0].elementos)} rutas con camiones esperados `
+      : `${format(days[0].total)} reportes esperados `;
+    text.append(strong, " · " + amount, badge,
+      confidence.error === null ? "" : ` · se equivoca ~${format(confidence.error, 2)} ${routes ? "camiones por tramo" : "por zona"}`);
+  } else {
+    text.textContent = `${predictionDayLabel(days[0].fecha, "long")} → ${predictionDayLabel(days[days.length - 1].fecha, "long")}` +
+      (routes ? ` · ${format(total)} rutas con camiones (promedio de camiones por día en cada ruta)`
+        : ` · ${format(total)} reportes esperados en ${days.length} días`);
+  }
+  // Mapa de calor
+  const map = ensurePredictionMap();
+  if (map) {
+    map.invalidateSize();
+    if (predictionState.layer) map.removeLayer(predictionState.layer);
+    if (routes) {
+      // Una línea por ruta completa, de un solo color (su nivel). Primero las rojas, así
+      // donde dos rutas comparten camino queda encima la de más camiones.
+      predictionState.renderer = predictionState.renderer || L.canvas({padding: 0.5});
+      const layer = L.layerGroup();
+      const levels = predictionRouteLevels(cells);
+      const order = {LOW: 0, MEDIUM: 1, HIGH: 2};
+      const sorted = cells.filter(([id]) => data.rutas && data.rutas[id])
+        .sort((a, b) => order[levels.get(a[0])] - order[levels.get(b[0])] || a[1] - b[1]);
+      for (const [id, value] of sorted) {
+        const level = levels.get(id);
+        L.polyline(data.rutas[id].lineas, {
+          renderer: predictionState.renderer, color: ROUTE_COLORS[level],
+          weight: level === "HIGH" ? 5 : level === "MEDIUM" ? 4 : 3, opacity: 0.9, lineCap: "round", lineJoin: "round"
+        }).bindTooltip(predictionRouteTip(data.rutas[id].label, value, days.length), {sticky: true}).addTo(layer);
+      }
+      predictionState.layer = layer;
+    } else {
+      // Escala logarítmica, igual que el mapa de calor del cuaderno (np.log1p).
+      const max = cells.reduce((top, cell) => Math.max(top, cell[cell.length - 1]), 0);
+      const points = cells.map(([lat, lon, value]) => [lat, lon, max ? Math.log1p(value) / Math.log1p(max) : 0]);
+      predictionState.layer = L.heatLayer
+        ? L.heatLayer(points, {radius: 9, blur: 11, minOpacity: 0.3, max: 1, maxZoom: 18, gradient: PREDICTION_GRADIENT})
+        : L.layerGroup();
+    }
+    predictionState.layer.addTo(map);
+    const points = routes ? cells.flatMap(([id]) => (data.rutas && data.rutas[id] ? data.rutas[id].lineas.flat() : []))
+      : cells.map((cell) => [cell[0], cell[1]]);
+    if (!predictionState.fitted && points.length) {
+      map.fitBounds(L.latLngBounds(points), {padding: [30, 30], maxZoom: 9});
+      predictionState.fitted = true;
+    }
+  }
+  // Marcar la selección en la ruleta y en las columnas
+  const selected = new Set(days.map((item) => item.fecha));
+  for (const node of document.querySelectorAll("[data-prediction-fecha]")) {
+    node.classList.toggle("is-selected", selected.has(node.dataset.predictionFecha));
+  }
+  for (const button of document.querySelectorAll("[data-prediction-mode]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.predictionMode === predictionState.mode));
+  }
+  $("prediction-range").hidden = predictionState.mode !== "range";
+  updatePredictionRange();
+}
+
+// --- Ruleta ---
+function buildPredictionWheel(data, today) {
+  const wheel = $("prediction-wheel");
+  wheel.replaceChildren(...data.dias.map((item, index) => {
+    const confidence = predictionConfidence(data, item.fecha);
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "wheel-day" + (item.fecha === today ? " is-today" : "");
+    card.dataset.predictionFecha = item.fecha;
+    card.dataset.index = String(index);
+    card.setAttribute("role", "option");
+    const weekday = document.createElement("small");
+    weekday.textContent = item.fecha === today ? "Hoy" : predictionDayLabel(item.fecha, "weekday");
+    const day = document.createElement("strong");
+    day.textContent = String(predictionDate(item.fecha).getUTCDate());
+    const month = document.createElement("small");
+    month.textContent = predictionDayLabel(item.fecha, "month");
+    const total = document.createElement("span");
+    total.textContent = predictionConfig().cardText(item);
+    const dot = document.createElement("i");
+    dot.className = "confidence-dot " + confidence.level;
+    dot.title = CONFIDENCE_LABELS[confidence.level];
+    card.append(weekday, day, month, total, dot);
+    card.addEventListener("click", () => selectPredictionIndex(index, true));
+    return card;
+  }));
+  if (!predictionState.wheelBound) {
+    predictionState.wheelBound = true;
+    wheel.addEventListener("scroll", () => {
+      paintPredictionWheel();
+      clearTimeout(predictionState.scrollTimer);
+      predictionState.scrollTimer = setTimeout(() => {
+        if (predictionState.mode !== "day" || predictionState.timer) return;
+        const index = centeredPredictionIndex();
+        if (index !== predictionState.index) { predictionState.index = index; drawPrediction(); }
+      }, 140);
+    }, {passive: true});
+    // Rueda del mouse: avanza un día por movimiento, como una ruleta. Solo cuando la ruleta
+    // está activa (después de tocarla), para no robarle el desplazamiento a la página.
+    wheel.addEventListener("pointerdown", () => wheel.focus({preventScroll: true}));
+    wheel.addEventListener("wheel", (event) => {
+      if (!wheel.contains(document.activeElement) || Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
+      event.preventDefault();
+      stopPredictionPlay();
+      selectPredictionIndex(predictionState.index + (event.deltaY > 0 ? 1 : -1), true);
+    }, {passive: false});
+    wheel.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+        event.preventDefault();
+        selectPredictionIndex(predictionState.index + (event.key === "ArrowRight" ? 1 : -1), true);
+      }
+    });
+    window.addEventListener("resize", () => centerPredictionWheel(false));
+  }
+  requestAnimationFrame(() => centerPredictionWheel(false));
+}
+
+function centeredPredictionIndex() {
+  const wheel = $("prediction-wheel");
+  if (!wheel.clientWidth) return predictionState.index;  // oculta: no cambiar la selección
+  const middle = wheel.scrollLeft + wheel.clientWidth / 2;
+  let best = 0, distance = Infinity;
+  for (const card of wheel.children) {
+    const gap = Math.abs(card.offsetLeft + card.offsetWidth / 2 - middle);
+    if (gap < distance) { distance = gap; best = Number(card.dataset.index); }
+  }
+  return best;
+}
+
+function paintPredictionWheel() {
+  // Efecto de ruleta: las tarjetas giran y se achican al alejarse del centro.
+  const wheel = $("prediction-wheel");
+  const middle = wheel.scrollLeft + wheel.clientWidth / 2;
+  for (const card of wheel.children) {
+    const offset = (card.offsetLeft + card.offsetWidth / 2 - middle) / (card.offsetWidth + 10);
+    const reach = Math.min(Math.abs(offset), 4);
+    card.style.transform = `perspective(700px) rotateY(${Math.max(-55, Math.min(55, -offset * 16))}deg) scale(${1 - reach * 0.07})`;
+    card.style.opacity = String(1 - reach * 0.16);
+    card.classList.toggle("is-center", reach < 0.5);
+  }
+}
+
+function centerPredictionWheel(smooth = true) {
+  const wheel = $("prediction-wheel");
+  const index = predictionState.mode === "range" ? predictionState.to : predictionState.index;
+  const card = wheel.children[index];
+  if (!card) return;
+  wheel.scrollTo({left: card.offsetLeft + card.offsetWidth / 2 - wheel.clientWidth / 2, behavior: smooth ? "smooth" : "auto"});
+  paintPredictionWheel();
+}
+
+function selectPredictionIndex(index, smooth) {
+  const days = predictionState.data ? predictionState.data.dias : [];
+  if (!days.length) return;
+  index = Math.max(0, Math.min(days.length - 1, index));
+  if (predictionState.mode === "range") {
+    // En modo rango, tocar un día mueve el extremo más cercano.
+    if (Math.abs(index - predictionState.from) <= Math.abs(index - predictionState.to)) predictionState.from = index;
+    else predictionState.to = index;
+  } else {
+    predictionState.mode = "day";
+    predictionState.index = index;
+  }
+  drawPrediction();
+  centerPredictionWheelTo(index, smooth);
+}
+
+function centerPredictionWheelTo(index, smooth) {
+  const wheel = $("prediction-wheel");
+  const card = wheel.children[index];
+  if (card) wheel.scrollTo({left: card.offsetLeft + card.offsetWidth / 2 - wheel.clientWidth / 2, behavior: smooth ? "smooth" : "auto"});
+}
+
+// --- Rango ---
+function updatePredictionRange() {
+  const days = predictionState.data ? predictionState.data.dias.length : 0;
+  const from = $("prediction-range-from"), to = $("prediction-range-to");
+  for (const input of [from, to]) input.max = String(Math.max(0, days - 1));
+  from.value = String(predictionState.from);
+  to.value = String(predictionState.to);
+  const [a, b] = [predictionState.from, predictionState.to].sort((x, y) => x - y);
+  const span = Math.max(1, days - 1);
+  const fill = $("prediction-range-fill");
+  fill.style.left = (a / span * 100) + "%";
+  fill.style.width = ((b - a) / span * 100) + "%";
+}
+
+function setPredictionMode(mode) {
+  stopPredictionPlay();
+  const days = predictionState.data ? predictionState.data.dias.length : 0;
+  if (mode === "range" && predictionState.mode !== "range") {
+    predictionState.from = predictionState.index;
+    predictionState.to = Math.min(days - 1, predictionState.index + 6);
+  }
+  predictionState.mode = mode;
+  drawPrediction();
+}
+
+// --- Recorrido animado ---
+function stopPredictionPlay() {
+  clearInterval(predictionState.timer);
+  predictionState.timer = null;
+  const button = $("prediction-play");
+  button.setAttribute("aria-pressed", "false");
+  button.textContent = "▶ Recorrer días";
+}
+
+function togglePredictionPlay() {
+  if (predictionState.timer) { stopPredictionPlay(); return; }
+  const days = predictionState.data ? predictionState.data.dias.length : 0;
+  if (!days) return;
+  predictionState.mode = "day";
+  const button = $("prediction-play");
+  button.setAttribute("aria-pressed", "true");
+  button.textContent = "❚❚ Pausar";
+  const step = () => {
+    predictionState.index = (predictionState.index + 1) % days;
+    drawPrediction();
+    centerPredictionWheelTo(predictionState.index, true);
+  };
+  if (predictionState.index >= days - 1) predictionState.index = -1;
+  step();
+  predictionState.timer = setInterval(step, PREDICTION_PLAY_MS);
+}
+
+function renderPrediction(data) {
+  predictionState.data = data;
+  const status = $("prediction-status");
+  const config = predictionConfig();
+  // La pestaña elegida se marca siempre, aunque su modelo aún no tenga resultados.
+  for (const tab of document.querySelectorAll("[data-prediction-tab]")) {
+    const selected = tab.dataset.predictionTab === predictionState.tipo;
+    tab.classList.toggle("is-active", selected);
+    tab.setAttribute("aria-selected", String(selected));
+  }
+  $("prediction-legend-heat").hidden = predictionState.tipo !== "calor";
+  $("prediction-legend-routes").hidden = predictionState.tipo !== "rutas";
+  $("prediction-chart-unit").textContent = config.chartUnit;
+  $("prediction-total-label").textContent = config.totalLabel;
+  if (!data || data.status !== "ok" || !data.dias.length) {
+    status.textContent = "Pendiente";
+    status.className = "status neutral";
+    $("prediction-intro").textContent = (data && data.message) ||
+      "La predicción se calcula sola cuando hay al menos 21 días cerrados.";
+    // No dejar a la vista los datos del otro modelo.
+    for (const id of ["prediction-total", "prediction-peak", "prediction-error", "prediction-base"]) $(id).textContent = "—";
+    for (const id of ["prediction-total-detail", "prediction-peak-detail", "prediction-error-detail", "prediction-base-detail",
+      "prediction-selection"]) $(id).textContent = "";
+    for (const id of ["prediction-wheel", "prediction-daily-chart", "prediction-methods-chart"]) $(id).replaceChildren();
+    if (predictionState.layer && predictionState.map) predictionState.map.removeLayer(predictionState.layer);
+    predictionState.layer = null;
+    return;
+  }
+  const m = data.metricas || {};
+  const usesModel = m.metodo === "lightgbm";
+  const errors = m.errores || {};
+  status.textContent = PREDICTION_METHODS[m.metodo] || "Predicción";
+  status.className = "status " + (usesModel ? "" : "neutral");
+  const today = localToday();
+  const first = data.dias[0].fecha, last = data.dias[data.dias.length - 1].fecha;
+  $("prediction-intro").textContent =
+    `${config.intro} entre el ${predictionDayLabel(first, "long")} y el ` +
+    `${predictionDayLabel(last, "long")} (${data.dias.length} días). Gira la ruleta para elegir un día, ` +
+    "elige un rango o recorre los días con ▶. Se recalcula sola cada noche." +
+    ((data.metricas || {}).dias_descartados
+      ? ` Se muestran solo los días en que el modelo se equivoca poco; ${data.metricas.dias_descartados} días ` +
+        "más allá se descartaron por tener demasiado error." : "");
+  const peak = data.dias.reduce((top, item) => config.value(item) > config.value(top) ? item : top, data.dias[0]);
+  $("prediction-peak").textContent = predictionDayLabel(peak.fecha);
+  $("prediction-peak-detail").textContent = format(config.value(peak)) + " " + config.unit + " esperados";
+  const error = m.mae_publicado ?? errors[m.metodo] ?? m.mae_referencia;
+  $("prediction-error").textContent = error === undefined ? "—" : format(error, 2);
+  const others = Object.entries(errors).filter(([method]) => method !== m.metodo)
+    .map(([method, value]) => `${PREDICTION_METHODS[method] || method}: ${format(value, 2)}`);
+  $("prediction-error-detail").textContent = others.length
+    ? others.join(" · ") + " · menor es mejor" : `En ${config.errorUnit} · menor es mejor`;
+  $("prediction-base").textContent = new Intl.DateTimeFormat("es-CL", {
+    day: "numeric", month: "short", timeZone: "UTC"}).format(predictionDate(data.base_hasta));
+  $("prediction-base-detail").textContent = m.dias_historia
+    ? `${format(m.dias_historia)} días de historia · ${format(m.camiones || 0)} camiones` : "—";
+  $("prediction-method").textContent =
+    config.method + ", usando los días anteriores, el mismo día de las semanas pasadas, la tendencia y los " +
+    "promedios recientes. Los días siguientes se apoyan en la predicción del día anterior, por eso cada día " +
+    "muestra su confianza: es el error real que tuvo el método al predecir esa misma distancia hacia " +
+    "adelante en los días de prueba (alta: hasta 10 % más que el primer día; media: hasta 30 %; baja: más). " +
+    `Compiten tres métodos en ${format(m.dias_prueba || 0)} días de prueba que ninguno vio: el modelo LightGBM, ` +
+    "el promedio del mismo día de la semana y el promedio de todo el período. " +
+    `Se publica el de menor error: ${PREDICTION_METHODS[m.metodo] || m.metodo}` +
+    (error === undefined ? "." : ` (${format(error, 2)} ${config.errorUnit} de error).`) +
+    (!usesModel && m.motivo ? ` ${m.motivo}.` : "");
+  // Mantener la selección si sigue existiendo; si no, hoy (o el primer día).
+  const count = data.dias.length;
+  const todayIndex = Math.max(0, data.dias.findIndex((item) => item.fecha === today));
+  if (predictionState.index >= count || !predictionState.loadedAt) predictionState.index = todayIndex;
+  predictionState.from = Math.min(predictionState.from, count - 1);
+  predictionState.to = Math.min(predictionState.to || count - 1, count - 1);
+  buildPredictionWheel(data, today);
+  renderPredictionCharts(data, today);
+  drawPrediction();
+}
+
+function renderPredictionCharts(data, today) {
+  // Columnas: total esperado por día (clic = ver ese día). La transparencia indica la confianza.
+  const chart = $("prediction-daily-chart");
+  const config = predictionConfig();
+  const peak = Math.max(1, ...data.dias.map((item) => config.value(item)));
+  chart.replaceChildren(...data.dias.map((item, index) => {
+    const weekday = predictionDate(item.fecha).getUTCDay();
+    const confidence = predictionConfidence(data, item.fecha);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "prediction-column confidence-" + confidence.level +
+      (weekday === 0 || weekday === 6 ? " weekend" : "") + (item.fecha === today ? " is-today" : "");
+    button.dataset.predictionFecha = item.fecha;
+    button.title = `${predictionDayLabel(item.fecha, "long")}: ${format(config.value(item))} ${config.unit} esperados · ` +
+      CONFIDENCE_LABELS[confidence.level];
+    const value = document.createElement("strong");
+    value.textContent = format(config.value(item));
+    const bar = document.createElement("i");
+    bar.style.height = Math.max(2, config.value(item) / peak * 100) + "%";
+    const label = document.createElement("span");
+    label.textContent = item.fecha === today ? "Hoy" : predictionDayLabel(item.fecha);
+    button.append(value, bar, label);
+    button.addEventListener("click", () => { stopPredictionPlay(); selectPredictionIndex(index, true); });
+    return button;
+  }));
+  // Barras: error de cada método; el publicado en verde.
+  const m = data.metricas || {};
+  const errors = m.errores || (m.mae_referencia !== undefined ? {promedio_historico: m.mae_referencia} : {});
+  const order = ["lightgbm", "promedio_dia_semana", "promedio_historico"].filter((key) => key in errors);
+  renderDashboardBars("prediction-methods-chart", order.map((key) => ({
+    label: (PREDICTION_METHODS[key] || key) + (key === m.metodo ? " · publicado" : ""),
+    value: errors[key],
+    color: key === m.metodo ? "#246c55" : "#b8c6bf",
+    detail: key === m.metodo ? "El de menor error: es el que se ve en el mapa"
+      : `${format((errors[key] / errors[m.metodo] - 1) * 100, 1)} % más error que el publicado`
+  })), "#246c55");
+  for (const [index, row] of [...$("prediction-methods-chart").children].entries()) {
+    row.classList.toggle("winner", order[index] === m.metodo);
+    const strong = row.querySelector("strong");
+    if (strong) strong.textContent = format(errors[order[index]], 3);
+  }
+}
+
+async function loadPrediction(force = false) {
+  if (!token() || predictionState.loading) return;
+  const tipo = predictionState.tipo;
+  const cached = predictionState.cache[tipo];
+  if (!force && cached && Date.now() - cached.loadedAt < PREDICTION_REFRESH_MS) {
+    if (predictionState.data !== cached.data) renderPrediction(cached.data);
+    else { drawPrediction(); centerPredictionWheel(false); }
+    return;
+  }
+  predictionState.loading = true;
+  if (!cached) {
+    $("prediction-status").textContent = "Cargando…";
+    $("prediction-intro").textContent = "Cargando la predicción…";
+  }
+  try {
+    const data = await api(PREDICTION_TYPES[tipo].endpoint, {timeoutMs: 120000});
+    predictionState.cache[tipo] = {data, loadedAt: Date.now()};
+    predictionState.loadedAt = Date.now();
+    predictionState.retries = 0;
+    if (predictionState.tipo === tipo) renderPrediction(data);
+  } catch (error) {
+    if (!cached) {
+      $("prediction-status").textContent = "Reintentando…";
+      $("prediction-status").className = "status warning";
+      $("prediction-intro").textContent = "No se pudo consultar la predicción (" + error.message + "). Se reintentará sola.";
+      // Reintento automático mientras se esté mirando la sección (máx. 5 veces).
+      predictionState.retries = (predictionState.retries || 0) + 1;
+      if (predictionState.retries <= 5) {
+        setTimeout(() => { if (window.location.hash === "#prediccion") loadPrediction(); }, 8000);
+      }
+    }
+  } finally {
+    predictionState.loading = false;
+  }
+}
+
+function setPredictionType(tipo) {
+  if (tipo === predictionState.tipo) return;
+  stopPredictionPlay();
+  predictionState.tipo = tipo;
+  loadPrediction();
+}
+
+for (const tab of document.querySelectorAll("[data-prediction-tab]")) {
+  tab.addEventListener("click", () => setPredictionType(tab.dataset.predictionTab));
+}
+
+for (const button of document.querySelectorAll("[data-prediction-mode]")) {
+  button.addEventListener("click", () => setPredictionMode(button.dataset.predictionMode));
+}
+$("prediction-play").addEventListener("click", togglePredictionPlay);
+$("prediction-prev").addEventListener("click", () => { stopPredictionPlay(); selectPredictionIndex((predictionState.mode === "range" ? predictionState.to : predictionState.index) - 1, true); });
+$("prediction-next").addEventListener("click", () => { stopPredictionPlay(); selectPredictionIndex((predictionState.mode === "range" ? predictionState.to : predictionState.index) + 1, true); });
+for (const id of ["prediction-range-from", "prediction-range-to"]) {
+  $(id).addEventListener("input", () => {
+    predictionState.from = Number($("prediction-range-from").value);
+    predictionState.to = Number($("prediction-range-to").value);
+    drawPrediction();
+  });
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopPredictionPlay(); });
+window.addEventListener("hashchange", () => { if (window.location.hash !== "#prediccion") stopPredictionPlay(); });
+setInterval(() => { if (window.location.hash === "#prediccion") loadPrediction(); }, PREDICTION_REFRESH_MS);
+
+// --- Camiones: flota en vivo y ficha de cada camión por día (/api/camiones) ----------------
+// La flota se lee de la última posición de cada camión; la ficha, del cierre diario
+// (resumen, viajes y paradas) y de los reportes GPS del día. No se inventan recorridos.
+const TRUCK_STATES = {
+  en_ruta: "En ruta", detenido: "Detenido", sin_senal: "Sin señal reciente", sin_datos: "Sin datos"
+};
+const TRUCK_REFRESH_MS = 60000;
+const TRUCK_COLORS = {base: "#9db5aa", halo: "#ffffff", stop: "#e07a1f", start: "#1f6b4f", end: "#172d32", gap: "#71817e"};
+// Un color por viaje (se repiten después del séptimo); el naranja queda para las paradas.
+const TRIP_COLORS = ["#1f6b4f", "#2563eb", "#9333ea", "#0e7490", "#db2777", "#4d7c0f", "#475569"];
+const tripColor = (number) => TRIP_COLORS[(number - 1) % TRIP_COLORS.length];
+const truckView = {fleet: null, filter: "todos", query: "", sort: "nombre", id: null, day: null, detail: null,
+  map: null, layer: null, trips: new Map(), base: [], focus: null, play: null, request: 0,
+  boardDay: null, dayRows: null, dayState: null, dayLoading: false, tab: "flota", pin: null};
+
+function truckHash() {
+  const match = window.location.hash.match(/^#camiones(?:\/([A-Za-z0-9_-]{1,16}))?(?:\/(\d{4}-\d{2}-\d{2}))?$/);
+  return match ? {id: match[1] || null, day: match[2] || null} : null;
+}
+
+function openTruckAtReport(report) {
+  const moment = new Date(report.report_date);
+  truckView.pin = {
+    id: report.asset_id, day: isoDayIn(moment),
+    time: new Intl.DateTimeFormat("en-GB", {hour: "2-digit", minute: "2-digit", hour12: false, timeZone: HISTORY_ZONE}).format(moment),
+    label: formatLocal(report.report_date), event: report.event_name || "Reporte",
+    point: report.latitude === null || report.longitude === null ? null : [Number(report.latitude), Number(report.longitude)]
+  };
+  truckView.detail = null;  // aunque sea el mismo camión y día, se vuelve a dibujar con la marca
+  openTruck(report.asset_id, truckView.pin.day);
+}
+
+function openTruck(id, day) {
+  window.location.hash = "#camiones/" + encodeURIComponent(id) + (day ? "/" + day : "");
+}
+
+// Hora local "YYYY-MM-DD HH:MM:SS" (la API ya la entrega en hora de Chile).
+const clock = (value) => value ? value.slice(11, 16) : "—";
+const minuteOfDay = (value) => value ? Number(value.slice(11, 13)) * 60 + Number(value.slice(14, 16)) : 0;
+
+function truckAge(minutes) {
+  return minutes === null || minutes === undefined ? "Sin reportes" : formatAge(minutes * 60);
+}
+
+function syncTruckView() {
+  const route = truckHash();
+  if (!route) return;
+  $("fleet-view").hidden = Boolean(route.id);
+  $("truck-view").hidden = !route.id;
+  if (!truckView.fleet) loadFleet();
+  if (route.id) {
+    const day = route.day || localToday();
+    if (route.id !== truckView.id || day !== truckView.day || !truckView.detail) loadTruckDay(route.id, day);
+    else if (truckView.map) window.setTimeout(() => truckView.map.invalidateSize(), 50);
+  }
+}
+
+async function loadFleet() {
+  try {
+    const data = await api("/api/camiones", {timeoutMs: 90000});
+    truckView.fleet = data;
+    renderFleet();
+    if (truckView.detail) renderTruckHead();
+  } catch (error) {
+    if (!truckView.fleet) $("fleet-board").replaceChildren(fleetMessage("No se pudo cargar la flota: " + error.message));
+  }
+}
+
+function fleetMessage(text) {
+  const note = document.createElement("p");
+  note.className = "fleet-empty";
+  note.textContent = text;
+  return note;
+}
+
+function sparkline(points) {
+  const width = 140, height = 30, max = Math.max(1, ...points.map((p) => p.km));
+  const step = width / Math.max(1, points.length);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("class", "fleet-spark");
+  svg.setAttribute("aria-hidden", "true");
+  points.forEach((point, index) => {
+    const bar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    const h = point.km ? Math.max(2, (point.km / max) * (height - 2)) : 1;
+    bar.setAttribute("x", String(index * step + 1));
+    bar.setAttribute("y", String(height - h));
+    bar.setAttribute("width", String(Math.max(1, step - 2)));
+    bar.setAttribute("height", String(h));
+    bar.setAttribute("rx", "1.5");
+    if (!point.km) bar.setAttribute("class", "empty");
+    if (index === points.length - 1) bar.setAttribute("class", point.km ? "today" : "empty");
+    svg.append(bar);
+  });
+  return svg;
+}
+
+// El tablero muestra hoy (estado en vivo) o un día anterior (resumen del cierre diario).
+const boardDay = () => truckView.boardDay || localToday();
+const boardIsToday = () => boardDay() === localToday();
+const shortTime = (value) => value ? new Intl.DateTimeFormat("es-CL", {timeStyle: "short", timeZone: HISTORY_ZONE}).format(new Date(value)) : "—";
+
+// Lo que hizo el camión en el día del tablero: {km, viajes, minutos_detenido, primer, ultimo, reportes} o null.
+function truckDay(truck) {
+  if (boardIsToday()) return truck.hoy;
+  const row = truckView.dayRows && truckView.dayRows.get(truck.asset_id);
+  return row ? {km: row.km_observados, viajes: row.viajes, minutos_detenido: row.minutos_detenido,
+    primer: shortTime(row.primer_reporte), ultimo: shortTime(row.ultimo_reporte), reportes: row.reportes} : null;
+}
+
+function fleetRow(truck) {
+  const today = boardIsToday();
+  const day = truckDay(truck);
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "fleet-row state-" + (today ? truck.estado : day ? "dia" : "sin_datos");
+  row.addEventListener("click", () => openTruck(truck.asset_id, today ? null : boardDay()));
+  const name = document.createElement("span");
+  name.className = "fleet-name";
+  const title = document.createElement("strong");
+  title.textContent = truck.nombre;
+  const sub = document.createElement("small");
+  sub.className = "fleet-identity";
+  sub.append(...truckIdentity(truck.asset_id, truck.conductor, null));
+  name.append(title, sub);
+  const state = document.createElement("span");
+  state.className = "fleet-state";
+  const label = document.createElement("strong");
+  const note = document.createElement("small");
+  if (today) {
+    label.innerHTML = '<i class="state-dot"></i>';
+    label.append(TRUCK_STATES[truck.estado] + (truck.estado === "en_ruta" && truck.velocidad ? ` · ${format(truck.velocidad)} km/h` : ""));
+    note.textContent = truckAge(truck.edad_minutos);
+  } else {
+    label.textContent = day ? `${(day.primer || "—").slice(0, 5)} – ${(day.ultimo || "—").slice(0, 5)}` : "Sin reportes";
+    note.textContent = day ? `${format(day.reportes)} reportes` : "";
+  }
+  state.append(label, note);
+  const summary = document.createElement("span");
+  summary.className = "fleet-today";
+  if (day) {
+    for (const [value, unit] of [[format(day.km, 1), "km"], [format(day.viajes), day.viajes === 1 ? "viaje" : "viajes"],
+      [formatMinutes(day.minutos_detenido), "detenido"]]) {
+      const item = document.createElement("span");
+      const strong = document.createElement("b");
+      strong.textContent = value;
+      item.append(strong, " " + unit);
+      summary.append(item);
+    }
+  } else {
+    summary.textContent = today ? "Sin actividad hoy" : "Sin actividad ese día";
+    summary.classList.add("is-empty");
+  }
+  row.append(name, state, summary, sparkline(truck.serie || []));
+  return row;
+}
+
+function renderBoardDay() {
+  const today = boardIsToday();
+  const day = boardDay();
+  $("board-date").value = day;
+  $("board-date").max = localToday();
+  $("board-next").disabled = today;
+  $("fleet-head-state").textContent = today ? "Último dato" : "Primer y último reporte";
+  $("fleet-head-day").textContent = today ? "Hoy" : "Ese día";
+  // Los estados en vivo solo tienen sentido hoy; en un día anterior se filtra por actividad.
+  for (const button of document.querySelectorAll('[data-fleet-filter]:not([data-fleet-filter="todos"])')) button.hidden = !today;
+  if (!today && truckView.filter !== "todos") truckView.filter = "todos";
+  const totals = $("fleet-day-totals");
+  const fleet = truckView.fleet;
+  const state = truckView.dayState;
+  let note = "";
+  if (today) {
+    const summary = fleet && fleet.resumen;
+    totals.textContent = summary ? `${format(summary.km_hoy, 0)} km · ${format(summary.viajes_hoy)} viajes hoy` : "";
+    note = "Hoy, en curso: las cifras se actualizan cada minuto.";
+  } else if (truckView.dayLoading) {
+    totals.textContent = "";
+    note = "Consultando el día…";
+  } else {
+    totals.textContent = state ? `${format(state.camiones)} camiones con reportes · ${format(state.km_observados, 0)} km · ${format(state.reportes)} reportes` : "";
+    const [label] = state ? (HISTORY_STATES[state.estado] || [state.estado]) : ["Sin resumen calculado para este día"];
+    note = label + (state && state.estado === "esperando_datos" ? ": cifras provisorias hasta que la API confirme los reportes hasta las 00:00." : "") +
+      (state && state.recalculos ? ` · recalculado ${format(state.recalculos)} ${state.recalculos === 1 ? "vez" : "veces"} por reportes atrasados` : "");
+  }
+  $("board-day-note").textContent = `${predictionDayLabel(day, "long")} · ${note}`;
+}
+
+async function setBoardDay(day) {
+  const today = localToday();
+  if (!day || day >= today) {
+    truckView.boardDay = null;
+    renderBoardDay();
+    renderFleet();
+    return;
+  }
+  truckView.boardDay = day;
+  truckView.dayLoading = true;
+  truckView.dayRows = null;
+  truckView.dayState = null;
+  renderBoardDay();
+  renderFleet();
+  try {
+    const data = await api(`/api/reportes/dia?fecha=${day}`);
+    if (truckView.boardDay !== day) return;
+    truckView.dayRows = new Map((data.camiones || []).map((row) => [row.asset_id, row]));
+    truckView.dayState = data.estado;
+  } catch (error) {
+    if (truckView.boardDay !== day) return;
+    $("fleet-board").replaceChildren(fleetMessage("No se pudo consultar el día: " + error.message));
+  } finally {
+    if (truckView.boardDay === day) {
+      truckView.dayLoading = false;
+      renderBoardDay();
+      renderFleet();
+    }
+  }
+}
+
+function renderFleet() {
+  const data = truckView.fleet;
+  if (!data || data.status !== "ok") {
+    $("fleet-board").replaceChildren(fleetMessage("La flota aparecerá cuando el catálogo de camiones esté cargado."));
+    return;
+  }
+  const summary = data.resumen;
+  for (const key of ["todos", "en_ruta", "detenido", "sin_senal"]) {
+    $("fleet-count-" + key).textContent = format(key === "todos" ? summary.total : summary[key] + (key === "sin_senal" ? summary.sin_datos : 0));
+  }
+  for (const button of document.querySelectorAll("[data-fleet-filter]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.fleetFilter === truckView.filter));
+  }
+  if (!boardIsToday() && truckView.dayLoading) {
+    $("fleet-board").replaceChildren(fleetMessage("Cargando el día…"));
+    return;
+  }
+  const query = truckView.query.trim().toLocaleLowerCase("es-CL");
+  let trucks = data.camiones.filter((truck) => truckView.filter === "todos" || truck.estado === truckView.filter
+    || (truckView.filter === "sin_senal" && truck.estado === "sin_datos"));
+  if (query) {
+    trucks = trucks.filter((truck) => [truck.nombre, truck.asset_id, truck.conductor].some((value) =>
+      value && value.toLocaleLowerCase("es-CL").includes(query)));
+  }
+  const byName = (a, b) => a.nombre.localeCompare(b.nombre, "es-CL", {numeric: true});
+  const km = (truck) => (truckDay(truck) || {}).km || 0;
+  const sorters = {
+    nombre: byName,
+    km: (a, b) => km(b) - km(a) || byName(a, b),
+    dato: (a, b) => (a.edad_minutos ?? Infinity) - (b.edad_minutos ?? Infinity) || byName(a, b)
+  };
+  trucks.sort(sorters[truckView.sort] || byName);
+  $("fleet-tab-flota-note").textContent = boardIsToday()
+    ? `${format(summary.total)} camiones · ${format(summary.en_ruta)} en ruta ahora`
+    : `${format(truckView.dayRows ? truckView.dayRows.size : 0)} con actividad el ${predictionDayLabel(boardDay())}`;
+  // En un día anterior, primero los que tuvieron actividad.
+  if (!boardIsToday()) trucks.sort((a, b) => Number(Boolean(truckDay(b))) - Number(Boolean(truckDay(a))));
+  $("fleet-board").replaceChildren(...(trucks.length ? trucks.map(fleetRow)
+    : [fleetMessage(query ? "Ningún camión coincide con la búsqueda." : "No hay camiones en este estado.")]));
+  renderBoardDay();
+}
+
+async function loadTruckDay(id, day, quiet = false) {
+  const request = ++truckView.request;
+  truckView.id = id;
+  truckView.day = day;
+  $("truck-date").value = day;
+  $("truck-date").max = localToday();
+  $("truck-next").disabled = day >= localToday();
+  if (!quiet) {
+    stopTruckPlay();
+    // La lista de reportes GPS es del día anterior: se cierra y se vuelve a pedir al abrirla.
+    historyState.detail = null;
+    $("history-detail").open = false;
+    $("history-detail-rows").replaceChildren();
+    $("history-detail-more").hidden = true;
+    $("truck-day-note").textContent = "Cargando el día…";
+    $("truck-image").disabled = true;
+  }
+  renderTruckHead();
+  try {
+    const data = await api(`/api/camiones/${encodeURIComponent(id)}?fecha=${day}`, {timeoutMs: 90000});
+    if (request !== truckView.request) return;
+    truckView.detail = data;
+    renderTruckDay(quiet);
+  } catch (error) {
+    if (request !== truckView.request) return;
+    truckView.detail = null;
+    $("truck-day-note").textContent = "No se pudo cargar este día: " + error.message;
+  }
+}
+
+function fleetTruck(id) {
+  return truckView.fleet && truckView.fleet.camiones ? truckView.fleet.camiones.find((truck) => truck.asset_id === id) : null;
+}
+
+// Patente con aspecto de placa, conductor y última ruta (con el color de su nivel de uso).
+function truckIdentity(plate, driver, route) {
+  const nodes = [];
+  const plateNode = document.createElement("span");
+  plateNode.className = "plate";
+  plateNode.textContent = plate;
+  plateNode.title = "Patente";
+  nodes.push(plateNode);
+  const driverNode = document.createElement("span");
+  driverNode.className = "driver" + (driver ? "" : " is-empty");
+  driverNode.title = "Conductor";
+  driverNode.textContent = driver ? driver.toLocaleLowerCase("es-CL").replace(/(^|\s)\S/g, (c) => c.toLocaleUpperCase("es-CL")) : "Sin conductor informado";
+  nodes.push(driverNode);
+  if (route) {
+    const routeNode = document.createElement("span");
+    routeNode.className = "last-route";
+    routeNode.style.setProperty("--route", ROUTE_COLORS[route.usage_level] || "#718785");
+    routeNode.title = "Última ruta clasificada";
+    routeNode.textContent = route.label;
+    nodes.push(routeNode);
+  }
+  return nodes;
+}
+
+function renderTruckHead() {
+  const live = fleetTruck(truckView.id);
+  const detail = truckView.detail && truckView.detail.asset_id === truckView.id ? truckView.detail : null;
+  const name = (live && live.nombre) || (detail && detail.nombre) || truckView.id;
+  $("truck-name").textContent = "Camión " + name;
+  const driver = (detail && detail.conductor) || (live && live.conductor);
+  $("truck-meta").replaceChildren(...truckIdentity(truckView.id, driver, live && live.ruta));
+  const state = $("truck-state");
+  state.className = "truck-state state-" + (live ? live.estado : "sin_datos");
+  state.innerHTML = '<i class="state-dot"></i>';
+  state.append(live ? `${TRUCK_STATES[live.estado]} · ${truckAge(live.edad_minutos)}` : "Estado en vivo no disponible");
+}
+
+function dayStatusNote(data) {
+  if (!data.resumen) return "Este camión no tiene reportes este día.";
+  if (data.estado_dia === "en_curso") return "Hoy, en curso: las cifras se actualizan cada pocos minutos hasta las 00:00.";
+  if (data.estado_dia === "esperando_datos") return "El día terminó, pero faltan reportes de la API: las cifras son provisorias.";
+  return "Día cerrado (00:00 a 00:00, hora de Chile).";
+}
+
+function renderTruckDay(keepView = false) {
+  const data = truckView.detail;
+  renderTruckHead();
+  const summary = data.resumen;
+  const pin = activePin(data);
+  $("truck-day-note").textContent = `${predictionDayLabel(data.fecha, "long")} · ${dayStatusNote(data)}` +
+    (pin ? ` · El punto rojo marca dónde estaba a las ${pin.time} (${pin.event}).` : "");
+  $("truck-km").textContent = summary ? format(summary.km, 1) : "—";
+  const average = (data.historial || []).filter((item) => item.fecha !== data.fecha && item.km > 0);
+  const mean = average.length ? average.reduce((sum, item) => sum + item.km, 0) / average.length : null;
+  $("truck-km-note").textContent = summary && mean
+    ? `Su promedio en días con actividad: ${format(mean, 0)} km` : " ";
+  $("truck-trips").textContent = summary ? format(summary.viajes) : "—";
+  $("truck-stopped").textContent = summary ? formatMinutes(summary.minutos_detenido) : "—";
+  $("truck-stopped-note").textContent = summary ? `${format(summary.paradas)} ${summary.paradas === 1 ? "parada" : "paradas"} de 10 min o más` : " ";
+  $("truck-span").textContent = summary ? `${clock(summary.primer)} – ${clock(summary.ultimo)}` : "—";
+  $("truck-span-note").textContent = summary ? `${formatMinutes(summary.minutos_activo)} entre ambos` : " ";
+  const hasRoute = Boolean(data.recorrido && data.recorrido.lineas.length);
+  $("truck-image").disabled = !hasRoute;
+  $("truck-play").disabled = !data.viajes.length;
+  $("truck-signal-note").textContent = data.recorrido && data.recorrido.cortes
+    ? `El GPS dejó de reportar ${format(data.recorrido.cortes)} ${data.recorrido.cortes === 1 ? "vez" : "veces"} ` +
+      `(${formatMinutes(data.recorrido.minutos_sin_senal)} en total).` : "";
+  renderTruckRibbon(data);
+  renderTruckEvents(data);
+  renderTruckHistory(data);
+  if (truckView.play) return;  // no interrumpir la reproducción con la actualización automática
+  drawTruckMap(data, keepView);
+}
+
+// Orden cronológico de viajes, paradas e intervalos sin datos.
+function truckTimeline(data) {
+  const items = [
+    ...data.viajes.map((trip) => ({kind: "viaje", from: trip.inicio, to: trip.fin, trip})),
+    ...data.eventos.map((event) => ({kind: event.tipo, from: event.desde, to: event.hasta, event}))
+  ];
+  return items.sort((a, b) => a.from.localeCompare(b.from));
+}
+
+// --- Geometría auxiliar (mapa e imagen) ---
+const distanceM = (a, b) => Math.hypot(b[0] - a[0], (b[1] - a[1]) * Math.cos((a[0] + b[0]) * Math.PI / 360)) * 111000;
+
+// Paradas agrupadas por lugar (a menos de 300 m): una sola marca con todas sus visitas,
+// así las paradas repetidas en la base no se tapan entre sí.
+function stopPlaces(data) {
+  const places = [];
+  let number = 0;
+  for (const event of data.eventos) {
+    if (event.tipo !== "parada" || !event.lugar) continue;
+    number += 1;
+    let place = places.find((item) => distanceM(item.lugar, event.lugar) < 300);
+    if (!place) { place = {lugar: event.lugar, nombre: event.nombre, visitas: []}; places.push(place); }
+    if (!place.nombre && event.nombre) place.nombre = event.nombre;
+    place.visitas.push({...event, numero: number});
+  }
+  return places;
+}
+
+function stopPlaceLabel(place) {
+  const numbers = place.visitas.map((visit) => visit.numero);
+  return numbers.length <= 3 ? numbers.join(" ") : `${numbers[0]}…${numbers[numbers.length - 1]}`;
+}
+
+// Cortes de señal: línea recta (punteada) entre el último punto antes del corte y el
+// primero después. Se dibuja aparte para que se entienda el recorrido completo, pero no es
+// el camino exacto.
+function signalGaps(lines) {
+  const gaps = [];
+  for (let k = 1; k < lines.length; k++) {
+    const from = lines[k - 1][lines[k - 1].length - 1], to = lines[k][0];
+    if (distanceM(from, to) > 40) gaps.push([from, to]);
+  }
+  return gaps;
+}
+
+// Punto a una fracción del largo de un viaje y su rumbo (grados, 0 = este, sentido horario).
+function pointAlong(lines, fraction) {
+  const segments = [];
+  let total = 0;
+  for (const line of lines) {
+    for (let k = 1; k < line.length; k++) {
+      const length = distanceM(line[k - 1], line[k]);
+      if (length > 0) { segments.push([line[k - 1], line[k], length]); total += length; }
+    }
+  }
+  if (!segments.length) return null;
+  let target = total * fraction;
+  for (const [a, b, length] of segments) {
+    if (target <= length) {
+      const t = target / length;
+      const angle = Math.atan2(-(b[0] - a[0]), (b[1] - a[1]) * Math.cos(a[0] * Math.PI / 180)) * 180 / Math.PI;
+      return {point: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], angle};
+    }
+    target -= length;
+  }
+  const [a, b] = segments[segments.length - 1];
+  return {point: b, angle: Math.atan2(-(b[0] - a[0]), (b[1] - a[1]) * Math.cos(a[0] * Math.PI / 180)) * 180 / Math.PI};
+}
+
+function tripLength(trip) {
+  let total = 0;
+  for (const line of trip.lineas) for (let k = 1; k < line.length; k++) total += distanceM(line[k - 1], line[k]);
+  return total;
+}
+
+// --- Cinta de 24 horas ---
+function renderTruckRibbon(data) {
+  const ribbon = $("truck-ribbon");
+  ribbon.replaceChildren();
+  const dayStart = data.fecha + " 00:00:00";
+  for (const item of truckTimeline(data)) {
+    // Un tramo que empezó el día anterior se recorta a las 00:00.
+    const from = item.from < dayStart ? 0 : minuteOfDay(item.from);
+    const to = item.to.slice(0, 10) > data.fecha ? 1440 : minuteOfDay(item.to);
+    if (to <= from) continue;
+    const block = document.createElement("span");
+    block.className = "ribbon-block " + (item.kind === "viaje" ? "move" : item.kind === "parada" ? "stop" : "gap");
+    block.style.left = (from / 14.4) + "%";
+    block.style.width = Math.max(0.3, (to - from) / 14.4) + "%";
+    block.title = item.kind === "viaje"
+      ? `Viaje ${item.trip.numero}: ${clock(item.from)}–${clock(item.to)} · ${format(item.trip.km, 1)} km`
+      : `${item.kind === "parada" ? "Detenido" : "Sin datos"}: ${clock(item.from)}–${clock(item.to)} (${formatMinutes(item.event.minutos)})`;
+    if (item.trip) {
+      block.style.background = tripColor(item.trip.numero);
+      block.addEventListener("click", () => focusTrip(item.trip.numero));
+    }
+    ribbon.append(block);
+  }
+  const pin = activePin(data);
+  if (pin) {
+    const mark = document.createElement("span");
+    mark.className = "ribbon-pin";
+    mark.style.left = ((Number(pin.time.slice(0, 2)) * 60 + Number(pin.time.slice(3, 5))) / 14.4) + "%";
+    mark.title = `Reporte de las ${pin.time}`;
+    ribbon.append(mark);
+  }
+  if (data.fecha === localToday()) {
+    const now = document.createElement("span");
+    now.className = "ribbon-now";
+    const parts = new Intl.DateTimeFormat("en-GB", {hour: "2-digit", minute: "2-digit", hour12: false, timeZone: HISTORY_ZONE}).format(new Date()).split(":");
+    now.style.left = ((Number(parts[0]) * 60 + Number(parts[1])) / 14.4) + "%";
+    now.title = "Ahora";
+    ribbon.append(now);
+  }
+  if (!ribbon.children.length) ribbon.append(Object.assign(document.createElement("span"), {className: "ribbon-empty", textContent: "Sin viajes ni paradas este día"}));
+}
+
+// --- El día, paso a paso ---
+function renderTruckEvents(data) {
+  const list = $("truck-events");
+  list.replaceChildren();
+  let stopNumber = 0;
+  for (const item of truckTimeline(data)) {
+    const li = document.createElement("li");
+    const time = document.createElement("time");
+    time.textContent = clock(item.from);
+    const body = document.createElement("div");
+    const title = document.createElement("strong");
+    const detail = document.createElement("small");
+    const mark = document.createElement("span");
+    if (item.kind === "viaje") {
+      const trip = item.trip;
+      li.className = "event move";
+      li.dataset.trip = String(trip.numero);
+      li.style.setProperty("--trip", tripColor(trip.numero));
+      mark.className = "event-mark trip";
+      mark.textContent = "V" + trip.numero;
+      title.textContent = `Viaje ${trip.numero} · ${format(trip.km, 1)} km`;
+      detail.textContent = `${clock(trip.inicio)} a ${clock(trip.fin)} · ${formatMinutes(trip.minutos)}` +
+        (trip.abierto_inicio ? " · venía del día anterior" : "") + (trip.abierto_fin ? " · sigue al día siguiente" : "") +
+        (trip.con_saltos ? " · con cortes de señal" : "");
+      li.tabIndex = 0;
+      li.title = "Ver este viaje en el mapa";
+      li.addEventListener("click", () => focusTrip(trip.numero));
+      li.addEventListener("keydown", (event) => { if (event.key === "Enter") focusTrip(trip.numero); });
+    } else if (item.kind === "parada") {
+      stopNumber += 1;
+      li.className = "event stop";
+      mark.className = "event-mark stop";
+      mark.textContent = String(stopNumber);
+      title.textContent = `Detenido ${formatMinutes(item.event.minutos)}`;
+      detail.textContent = `${clock(item.from)} a ${clock(item.to)} · ${item.event.nombre || "Lugar sin nombre"}`;
+    } else {
+      li.className = "event gap";
+      mark.className = "event-mark gap";
+      mark.textContent = "?";
+      title.textContent = `Sin datos ${formatMinutes(item.event.minutos)}`;
+      detail.textContent = `${clock(item.from)} a ${clock(item.to)} · el GPS no reportó; no se sabe dónde estuvo`;
+    }
+    body.append(title, detail);
+    li.append(time, mark, body);
+    list.append(li);
+  }
+  // Llegando desde un reporte: se marca qué estaba haciendo el camión a esa hora.
+  const pin = activePin(data);
+  if (pin) {
+    const at = `${data.fecha} ${pin.time}:00`;
+    const items = truckTimeline(data);
+    const index = items.findIndex((item) => item.from <= at && at <= item.to);
+    const node = index >= 0 ? list.children[index] : null;
+    if (node) {
+      node.classList.add("is-report");
+      window.setTimeout(() => { list.scrollTop = node.offsetTop - list.offsetTop - list.clientHeight / 3; }, 50);
+    }
+  }
+  if (!list.children.length) {
+    const li = document.createElement("li");
+    li.className = "event empty";
+    li.textContent = data.resumen
+      ? "Hubo reportes, pero ningún viaje de más de 1 km ni paradas de 10 min."
+      : "Sin reportes este día. Elige otro día en el calendario o en los últimos 30 días.";
+    list.append(li);
+  }
+}
+
+// --- Últimos 30 días: ventana fija que termina hoy ---
+function renderTruckHistory(data) {
+  const chart = $("truck-history");
+  const byDay = new Map((data.historial || []).map((item) => [item.fecha, item]));
+  const today = data.hoy || localToday();
+  const days = Array.from({length: 30}, (_, k) => shiftDay(today, k - 29));
+  const max = Math.max(1, ...days.map((day) => (byDay.get(day) || {}).km || 0));
+  chart.replaceChildren(...days.map((day) => {
+    const item = byDay.get(day);
+    const button = document.createElement("button");
+    button.type = "button";
+    const weekday = predictionDate(day).getUTCDay();
+    button.className = "history-bar" + (day === data.fecha ? " is-selected" : "") + (weekday === 0 || weekday === 6 ? " weekend" : "");
+    button.title = `${predictionDayLabel(day, "long")}: ` + (item ? `${format(item.km, 1)} km · ${format(item.viajes)} viajes` : "sin reportes");
+    button.setAttribute("aria-pressed", String(day === data.fecha));
+    const bar = document.createElement("i");
+    bar.style.height = item && item.km ? Math.max(3, (item.km / max) * 100) + "%" : "2px";
+    const label = document.createElement("span");
+    label.textContent = String(Number(day.slice(8)));
+    button.append(bar, label);
+    button.addEventListener("click", () => openTruck(data.asset_id, day));
+    return button;
+  }));
+}
+
+// --- Mapa del día ---
+function ensureTruckMap() {
+  if (truckView.map || !window.L) return truckView.map;
+  truckView.map = L.map($("truck-map"), {zoomControl: true, preferCanvas: true}).setView([-23.6, -70.4], 7);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(truckView.map);
+  truckView.map.createPane("truckMarks").style.zIndex = 650;
+  truckView.map.on("zoomend", applyTripLanes);
+  return truckView.map;
+}
+
+function pinIcon(text, className, color) {
+  const style = color ? ` style="--pin:${color}"` : "";
+  return L.divIcon({className: "truck-pin-icon", html: `<span class="truck-pin ${className}"${style}>${text}</span>`,
+    iconSize: [0, 0], iconAnchor: [0, 0]});
+}
+
+function arrowIcon(angle, color) {
+  return L.divIcon({className: "truck-pin-icon",
+    html: `<span class="truck-arrow" style="--pin:${color};transform:rotate(${angle.toFixed(0)}deg)"></span>`,
+    iconSize: [14, 14], iconAnchor: [7, 7]});
+}
+
+// Los viajes se corren unos píxeles a la derecha de su sentido de marcha, como pistas de una
+// carretera: la ida y la vuelta por el mismo camino quedan lado a lado en vez de taparse.
+const TRIP_LANE_PX = 4;
+
+function offsetPath(points, px) {
+  if (points.length < 2) return points.map((p) => [p[0], p[1]]);
+  return points.map((p, k) => {
+    const a = points[Math.max(0, k - 1)], b = points[Math.min(points.length - 1, k + 1)];
+    const dx = b[0] - a[0], dy = b[1] - a[1], length = Math.hypot(dx, dy) || 1;
+    return [p[0] - dy / length * px, p[1] + dx / length * px];
+  });
+}
+
+function laneLines(map, lines) {
+  return lines.map((line) => offsetPath(line.map((p) => {
+    const point = map.latLngToLayerPoint(p);
+    return [point.x, point.y];
+  }), TRIP_LANE_PX).map(([x, y]) => {
+    const latlng = map.layerPointToLatLng([x, y]);
+    return [latlng.lat, latlng.lng];
+  }));
+}
+
+function applyTripLanes() {
+  const map = truckView.map;
+  if (!map) return;
+  for (const entry of truckView.trips.values()) {
+    const lanes = laneLines(map, entry.trip.lineas);
+    entry.lanes = lanes;
+    for (const part of entry.parts) part.setLatLngs(lanes);
+    for (const mark of entry.marks) {
+      const at = pointAlong(lanes, mark.options.fraction);
+      if (at) mark.setLatLng(at.point);
+    }
+  }
+}
+
+// Marcas fijas del mapa: paradas agrupadas por lugar, y A (primer punto) y B (último). Si A o
+// B caen donde hay paradas, van en la misma marca para que no se tapen.
+function placeMarks(data) {
+  const lines = data.recorrido ? data.recorrido.lineas : [];
+  const marks = stopPlaces(data).map((place) => ({lugar: place.lugar, place, start: false, end: false}));
+  if (lines.length) {
+    const first = lines[0][0], lastLine = lines[lines.length - 1], last = lastLine[lastLine.length - 1];
+    for (const [point, key] of [[first, "start"], [last, "end"]]) {
+      let mark = marks.find((item) => distanceM(item.lugar, point) < 600);
+      if (!mark) { mark = {lugar: point, place: null, start: false, end: false}; marks.push(mark); }
+      mark[key] = true;
+    }
+  }
+  return marks.map((mark) => ({...mark, parts: [
+    ...(mark.start ? [["start", "A"]] : []),
+    ...(mark.place ? [["stop", stopPlaceLabel(mark.place)]] : []),
+    ...(mark.end ? [["end", "B"]] : [])
+  ]}));
+}
+
+function placeMarkTooltip(mark, data) {
+  const lines = [];
+  if (mark.start) lines.push(`<strong>A</strong> · primer punto del día · ${clock(data.recorrido.inicio)}`);
+  if (mark.place) {
+    lines.push(`<strong>${mark.place.visitas.length > 1 ? `${mark.place.visitas.length} paradas en ` : "Parada en "}` +
+      `${escapeText(mark.place.nombre || "lugar sin nombre")}</strong>`);
+    for (const visit of mark.place.visitas) {
+      lines.push(`${visit.numero}. ${clock(visit.desde)}–${clock(visit.hasta)} (${formatMinutes(visit.minutos)})`);
+    }
+  }
+  if (mark.end) lines.push(`<strong>B</strong> · último punto · ${clock(data.recorrido.fin)}`);
+  return lines.join("<br>");
+}
+
+function drawTruckMap(data, keepView = false) {
+  const map = ensureTruckMap();
+  if (!map) return;
+  map.invalidateSize();
+  if (truckView.layer) map.removeLayer(truckView.layer);
+  truckView.trips.clear();
+  truckView.base = [];
+  truckView.focus = null;
+  $("truck-show-all").hidden = true;
+  const layer = L.featureGroup();
+  const lines = data.recorrido ? data.recorrido.lineas : [];
+  // 1. Todo lo que registró el GPS (también movimientos cortos que no son viajes), de fondo.
+  if (lines.length) {
+    truckView.base.push(
+      L.polyline(lines, {color: TRUCK_COLORS.halo, weight: 6, opacity: 0.85, interactive: false}).addTo(layer),
+      L.polyline(lines, {color: TRUCK_COLORS.base, weight: 3, opacity: 0.9, interactive: false}).addTo(layer));
+    for (const gap of signalGaps(lines)) {
+      truckView.base.push(L.polyline(gap, {color: TRUCK_COLORS.gap, weight: 2, opacity: 0.8, dashArray: "2 7"})
+        .bindTooltip("Sin señal: línea recta entre dos reportes, no es el camino exacto", {sticky: true}).addTo(layer));
+    }
+  }
+  // 2. Cada viaje con su color, flechas de sentido y su número (V1, V2…).
+  for (const trip of data.viajes) {
+    const color = tripColor(trip.numero);
+    const parts = [
+      L.polyline(trip.lineas, {color: TRUCK_COLORS.halo, weight: 8, opacity: 0.95, lineJoin: "round", lineCap: "round"}),
+      L.polyline(trip.lineas, {color, weight: 4, opacity: 1, lineJoin: "round", lineCap: "round"})
+    ];
+    const tip = `Viaje ${trip.numero}: ${clock(trip.inicio)}–${clock(trip.fin)} · ${format(trip.km, 1)} km`;
+    for (const part of parts) part.bindTooltip(tip, {sticky: true}).on("click", () => focusTrip(trip.numero));
+    const marks = [];
+    if (tripLength(trip) > 400) {
+      for (const fraction of [0.2, 0.8]) {
+        const at = pointAlong(trip.lineas, fraction);
+        if (at) marks.push(L.marker(at.point, {icon: arrowIcon(at.angle, color), interactive: false, pane: "truckMarks", fraction}));
+      }
+      const fraction = 0.35;
+      const middle = pointAlong(trip.lineas, fraction);
+      if (middle) marks.push(L.marker(middle.point, {icon: pinIcon("V" + trip.numero, "trip", color), pane: "truckMarks", fraction})
+        .bindTooltip(tip).on("click", () => focusTrip(trip.numero)));
+    }
+    for (const item of [...parts, ...marks]) item.addTo(layer);
+    truckView.trips.set(trip.numero, {trip, parts, marks, lanes: trip.lineas});
+  }
+  // 3. Paradas (agrupadas por lugar) y los puntos A y B.
+  for (const mark of placeMarks(data)) {
+    const html = `<span class="truck-pin group">${mark.parts.map(([kind, text]) => `<b class="${kind}">${text}</b>`).join("")}</span>`;
+    L.marker(mark.lugar, {icon: L.divIcon({className: "truck-pin-icon", html, iconSize: [0, 0], iconAnchor: [0, 0]}),
+      zIndexOffset: mark.start || mark.end ? 600 : 400, pane: "truckMarks"})
+      .bindTooltip(placeMarkTooltip(mark, data)).addTo(layer);
+  }
+  layer.addTo(map);
+  truckView.layer = layer;
+  // Si se llegó desde un reporte, se marca dónde estaba el camión en ese momento.
+  const pin = activePin(data);
+  if (pin && pin.point) {
+    L.marker(pin.point, {icon: L.divIcon({className: "truck-pin-icon", iconSize: [0, 0], iconAnchor: [0, 0],
+      html: `<span class="report-pin"><b></b><em>${escapeText(pin.time)}</em></span>`}), zIndexOffset: 1000, pane: "truckMarks"})
+      .bindTooltip(`Reporte del ${escapeText(pin.label)} · ${escapeText(pin.event)}`).addTo(layer);
+  }
+  if (!keepView && layer.getLayers().length) map.fitBounds(layer.getBounds(), {padding: [30, 30], maxZoom: 14, animate: false});
+  applyTripLanes();
+}
+
+function activePin(data) {
+  const pin = truckView.pin;
+  return pin && data && pin.id === data.asset_id && pin.day === data.fecha ? pin : null;
+}
+
+function escapeText(value) {
+  const node = document.createElement("span");
+  node.textContent = value;
+  return node.innerHTML;
+}
+
+// Ver un viaje: él al frente, el resto atenuado.
+function focusTrip(number, fit = true) {
+  const entry = truckView.trips.get(number);
+  if (!entry || !truckView.map) return;
+  truckView.focus = number;
+  for (const [key, item] of truckView.trips) {
+    const active = key === number;
+    item.parts[0].setStyle({opacity: active ? 0.95 : 0});
+    item.parts[1].setStyle({opacity: active ? 1 : 0.18, weight: active ? 6 : 3.5});
+    for (const mark of item.marks) mark.setOpacity(active ? 1 : 0);
+    if (active) { item.parts[0].bringToFront(); item.parts[1].bringToFront(); }
+  }
+  for (const base of truckView.base) base.setStyle({opacity: 0.35});
+  for (const node of document.querySelectorAll(".truck-events .event.move")) {
+    node.classList.toggle("is-selected", node.dataset.trip === String(number));
+  }
+  $("truck-show-all").hidden = false;
+  if (fit) truckView.map.fitBounds(L.featureGroup(entry.parts).getBounds(), {padding: [50, 50], maxZoom: 15});
+}
+
+function showWholeDay() {
+  stopTruckPlay();
+  if (truckView.detail) drawTruckMap(truckView.detail);
+  for (const node of document.querySelectorAll(".truck-events .event.is-selected")) node.classList.remove("is-selected");
+}
+
+// --- Reproducir el día: el camión recorre sus viajes en orden y se detiene en cada parada ---
+function playbackSteps(data) {
+  const steps = [];
+  let stopNumber = 0;
+  for (const item of truckTimeline(data)) {
+    if (item.kind === "viaje") {
+      if (item.trip.lineas.flat().length > 1) steps.push({kind: "viaje", trip: item.trip});
+    } else if (item.kind === "parada") {
+      stopNumber += 1;
+      if (item.event.lugar) steps.push({kind: "parada", event: item.event, numero: stopNumber});
+    } else {
+      steps.push({kind: "sin_datos", event: item.event});
+    }
+  }
+  return steps;
+}
+
+function setPlayStatus(text) {
+  $("truck-play-status").textContent = text;
+}
+
+function stopTruckPlay() {
+  const play = truckView.play;
+  if (!play) return;
+  cancelAnimationFrame(play.frame);
+  clearTimeout(play.timer);
+  if (play.layer && truckView.map) truckView.map.removeLayer(play.layer);
+  truckView.play = null;
+  $("truck-play").textContent = "▶ Reproducir el día";
+  $("truck-play").setAttribute("aria-pressed", "false");
+  setPlayStatus("");
+  for (const node of document.querySelectorAll(".truck-events .event.is-playing")) node.classList.remove("is-playing");
+}
+
+function toggleTruckPlay() {
+  if (truckView.play) { showWholeDay(); return; }
+  const data = truckView.detail;
+  const map = truckView.map;
+  if (!data || !map || !data.viajes.length) return;
+  drawTruckMap(data);
+  for (const item of truckView.trips.values()) {
+    item.parts[0].setStyle({opacity: 0});
+    item.parts[1].setStyle({opacity: 0.15});
+    for (const mark of item.marks) mark.setOpacity(0);
+  }
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const play = {steps: playbackSteps(data), index: 0, frame: 0, timer: 0, layer: L.layerGroup().addTo(map)};
+  play.truck = L.marker(data.viajes[0].lineas[0][0],
+    {icon: L.divIcon({className: "truck-pin-icon", html: '<span class="truck-pin play">⛟</span>', iconSize: [0, 0], iconAnchor: [0, 0]}),
+      zIndexOffset: 900, pane: "truckMarks"}).addTo(play.layer);
+  truckView.play = play;
+  $("truck-play").textContent = "■ Detener";
+  $("truck-play").setAttribute("aria-pressed", "true");
+  const markItem = (selector) => {
+    for (const node of document.querySelectorAll(".truck-events .event.is-playing")) node.classList.remove("is-playing");
+    const node = selector && document.querySelector(selector);
+    if (node) {
+      node.classList.add("is-playing");
+      const list = $("truck-events");
+      list.scrollTop = node.offsetTop - list.offsetTop - list.clientHeight / 3;
+    }
+  };
+  const next = () => {
+    if (truckView.play !== play) return;
+    if (play.index >= play.steps.length) {
+      setPlayStatus("Fin del día · " + clock(data.recorrido.fin));
+      play.timer = setTimeout(() => { if (truckView.play === play) showWholeDay(); }, 2500);
+      return;
+    }
+    const step = play.steps[play.index++];
+    if (step.kind === "parada") {
+      play.truck.setLatLng(step.event.lugar);
+      setPlayStatus(`Parada ${step.numero} · detenido ${formatMinutes(step.event.minutos)} · ${clock(step.event.desde)}–${clock(step.event.hasta)}` +
+        (step.event.nombre ? ` · ${step.event.nombre}` : ""));
+      markItem(null);
+      play.timer = setTimeout(next, reduceMotion ? 300 : 900);
+      return;
+    }
+    if (step.kind === "sin_datos") {
+      setPlayStatus(`Sin datos · ${formatMinutes(step.event.minutos)} sin reportes`);
+      play.timer = setTimeout(next, reduceMotion ? 200 : 600);
+      return;
+    }
+    const trip = step.trip, color = tripColor(trip.numero);
+    // Si el viaje no cabe en la vista, el mapa lo sigue (sin animar, para que las pistas se recalculen).
+    const tripBounds = L.latLngBounds(trip.lineas.flat());
+    if (!map.getBounds().contains(tripBounds)) map.fitBounds(tripBounds, {padding: [40, 40], maxZoom: 15, animate: false});
+    const entryLanes = truckView.trips.get(trip.numero);
+    step.points = (entryLanes ? entryLanes.lanes : trip.lineas).flat();
+    setPlayStatus(`Viaje ${trip.numero} · ${clock(trip.inicio)} → ${clock(trip.fin)} · ${format(trip.km, 1)} km`);
+    markItem(`.truck-events .event.move[data-trip="${trip.numero}"]`);
+    const entry = truckView.trips.get(trip.numero);
+    if (entry) for (const mark of entry.marks) mark.setOpacity(1);
+    L.polyline(step.points, {color: TRUCK_COLORS.halo, weight: 9, opacity: 0.9, interactive: false}).addTo(play.layer);
+    const drawn = L.polyline([step.points[0]], {color, weight: 5, opacity: 1, interactive: false}).addTo(play.layer);
+    const duration = reduceMotion ? 1 : Math.min(5000, 1200 + trip.km * 25);
+    const started = performance.now();
+    const animate = (now) => {
+      if (truckView.play !== play) return;
+      const t = Math.min(1, (now - started) / duration);
+      const count = Math.max(1, Math.round(t * (step.points.length - 1)));
+      drawn.setLatLngs(step.points.slice(0, count + 1));
+      play.truck.setLatLng(step.points[count]);
+      if (t < 1) play.frame = requestAnimationFrame(animate);
+      else play.timer = setTimeout(next, 250);
+    };
+    play.frame = requestAnimationFrame(animate);
+  };
+  next();
+}
+
+// --- Imagen del recorrido ---
+// Lienzo con el mapa base de OpenStreetMap si el navegador lo permite (si no, fondo liso),
+// los viajes con su color, sentido y número, las paradas, y a la derecha el día paso a paso.
+const TILE = 256;
+const mercator = (lat, lon, zoom) => {
+  const scale = TILE * 2 ** zoom, sin = Math.sin(lat * Math.PI / 180);
+  return [(lon + 180) / 360 * scale, (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale];
+};
+
+function loadTile(url) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    const timer = setTimeout(() => resolve(null), 8000);
+    image.onload = () => { clearTimeout(timer); resolve(image); };
+    image.onerror = () => { clearTimeout(timer); resolve(null); };
+    image.src = url;
+  });
+}
+
+function roundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+async function drawTruckImage(data, withTiles) {
+  const width = 1600, height = 1100, header = 150, footer = 64, side = 450, pad = 40;
+  const mapW = width - side;
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#eef2ee";
+  ctx.fillRect(0, 0, width, height);
+  const lines = data.recorrido.lineas;
+  const points = lines.flat();
+  const lats = points.map((p) => p[0]), lons = points.map((p) => p[1]);
+  const top = header, bottom = height - footer;
+  let zoom = 17;
+  for (; zoom > 3; zoom--) {
+    const [x0, y0] = mercator(Math.max(...lats), Math.min(...lons), zoom);
+    const [x1, y1] = mercator(Math.min(...lats), Math.max(...lons), zoom);
+    if (x1 - x0 <= mapW - pad * 2 && y1 - y0 <= bottom - top - pad * 2) break;
+  }
+  const [cx0, cy0] = mercator(Math.max(...lats), Math.min(...lons), zoom);
+  const [cx1, cy1] = mercator(Math.min(...lats), Math.max(...lons), zoom);
+  const origin = [(cx0 + cx1) / 2 - mapW / 2, (cy0 + cy1) / 2 - (top + bottom) / 2];
+  const project = ([lat, lon]) => { const [x, y] = mercator(lat, lon, zoom); return [x - origin[0], y - origin[1]]; };
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, top, mapW, bottom - top); ctx.clip();
+  let tilesDrawn = 0;
+  if (withTiles) {
+    const tiles = [];
+    const maxTile = 2 ** zoom;
+    for (let tx = Math.floor(origin[0] / TILE); tx <= Math.floor((origin[0] + mapW) / TILE); tx++) {
+      for (let ty = Math.floor((origin[1] + top) / TILE); ty <= Math.floor((origin[1] + bottom) / TILE); ty++) {
+        if (ty < 0 || ty >= maxTile) continue;
+        const wrapped = ((tx % maxTile) + maxTile) % maxTile;
+        tiles.push(loadTile(`https://tile.openstreetmap.org/${zoom}/${wrapped}/${ty}.png`).then((image) => ({image, tx, ty})));
+      }
+    }
+    for (const {image, tx, ty} of await Promise.all(tiles)) {
+      if (image) { ctx.drawImage(image, tx * TILE - origin[0], ty * TILE - origin[1]); tilesDrawn += 1; }
+    }
+    if (tilesDrawn) { ctx.fillStyle = "rgba(244,246,243,.35)"; ctx.fillRect(0, top, mapW, bottom - top); }
+  }
+  const strokePixels = (paths, color, lineWidth, dash = []) => {
+    ctx.strokeStyle = color; ctx.lineWidth = lineWidth; ctx.lineJoin = "round"; ctx.lineCap = "round"; ctx.setLineDash(dash);
+    for (const line of paths) {
+      ctx.beginPath();
+      line.forEach(([x, y], index) => { if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  };
+  const strokeLines = (paths, color, lineWidth, dash) => strokePixels(paths.map((line) => line.map(project)), color, lineWidth, dash);
+  // Viajes en su "pista" (a la derecha del sentido de marcha), igual que en el mapa de la web.
+  const lanes = new Map(data.viajes.map((trip) => [trip.numero, trip.lineas.map((line) => offsetPath(line.map(project), 5))]));
+  const alongPixels = (paths, fraction) => {
+    const segments = [];
+    let total = 0;
+    for (const line of paths) for (let k = 1; k < line.length; k++) {
+      const length = Math.hypot(line[k][0] - line[k - 1][0], line[k][1] - line[k - 1][1]);
+      if (length) { segments.push([line[k - 1], line[k], length]); total += length; }
+    }
+    let target = total * fraction;
+    for (const [a, b, length] of segments) {
+      if (target <= length) {
+        const t = target / length;
+        return {x: a[0] + (b[0] - a[0]) * t, y: a[1] + (b[1] - a[1]) * t, angle: Math.atan2(b[1] - a[1], b[0] - a[0])};
+      }
+      target -= length;
+    }
+    return null;
+  };
+  strokeLines(lines, "#ffffff", 7);
+  strokeLines(lines, TRUCK_COLORS.base, 3.5);
+  strokeLines(signalGaps(lines), TRUCK_COLORS.gap, 2.5, [3, 9]);
+  for (const trip of data.viajes) {
+    strokePixels(lanes.get(trip.numero), "#ffffff", 9);
+    strokePixels(lanes.get(trip.numero), tripColor(trip.numero), 4.5);
+  }
+  const font = (weight, size) => `${weight} ${size}px Inter, "Segoe UI", Arial, sans-serif`;
+  for (const trip of data.viajes) {
+    if (tripLength(trip) <= 400) continue;
+    const color = tripColor(trip.numero);
+    for (const fraction of [0.2, 0.8]) {
+      const at = alongPixels(lanes.get(trip.numero), fraction);
+      if (!at) continue;
+      ctx.save(); ctx.translate(at.x, at.y); ctx.rotate(at.angle);
+      ctx.beginPath(); ctx.moveTo(9, 0); ctx.lineTo(-7, -7); ctx.lineTo(-3, 0); ctx.lineTo(-7, 7); ctx.closePath();
+      ctx.fillStyle = color; ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2.5; ctx.stroke(); ctx.fill();
+      ctx.restore();
+    }
+    const middle = alongPixels(lanes.get(trip.numero), 0.35);
+    if (middle) {
+      const {x, y} = middle;
+      ctx.font = font(700, 15);
+      const label = "V" + trip.numero, w = ctx.measureText(label).width + 16;
+      roundedRect(ctx, x - w / 2, y - 13, w, 26, 6);
+      ctx.fillStyle = color; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+      ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(label, x, y + 1);
+    }
+  }
+  // Paradas agrupadas y A/B: una sola marca por lugar, con un tramo de color por cada parte.
+  const fills = {start: TRUCK_COLORS.start, stop: TRUCK_COLORS.stop, end: TRUCK_COLORS.end};
+  for (const mark of placeMarks(data)) {
+    const [x, y] = project(mark.lugar);
+    ctx.font = font(700, 15);
+    const widths = mark.parts.map(([, text]) => Math.max(32, ctx.measureText(text).width + 18));
+    const total = widths.reduce((sum, w) => sum + w, 0);
+    let left = x - total / 2;
+    roundedRect(ctx, left - 3, y - 19, total + 6, 38, 19);
+    ctx.fillStyle = "#ffffff"; ctx.fill();
+    ctx.save();
+    roundedRect(ctx, left, y - 16, total, 32, 16); ctx.clip();
+    mark.parts.forEach(([kind, text], index) => {
+      ctx.fillStyle = fills[kind]; ctx.fillRect(left, y - 16, widths[index], 32);
+      if (index) { ctx.fillStyle = "#ffffff"; ctx.fillRect(left, y - 16, 2, 32); }
+      ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(text, left + widths[index] / 2, y + 1);
+      left += widths[index];
+    });
+    ctx.restore();
+  }
+  ctx.restore();
+  // Encabezado
+  ctx.fillStyle = "#172d32";
+  ctx.fillRect(0, 0, width, header);
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#d5ee9c"; ctx.font = font(600, 19);
+  ctx.fillText("Artisa · recorrido del día", pad, 44);
+  ctx.fillStyle = "#ffffff"; ctx.font = font(700, 40);
+  const label = predictionDayLabel(data.fecha, "long");
+  ctx.fillText(`Camión ${data.nombre}  ·  ${label.charAt(0).toUpperCase() + label.slice(1)}`, pad, 94);
+  const summary = data.resumen;
+  ctx.fillStyle = "#b8c9c4"; ctx.font = font(400, 20);
+  ctx.fillText([
+    summary ? `${format(summary.km, 1)} km` : null,
+    summary ? `${format(summary.viajes)} ${summary.viajes === 1 ? "viaje" : "viajes"}` : null,
+    summary ? `${formatMinutes(summary.minutos_detenido)} detenido` : null,
+    summary ? `reportes de ${clock(summary.primer)} a ${clock(summary.ultimo)}` : null,
+    data.conductor ? `conductor ${data.conductor}` : null
+  ].filter(Boolean).join("   ·   "), pad, 128);
+  // Columna derecha: el día paso a paso
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(mapW, top, side, bottom - top);
+  ctx.fillStyle = "#dce4e2"; ctx.fillRect(mapW, top, 1, bottom - top);
+  ctx.fillStyle = "#172d32"; ctx.font = font(700, 20); ctx.textAlign = "left";
+  ctx.fillText("El día, paso a paso", mapW + 28, top + 40);
+  const rows = truckTimeline(data);
+  const rowHeight = 36, maxRows = Math.floor((bottom - top - 80) / rowHeight);
+  let y = top + 78, stopNumber = 0;
+  rows.slice(0, rows.length > maxRows ? maxRows - 1 : maxRows).forEach((item) => {
+    ctx.font = font(400, 15); ctx.fillStyle = "#687b7c"; ctx.textAlign = "left";
+    ctx.fillText(clock(item.from), mapW + 28, y);
+    let mark, color, text;
+    if (item.kind === "viaje") {
+      mark = "V" + item.trip.numero; color = tripColor(item.trip.numero);
+      text = `Viaje · ${format(item.trip.km, 1)} km · ${formatMinutes(item.trip.minutos)}`;
+    } else if (item.kind === "parada") {
+      mark = String(++stopNumber); color = TRUCK_COLORS.stop;
+      text = `Detenido ${formatMinutes(item.event.minutos)}` + (item.event.nombre ? ` · ${item.event.nombre}` : "");
+    } else {
+      mark = "?"; color = "#9aa8a6"; text = `Sin datos ${formatMinutes(item.event.minutos)}`;
+    }
+    ctx.font = font(700, 13);
+    const w = Math.max(30, ctx.measureText(mark).width + 14);
+    roundedRect(ctx, mapW + 86, y - 17, w, 24, 6);
+    ctx.fillStyle = color; ctx.fill();
+    ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.fillText(mark, mapW + 86 + w / 2, y);
+    ctx.textAlign = "left"; ctx.fillStyle = "#172d32"; ctx.font = font(500, 15);
+    let shown = text;
+    while (ctx.measureText(shown).width > side - 160 && shown.length > 4) shown = shown.slice(0, -2);
+    ctx.fillText(shown === text ? text : shown.trimEnd() + "…", mapW + 130, y);
+    y += rowHeight;
+  });
+  if (rows.length > maxRows) {
+    ctx.font = font(400, 14); ctx.fillStyle = "#687b7c";
+    ctx.fillText(`… y ${rows.length - maxRows + 1} más (ver en la web)`, mapW + 28, y);
+  }
+  // Pie
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, bottom, width, footer);
+  ctx.fillStyle = "#dce4e2"; ctx.fillRect(0, bottom, width, 1);
+  ctx.font = font(400, 16); ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  const legend = [[TRUCK_COLORS.start, "A primer punto"], [TRIP_COLORS[1], "V1, V2… viajes (flecha = sentido)"],
+    [TRUCK_COLORS.stop, "1, 2… paradas"], [TRUCK_COLORS.gap, "punteado: sin señal"], [TRUCK_COLORS.end, "B último punto"]];
+  let x = pad;
+  for (const [color, text] of legend) {
+    ctx.beginPath(); ctx.arc(x + 8, bottom + footer / 2, 8, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+    ctx.fillStyle = "#4d6264"; ctx.fillText(text, x + 22, bottom + footer / 2 + 1);
+    x += ctx.measureText(text).width + 52;
+  }
+  ctx.textAlign = "right";
+  ctx.fillText(`GPS real · hora de Chile${tilesDrawn ? " · © OpenStreetMap" : ""}`, width - pad, bottom + footer / 2 + 1);
+  return canvas;
+}
+async function downloadTruckImage() {
+  const data = truckView.detail;
+  if (!data || !data.recorrido || !data.recorrido.lineas.length) return;
+  const button = $("truck-image");
+  button.disabled = true;
+  button.textContent = "Generando imagen…";
+  try {
+    let canvas = await drawTruckImage(data, true);
+    let blob;
+    try {
+      blob = await new Promise((resolve, reject) => {
+        try { canvas.toBlob((value) => value ? resolve(value) : reject(new Error("vacío")), "image/png"); }
+        catch (error) { reject(error); }
+      });
+    } catch {
+      // El mapa base no permitió exportarse: se genera igual, sin fondo de mapa.
+      canvas = await drawTruckImage(data, false);
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    }
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `recorrido-${data.nombre}-${data.fecha}.png`.replace(/[^\w.-]+/g, "_");
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+  } finally {
+    button.disabled = false;
+    button.textContent = "↓ Imagen del recorrido";
+  }
+}
+
+for (const button of document.querySelectorAll("[data-fleet-filter]")) {
+  button.addEventListener("click", () => { truckView.filter = button.dataset.fleetFilter; renderFleet(); });
+}
+$("fleet-search").addEventListener("input", () => { truckView.query = $("fleet-search").value; renderFleet(); });
+$("fleet-sort").addEventListener("change", () => { truckView.sort = $("fleet-sort").value; renderFleet(); });
+$("truck-back").addEventListener("click", () => { truckView.pin = null; window.location.hash = "#camiones"; });
+$("truck-date").addEventListener("change", () => { if ($("truck-date").value) openTruck(truckView.id, $("truck-date").value); });
+$("truck-prev").addEventListener("click", () => openTruck(truckView.id, shiftDay(truckView.day || localToday(), -1)));
+$("truck-next").addEventListener("click", () => {
+  const next = shiftDay(truckView.day || localToday(), 1);
+  if (next <= localToday()) openTruck(truckView.id, next);
+});
+$("truck-today").addEventListener("click", () => openTruck(truckView.id, localToday()));
+$("truck-yesterday").addEventListener("click", () => openTruck(truckView.id, shiftDay(localToday(), -1)));
+$("truck-image").addEventListener("click", downloadTruckImage);
+$("truck-play").addEventListener("click", toggleTruckPlay);
+$("history-detail").addEventListener("toggle", () => {
+  const detail = truckView.detail;
+  if ($("history-detail").open && detail && !historyState.detail) loadTruckDetail(detail.asset_id, detail.nombre, detail.fecha);
+});
+$("board-date").addEventListener("change", () => setBoardDay($("board-date").value));
+$("board-prev").addEventListener("click", () => setBoardDay(shiftDay(boardDay(), -1)));
+$("board-next").addEventListener("click", () => setBoardDay(shiftDay(boardDay(), 1)));
+$("board-today").addEventListener("click", () => setBoardDay(null));
+$("board-yesterday").addEventListener("click", () => setBoardDay(shiftDay(localToday(), -1)));
+// Tres tareas en el mismo espacio: la lista de camiones, los reportes en vivo y el mes.
+function setFleetTab(tab) {
+  if (tab === "flota") truckView.pin = null;
+  truckView.tab = tab;
+  for (const button of document.querySelectorAll("[data-fleet-tab]")) {
+    button.setAttribute("aria-selected", String(button.dataset.fleetTab === tab));
+  }
+  $("fleet-panel-flota").hidden = tab !== "flota";
+  $("live-reports").hidden = tab !== "reportes";
+  $("month-panel").hidden = tab !== "mes";
+  if (tab === "mes" && historyState.month !== boardDay().slice(0, 7)) loadHistoryMonth(boardDay().slice(0, 7));
+}
+for (const button of document.querySelectorAll("[data-fleet-tab]")) {
+  button.addEventListener("click", () => setFleetTab(button.dataset.fleetTab));
+}
+$("truck-show-all").addEventListener("click", showWholeDay);
+window.addEventListener("hashchange", () => { if (!truckHash()) stopTruckPlay(); });
+setInterval(() => {
+  if (!token() || !truckHash()) return;
+  loadFleet();
+  // Hoy se actualiza solo, sin mover el mapa ni cortar la reproducción.
+  if (truckView.id && truckView.day === localToday() && !$("truck-view").hidden && !truckView.play) {
+    loadTruckDay(truckView.id, truckView.day, true);
+  }
+}, TRUCK_REFRESH_MS);
+
 restoreSession();
 setInterval(refresh, 300000);
 setInterval(refreshMapVehicles, 60000);

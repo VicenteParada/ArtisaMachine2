@@ -27,8 +27,8 @@ from urllib.parse import urlsplit
 from common import dias
 from common.db import connect_db, initialize_db
 from common.http import JsonHandler, serve
-from machine_learning import rutas_job
-from machine_learning.diario import VERSION_CALCULO, procesar_dia, ultimo_recibido
+from machine_learning import prediccion, rutas_job
+from machine_learning.diario import VERSION_CALCULO, procesar_dia, quitar_no_camiones, ultimo_recibido
 
 
 GRACIA = timedelta(minutes=int(os.environ.get("DIARIO_GRACIA_MINUTOS", "15")))
@@ -41,8 +41,13 @@ INTERVALO = 60
 # clasificar rutas. Vacío = continuo, como antes. Fuera de esa hora solo se actualiza "hoy".
 HORA_PROGRAMADA = os.environ.get("DIARIO_HORA", "00:30").strip()
 LOCK_NAME = "artisa_cierre_diario"
+PREDICCION_REVISADA = {"value": float("-inf")}  # revisar a lo más cada 15 min
 STATE = {"estado": "iniciando", "error": None, "ultimo_ciclo": None, "dias_procesados": 0}
 HEARTBEAT = {"value": time.monotonic()}
+
+
+def _latido():
+    HEARTBEAT["value"] = time.monotonic()
 
 
 def _utc_now():
@@ -212,6 +217,7 @@ def ejecucion_completa(connection, utc_now):
     """Recupera días pendientes y publica rutas por lotes. Devuelve días procesados."""
     total = 0
     revisados = set()
+    quitar_no_camiones(connection)
     while True:
         HEARTBEAT["value"] = time.monotonic()
         hecho = ciclo(connection, utc_now, completo=True, revisados=revisados)
@@ -222,15 +228,51 @@ def ejecucion_completa(connection, utc_now):
         if terminado:
             break
         utc_now = _utc_now()
+    publicar_prediccion(connection, _utc_now())
     return total
 
 
+def publicar_prediccion(connection, utc_now):
+    """Reentrena la predicción de actividad si hay un cierre nuevo o cambió el catálogo de
+    camiones. Un fallo aquí no detiene el cierre diario."""
+    try:
+        with connection.cursor() as cursor:
+            calcular = prediccion.necesita_calculo(cursor, utc_now)
+        connection.commit()
+        if calcular:
+            STATE["estado"] = "prediciendo"
+            HEARTBEAT["value"] = time.monotonic()
+            # Contar 16 semanas puede tardar más que el límite de /health: cada día contado avisa.
+            STATE["prediccion"] = prediccion.ejecutar(connection, utc_now, latido=_latido)
+            HEARTBEAT["value"] = time.monotonic()
+    except Exception as error:
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+        STATE["prediccion"] = {"error": f"{type(error).__name__}: {error}"[:255]}
+        print(f"Predicción: no se pudo calcular ({STATE['prediccion']['error']})", flush=True)
+
+
 def _con_bloqueo(connection, funcion, espera=0):
-    """Evita que el servicio y una ejecución manual procesen a la vez."""
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT GET_LOCK(%s, %s) AS ok", (LOCK_NAME, espera))
-        if not (cursor.fetchone() or {}).get("ok"):
+    """Evita que el servicio y una ejecución manual procesen a la vez.
+
+    La espera se hace en tramos de 30 s: una sola espera larga en MariaDB superaría el
+    límite de lectura de la conexión y la cortaría (error 2013) aunque nada haya fallado.
+    """
+    limite = time.monotonic() + espera
+    intentos = 0
+    while True:
+        tramo = max(0, min(30, int(limite - time.monotonic())))
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s, %s) AS ok", (LOCK_NAME, tramo))
+            if (cursor.fetchone() or {}).get("ok"):
+                break
+        if time.monotonic() >= limite:
             return None
+        intentos += 1
+        if intentos % 10 == 0:
+            print(f"El servicio sigue trabajando; esperando… ({intentos // 2} min)", flush=True)
     try:
         return funcion()
     finally:
@@ -265,6 +307,10 @@ def loop():
                 else:
                     hecho = _con_bloqueo(connection, lambda: ciclo(connection, ahora, completo=False)) or []
                     STATE["dias_procesados"] += len(hecho)
+                    # Primera predicción (o un camión nuevo) sin esperar la hora programada.
+                    if not hecho and time.monotonic() - PREDICCION_REVISADA["value"] >= 900:
+                        PREDICCION_REVISADA["value"] = time.monotonic()
+                        _con_bloqueo(connection, lambda: publicar_prediccion(connection, ahora))
             STATE.update(estado="ok", error=None, ultimo_ciclo=_utc_now().isoformat() + "Z")
         except Exception as error:  # MariaDB caída u otro fallo: se reintenta en el próximo ciclo
             STATE.update(estado="error", error=f"{type(error).__name__}: {error}"[:255])
