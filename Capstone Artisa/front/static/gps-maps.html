@@ -5,7 +5,7 @@
 
   Datos que usa (mismo origen que el front, que hace de proxy a endpoints):
     GET /api/gps?desde=YYYY-MM-DD&hasta=YYYY-MM-DD   maximo 14 dias, ambos incluidos
-        -> {desde, hasta, camiones: [asset_id...], cam: [indice en camiones...],
+        -> {desde, hasta, camiones: [asset_id...], conductores: [nombre o null...], cam: [indice en camiones...],
             t: [segundos desde 'desde' 00:00...], lat: [lat*1e5...], lon: [lon*1e5...]}
     GET /api/faenas -> {faenas: [{nombre, area_m2, geocerca: GeoJSON}...]}
   Si la API queda en otro host, cambiar API_BASE.
@@ -53,8 +53,18 @@
   #cargar { background: var(--acento); border-color: var(--acento); color: #fff; }
   .duracion { display: flex; gap: 4px; }
   .duracion button[aria-pressed="true"] { border-color: var(--acento); color: var(--acento); font-weight: 600; }
-  .pestanas { display: flex; flex-wrap: wrap; gap: 4px; }
-  .pestanas button[aria-selected="true"] { border-color: var(--acento); color: var(--acento); font-weight: 600; }
+  .selector-vista {
+    display: flex; flex-direction: column; gap: 4px; min-width: 190px;
+    color: var(--suave); font-size: 11px; font-weight: 700;
+  }
+  .selector-vista select {
+    width: 100%; padding: 8px 34px 8px 11px; border: 1px solid var(--acento);
+    border-radius: 8px; background-color: var(--panel); color: var(--acento);
+    font: inherit; font-size: 14px; font-weight: 650; cursor: pointer;
+  }
+  .selector-vista select:focus {
+    outline: 0; box-shadow: 0 0 0 3px rgba(33, 100, 71, .14);
+  }
   #estado {
     margin: 0; padding: 8px 16px; min-height: 36px; white-space: pre-wrap;
     font-size: 12px; color: var(--suave); background: var(--panel); border-bottom: 1px solid var(--borde);
@@ -72,12 +82,113 @@
     width: 14px; height: 14px; border-radius: 50%; background: #2e7d32;
     border: 2px solid #fff; box-shadow: 0 0 3px rgba(0, 0, 0, .5);
   }
-  .solo-calor .pestanas { display: none; }
+  .solo-calor .selector-vista { display: none; }
   .etiqueta { color: var(--acento); font-size: 11px; font-weight: 700; }
   .titulo { display: flex; flex-direction: column; gap: 2px; align-self: center; }
   .rango { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 10px; margin: 0; padding: 0; border: 0; }
   .rango legend { float: left; width: 100%; margin-bottom: 2px; padding: 0; font-size: 11px; font-weight: 700; color: var(--suave); }
   .duracion button { padding: 7px 10px; font-size: 13px; }
+
+  /* Selector de rutas por camión: conserva el control de capas de Leaflet,
+     pero organiza las patentes para que una flota grande sea fácil de filtrar. */
+  .leaflet-control-layers.control-camiones {
+    border: 0; border-radius: 12px; background: var(--panel);
+    box-shadow: 0 8px 24px rgba(23, 52, 42, .18); color: var(--texto);
+  }
+  .control-camiones.leaflet-control-layers-expanded {
+    width: min(300px, calc(100vw - 72px)); padding: 0; overflow: hidden;
+  }
+  .control-camiones .leaflet-control-layers-base {
+    margin: 0; padding: 10px 12px 8px; border-bottom: 1px solid var(--borde);
+  }
+  .control-camiones .leaflet-control-layers-base label,
+  .control-camiones .leaflet-control-layers-overlays label {
+    margin: 0; padding: 6px 7px; border-radius: 7px; line-height: 1.25;
+  }
+  .control-camiones .leaflet-control-layers-base label:hover,
+  .control-camiones .leaflet-control-layers-overlays label:hover { background: #eef5f1; }
+  .control-camiones .leaflet-control-layers-separator { display: none; }
+  .control-camiones .leaflet-control-layers-overlays {
+    max-height: 250px; margin: 0; padding: 5px 8px 8px; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: #8ea69b transparent;
+  }
+  .control-camiones .leaflet-control-layers-overlays::-webkit-scrollbar { width: 7px; }
+  .control-camiones .leaflet-control-layers-overlays::-webkit-scrollbar-thumb {
+    border-radius: 999px; background: #8ea69b;
+  }
+  .control-camiones .leaflet-control-layers-overlays label.capa-camion {
+    border-bottom: 1px solid #edf1ee;
+  }
+  .control-camiones .leaflet-control-layers-overlays label.capa-general {
+    margin-top: 5px; border-top: 1px solid var(--borde); border-radius: 0;
+    color: var(--acento); font-weight: 600;
+  }
+  .filtro-camiones { padding: 11px 12px 8px; background: #f8fbf9; }
+  .filtro-camiones__cabecera {
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+  }
+  .filtro-camiones__cabecera strong { color: #173d30; font-size: 13px; }
+  .filtro-camiones__contador {
+    padding: 2px 7px; border-radius: 999px; background: #e4efe9;
+    color: var(--acento); font-size: 11px; font-weight: 700;
+  }
+  .filtro-camiones__busqueda {
+    display: flex; align-items: center; gap: 7px; padding: 7px 9px;
+    border: 1px solid #cfdad4; border-radius: 8px; background: var(--panel);
+  }
+  .filtro-camiones__busqueda:focus-within {
+    border-color: var(--acento); box-shadow: 0 0 0 2px rgba(33, 100, 71, .12);
+  }
+  .filtro-camiones__busqueda span { color: var(--suave); font-size: 15px; }
+  .filtro-camiones__busqueda input {
+    width: 100%; min-width: 0; padding: 0; border: 0; outline: 0;
+    background: transparent; color: var(--texto); font: inherit;
+  }
+  .filtro-camiones__acciones { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 7px; }
+  .filtro-camiones__acciones button {
+    padding: 5px 7px; border-color: #cfdad4; border-radius: 7px;
+    background: var(--panel); color: var(--acento); font-size: 11px; font-weight: 650;
+  }
+  .filtro-camiones__acciones button:hover:not(:disabled) { background: #e9f2ed; }
+  .filtro-camiones__vacio {
+    display: none; margin: 0; padding: 13px 12px; color: var(--suave);
+    text-align: center; font-size: 12px;
+  }
+  .filtro-camiones__vacio.visible { display: block; }
+  .leaflet-popup.popup-uso-camiones .leaflet-popup-content-wrapper {
+    width: min(520px, calc(100vw - 64px)) !important;
+    max-width: calc(100vw - 64px); padding: 0; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 6px 20px rgba(23, 52, 42, .22); background: var(--panel);
+  }
+  .leaflet-popup.popup-uso-camiones .leaflet-popup-content {
+    width: 100% !important; max-width: none !important; margin: 0;
+  }
+  .leaflet-popup.popup-uso-camiones .leaflet-popup-close-button {
+    top: 4px; right: 4px; width: 25px; height: 25px; color: #49645a; font-size: 20px;
+  }
+  .leaflet-popup.popup-uso-camiones .leaflet-popup-tip { background: var(--panel); }
+  .leaflet-popup.popup-uso-camiones a.leaflet-popup-close-button:hover { color: var(--acento); }
+  .tooltip-uso { width: 100%; }
+  .tooltip-uso__titulo {
+    display: block; padding: 9px 38px 9px 11px; background: #edf5f0;
+    color: #173d30; font-size: 12px;
+  }
+  .tooltip-uso__lista {
+    max-height: 190px; margin: 0; padding: 5px 7px; overflow-y: auto;
+    overscroll-behavior: contain; list-style: none;
+    scrollbar-width: thin; scrollbar-color: #8ea69b transparent;
+  }
+  .tooltip-uso__lista li {
+    display: grid; grid-template-columns: 95px minmax(0, 1fr); align-items: center;
+    gap: 10px; padding: 7px 5px;
+    border-bottom: 1px solid #edf1ee;
+  }
+  .tooltip-uso__lista li:last-child { border-bottom: 0; }
+  .tooltip-uso__lista strong { color: var(--texto); font-size: 12px; white-space: nowrap; }
+  .tooltip-uso__lista span {
+    color: var(--suave); font-size: 11px; line-height: 1.3;
+    white-space: normal; overflow-wrap: break-word; word-break: normal;
+  }
 </style>
 </head>
 <body>
@@ -97,12 +208,15 @@
     </div>
     <button id="cargar">Cargar</button>
   </fieldset>
-  <nav class="pestanas" role="tablist">
-    <button role="tab" data-vista="calor" aria-selected="true">Mapa de calor</button>
-    <button role="tab" data-vista="rutas" aria-selected="false">Rutas por camión</button>
-    <button role="tab" data-vista="uso" aria-selected="false">Uso de rutas</button>
-    <button role="tab" data-vista="puntos" aria-selected="false">Puntos</button>
-  </nav>
+  <label class="selector-vista">
+    TIPO DE MAPA
+    <select id="selector-vista" aria-label="Elegir tipo de mapa">
+      <option value="calor">Mapa de calor</option>
+      <option value="rutas">Rutas por camión</option>
+      <option value="uso">Uso de rutas</option>
+      <option value="puntos">Puntos GPS</option>
+    </select>
+  </label>
 </header>
 <p id="estado">Elige un rango de fechas (hasta 14 días) y presiona Cargar. El calor representa densidad de reportes GPS; el uso de rutas cuenta camiones próximos a cada tramo y aún no es una clasificación definitiva.</p>
 <div id="mapa"></div>
@@ -261,7 +375,8 @@ let turno = 0;             // invalida calculos viejos si se cambia de vista o d
 function prepararDatos(r) {
   const n = r.t.length;
   const [y, m, d] = r.desde.split("-").map(Number);
-  const D = {desde: r.desde, hasta: r.hasta, inicioMs: Date.UTC(y, m - 1, d), camiones: r.camiones, filas: n};
+  const D = {desde: r.desde, hasta: r.hasta, inicioMs: Date.UTC(y, m - 1, d),
+             camiones: r.camiones, conductores: r.conductores || [], filas: n};
   // gps_validos: fuera de rango y el 0,0 (GPS sin fix) no cuentan
   const validos = [];
   for (let i = 0; i < n; i++) {
@@ -499,7 +614,7 @@ function tablaNivel(g, celda, ny) {
 
 // Puntos de control de cada linea: camiones en las celdas vecinas (radio de la linea).
 // Un camion cuenta si esta cerca en al menos minPuntos de los puntos de control.
-function contarCamionesCerca(g, tabla, celda, ny, lineas, ini, fin, camionesCerca) {
+function contarCamionesCerca(g, tabla, celda, ny, lineas, ini, fin, camionesCerca, camionesPorLinea) {
   const {nCam, W, R, N_ANG, discoX, discoY, x0, y0, dx, dy, angBin, xMin, yMin, tk, minPuntos} = g;
   const cnt = new Uint8Array(nCam), tmp = new Uint32Array(W), tocados = new Int32Array(nCam), m = tabla.m;
   for (let q = ini; q < fin; q++) {
@@ -523,9 +638,15 @@ function contarCamionesCerca(g, tabla, celda, ny, lineas, ini, fin, camionesCerc
         }
       }
     }
-    let cerca = 0;
-    for (let j = 0; j < nTocados; j++) { const c = tocados[j]; if (cnt[c] >= minPuntos) cerca++; cnt[c] = 0; }
-    camionesCerca[l] = Math.max(cerca, 1);
+    const cerca = [];
+    for (let j = 0; j < nTocados; j++) {
+      const c = tocados[j];
+      if (cnt[c] >= minPuntos) cerca.push(c);
+      cnt[c] = 0;
+    }
+    if (!cerca.length) cerca.push(camion[l]);
+    camionesPorLinea[l] = cerca;
+    camionesCerca[l] = cerca.length;
   }
 }
 
@@ -556,6 +677,7 @@ async function vistaUso(D, progreso) {
     camion[l] = numero.get(c);
   }
   const nCam = numero.size, W = Math.ceil(nCam / 32);
+  const indiceCamion = Array.from(numero.keys());  // índice compacto -> índice de D.camiones
 
   // Pasar a metros (plano local) para medir distancias y angulos reales
   let suma = 0;
@@ -592,6 +714,7 @@ async function vistaUso(D, progreso) {
              tk: Array.from({length: P.PUNTOS_LINEA}, (_, k) => (k + 0.5) / P.PUNTOS_LINEA),
              minPuntos: Math.ceil(P.FRACCION_MIN * P.PUNTOS_LINEA)};
   const camionesCerca = new Int32Array(n).fill(1);
+  const camionesPorLinea = new Array(n);
 
   for (let k = 0; k < radios.length; k++) {
     const lineasK = [];
@@ -605,29 +728,49 @@ async function vistaUso(D, progreso) {
     for (let ini = 0; ini < lineasK.length; ini += P.LOTE) {
       progreso(`Calculando uso de rutas… radio ${k + 1} de ${radios.length} (${nf.format(ini)} de ${nf.format(lineasK.length)} lineas)`);
       await pausa();
-      contarCamionesCerca(g, tabla, celda, ny, lineasK, ini, Math.min(ini + P.LOTE, lineasK.length), camionesCerca);
+      contarCamionesCerca(g, tabla, celda, ny, lineasK, ini, Math.min(ini + P.LOTE, lineasK.length),
+                          camionesCerca, camionesPorLinea);
     }
   }
 
-  // Lineas unicas agrupadas por concentracion: una multi-linea por grupo, de menos a mas
+  // Líneas únicas agrupadas por el conjunto de camiones cercanos. Así cada tooltip puede
+  // mostrar las patentes correctas sin cambiar el cálculo ni la geometría de los tramos.
   const vistas = new Set(), grupos = new Map();
   let maxCamiones = 1;
   const lats = [], lons = [];
   for (let l = 0; l < n; l++) {
-    const a = I0[l], b = I1[l], c = camionesCerca[l];
-    const id = `${D.latE[a]},${D.lonE[a]},${D.latE[b]},${D.lonE[b]},${c}`;
+    const a = I0[l], b = I1[l], cercanos = camionesPorLinea[l] || [camion[l]], c = cercanos.length;
+    const firma = cercanos.join(",");
+    const id = `${D.latE[a]},${D.lonE[a]},${D.latE[b]},${D.lonE[b]},${firma}`;
     if (vistas.has(id)) continue;
     vistas.add(id);
-    if (!grupos.has(c)) grupos.set(c, []);
-    grupos.get(c).push([[D.latE[a] / 1e5, D.lonE[a] / 1e5], [D.latE[b] / 1e5, D.lonE[b] / 1e5]]);
+    if (!grupos.has(firma)) grupos.set(firma, {camiones: cercanos, lineas: []});
+    grupos.get(firma).lineas.push([[D.latE[a] / 1e5, D.lonE[a] / 1e5], [D.latE[b] / 1e5, D.lonE[b] / 1e5]]);
     lats.push(D.lat[a], D.lat[b]); lons.push(D.lon[a], D.lon[b]);
     if (c > maxCamiones) maxCamiones = c;
   }
   const vmax = Math.max(maxCamiones, 2), escala = escalaLineal(COLORES, 1, vmax);
   const capa = L.featureGroup();
-  for (const c of [...grupos.keys()].sort((a, b) => a - b)) {
-    L.polyline(grupos.get(c), {color: escala(c), weight: 2 + 4 * c / maxCamiones, opacity: 0.9})
-      .bindTooltip(`${c} camiones distintos van por aquí`, {sticky: true}).addTo(capa);
+  const gruposOrdenados = [...grupos.values()].sort((a, b) => a.camiones.length - b.camiones.length);
+  for (const grupo of gruposOrdenados) {
+    const c = grupo.camiones.length;
+    const filas = grupo.camiones.map(compacto => {
+      const indice = indiceCamion[compacto];
+      const patente = esc(D.camiones[indice] || "Patente no informada");
+      const conductor = D.conductores[indice] ? `<span>${esc(D.conductores[indice])}</span>` : "";
+      return `<li><strong>${patente}</strong>${conductor}</li>`;
+    }).join("");
+    const titulo = c === 1 ? "1 camión pasó por aquí" : `${c} camiones distintos pasaron por aquí`;
+    const detalle = `<div class="tooltip-uso"><strong class="tooltip-uso__titulo">${titulo}</strong>`
+      + `<ul class="tooltip-uso__lista">${filas}</ul></div>`;
+    const linea = L.polyline(grupo.lineas, {color: escala(c), weight: 2 + 4 * c / maxCamiones, opacity: 0.9})
+      .bindPopup(detalle, {className: "popup-uso-camiones", minWidth: 520, maxWidth: 520,
+                           autoPan: true, autoPanPadding: [24, 24]})
+      .addTo(capa);
+    // El recuadro se abre al pasar por la línea y permanece visible para poder recorrer
+    // la lista. Otro tramo reemplaza el recuadro actual; la X o un clic en el mapa lo cierra.
+    linea.on("mouseover", evento => linea.openPopup(evento.latlng));
+    linea.on("popupopen", evento => L.DomEvent.disableScrollPropagation(evento.popup.getElement()));
   }
   return {
     overlays: {"Uso de rutas": capa, "Faenas": capaFaenas(false)},
@@ -807,6 +950,74 @@ function vistaPuntos(D) {
 // ---------------------------------------------------------------------------
 const VISTAS = {calor: vistaCalor, rutas: vistaRutas, uso: vistaUso, puntos: vistaPuntos};
 
+function mejorarControlCamiones(control) {
+  const raiz = control.getContainer();
+  const lista = raiz.querySelector(".leaflet-control-layers-list");
+  const overlays = raiz.querySelector(".leaflet-control-layers-overlays");
+  if (!lista || !overlays) return;
+
+  raiz.classList.add("control-camiones");
+  const etiquetas = [...overlays.querySelectorAll("label")];
+  const camiones = etiquetas.filter(etiqueta => etiqueta.textContent.trim().startsWith("Camión "));
+  camiones.forEach(etiqueta => etiqueta.classList.add("capa-camion"));
+  etiquetas.filter(etiqueta => !camiones.includes(etiqueta)).forEach(etiqueta => etiqueta.classList.add("capa-general"));
+
+  const herramientas = document.createElement("div");
+  herramientas.className = "filtro-camiones";
+  herramientas.innerHTML = `
+    <div class="filtro-camiones__cabecera">
+      <strong>Filtrar camiones</strong>
+      <span class="filtro-camiones__contador"></span>
+    </div>
+    <label class="filtro-camiones__busqueda">
+      <span aria-hidden="true">⌕</span>
+      <input type="search" placeholder="Buscar patente…" aria-label="Buscar camión por patente" autocomplete="off">
+    </label>
+    <div class="filtro-camiones__acciones">
+      <button type="button" data-accion="mostrar">Mostrar resultados</button>
+      <button type="button" data-accion="ocultar">Ocultar resultados</button>
+    </div>`;
+  const sinResultados = document.createElement("p");
+  sinResultados.className = "filtro-camiones__vacio";
+  sinResultados.textContent = "No se encontraron camiones.";
+  lista.insertBefore(herramientas, overlays);
+  lista.insertBefore(sinResultados, overlays);
+
+  const buscador = herramientas.querySelector("input");
+  const contador = herramientas.querySelector(".filtro-camiones__contador");
+  const botones = [...herramientas.querySelectorAll("button")];
+  const normalizar = texto => texto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+  function resultadosVisibles() {
+    const termino = normalizar(buscador.value.trim());
+    const visibles = [];
+    for (const etiqueta of camiones) {
+      const coincide = !termino || normalizar(etiqueta.textContent).includes(termino);
+      etiqueta.hidden = !coincide;
+      if (coincide) visibles.push(etiqueta);
+    }
+    contador.textContent = termino ? `${visibles.length} de ${camiones.length}` : `${camiones.length}`;
+    sinResultados.classList.toggle("visible", visibles.length === 0);
+    botones.forEach(boton => { boton.disabled = visibles.length === 0; });
+    return visibles;
+  }
+
+  buscador.addEventListener("input", resultadosVisibles);
+  buscador.addEventListener("keydown", evento => evento.stopPropagation());
+  herramientas.addEventListener("click", evento => {
+    const boton = evento.target.closest("button[data-accion]");
+    if (!boton) return;
+    const activar = boton.dataset.accion === "mostrar";
+    for (const etiqueta of resultadosVisibles()) {
+      const casilla = etiqueta.querySelector('input[type="checkbox"]');
+      if (casilla && casilla.checked !== activar) casilla.click();
+    }
+  });
+  L.DomEvent.disableClickPropagation(herramientas);
+  L.DomEvent.disableScrollPropagation(raiz);
+  resultadosVisibles();
+}
+
 function quitarMostrado() {
   if (!mostrado) return;
   for (const capa of Object.values(mostrado.overlays)) mapa.removeLayer(capa);
@@ -817,7 +1028,7 @@ function quitarMostrado() {
 
 async function mostrarVista(nombre) {
   vistaActual = nombre;
-  document.querySelectorAll("[data-vista]").forEach(b => b.setAttribute("aria-selected", b.dataset.vista === nombre));
+  document.getElementById("selector-vista").value = nombre;
   if (!datos) return;
   const miTurno = ++turno, D = datos, tabla = cache;
   quitarMostrado();
@@ -839,6 +1050,7 @@ async function mostrarVista(nombre) {
   if (miTurno !== turno) return;
   for (const capa of Object.values(v.overlays)) capa.addTo(mapa);
   v.control = L.control.layers(MAPAS_BASE, v.overlays, {collapsed: !!v.controlCerrado}).addTo(mapa);
+  if (nombre === "rutas") mejorarControlCamiones(v.control);
   if (v.leyenda) v.leyenda.addTo(mapa);
   mostrado = v;
   if (v.encuadre && v.encuadre.limites) mapa.fitBounds(v.encuadre.limites, v.encuadre.opciones);
@@ -927,7 +1139,7 @@ async function cargar() {
 }
 
 document.getElementById("cargar").addEventListener("click", cargar);
-document.querySelectorAll("[data-vista]").forEach(b => b.addEventListener("click", () => mostrarVista(b.dataset.vista)));
+document.getElementById("selector-vista").addEventListener("change", evento => mostrarVista(evento.target.value));
 </script>
 </body>
 </html>

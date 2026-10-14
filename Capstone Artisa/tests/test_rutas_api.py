@@ -50,13 +50,13 @@ class MapContractTests(unittest.TestCase):
             ("FROM rutas_version", lambda p: [dict(VERSION)]),
             ("FROM rutas_clasificadas WHERE", [RUTA]),
             ("FROM rutas_vehiculo", [{"asset_id": "RJXS30", "route_id": "R-ABC123"}]),
-            ("FROM vehiculos", [{"asset_id": "RJXS30"}]),
-            ("FROM telemetria_api WHERE asset_id", [{"asset_id": "RJXS30", "asset_name": "Lampa-826",
-                                                      "report_date": datetime(2026, 10, 6, 17), "latitude": -33.3,
-                                                      "longitude": -70.6, "speed": 40.0, "heading": 5,
-                                                      "ignition": 1, "event_name": "Reporte"}]),
-            ("FROM raw_gps WHERE asset_id", []),
-            ("driver_name IS NOT NULL", [{"driver_name": "JULIO", "driver_last_name": "PÉREZ"}]),
+            ("SELECT v.asset_id FROM vehiculos", [{"asset_id": "RJXS30"}]),
+            ("FROM telemetria_api AS gps", [{"asset_id": "RJXS30", "asset_name": "Lampa-826",
+                                             "report_date": datetime(2026, 10, 6, 17), "latitude": -33.3,
+                                             "longitude": -70.6, "speed": 40.0, "heading": 5,
+                                             "ignition": 1, "event_name": "Reporte",
+                                             "driver_name": "JULIO", "driver_last_name": "PÉREZ"}]),
+            ("FROM raw_gps AS gps", []),
             ("validos", [{"n": 500}]),
         ])
         payload = rutas_api.classified_map(cursor)
@@ -69,7 +69,6 @@ class MapContractTests(unittest.TestCase):
         self.assertFalse(route["map_matching"])
         vehicle = payload["vehicles"][0]
         self.assertEqual((vehicle["vehicle_id"], vehicle["route_id"], vehicle["fuente"]), ("RJXS30", "R-ABC123", "api"))
-        # El último reporte no trae conductor: se usa el último informado en las 24 h previas.
         self.assertEqual((vehicle["patente"], vehicle["driver_name"], vehicle["driver_last_name"]),
                          ("RJXS30", "JULIO", "PÉREZ"))
         self.assertEqual(payload["ranking"]["most_used"]["route_id"], "R-ABC123")
@@ -80,6 +79,22 @@ class MapContractTests(unittest.TestCase):
         dash = rutas_api.classified_dashboard(cursor)
         self.assertEqual(dash["rutas"], {"HIGH": 1, "MEDIUM": 0, "LOW": 1})
         self.assertEqual(dash["operacion"]["viajes"], 18)
+
+    def test_latest_position_uses_recent_driver_when_last_report_has_none(self):
+        recent_driver = {"asset_id": "TFWK19", "driver_name": "RICHARD", "driver_last_name": "FUENTES",
+                         "report_date": datetime(2026, 10, 14, 11, 40)}
+        cursor = FakeCursor([
+            ("SELECT v.asset_id FROM vehiculos", [{"asset_id": "TFWK19"}]),
+            ("FROM telemetria_api AS gps", [{"asset_id": "TFWK19", "asset_name": "Lampa-998",
+                                             "report_date": datetime(2026, 10, 14, 11, 41),
+                                             "latitude": -29.4, "longitude": -71.1, "speed": 87.0,
+                                             "heading": 180, "ignition": 1, "event_name": "Reporte por tiempo",
+                                             "driver_name": None, "driver_last_name": None}]),
+            ("FROM raw_gps AS gps", []),
+            ("ROW_NUMBER() OVER", [recent_driver]),
+        ])
+        vehicle = rutas_api.latest_positions(cursor, {})[0]
+        self.assertEqual((vehicle["driver_name"], vehicle["driver_last_name"]), ("RICHARD", "FUENTES"))
 
 
 class JourneyTests(unittest.TestCase):

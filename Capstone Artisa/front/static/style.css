@@ -37,11 +37,14 @@
 .leaflet-control-attribution{font-size:8px}
 .leaflet-popup-content-wrapper{border-radius:8px;box-shadow:0 10px 35px rgba(18,45,47,.18)}
 .truck-div-icon{background:transparent;border:0}
-.truck-marker{--truck-state:#d88632;position:relative;display:grid;place-items:center;width:54px;height:46px;border:0;background:transparent;filter:drop-shadow(0 4px 3px rgba(20,40,42,.32));transition:filter .15s,transform .15s}
+.truck-marker{--truck-state:#d88632;position:relative;display:grid;place-items:center;width:56px;height:38px;border:0;background:transparent;filter:drop-shadow(0 3px 2px rgba(20,40,42,.28));transition:filter .15s,transform .15s}
 .truck-marker.moving{--truck-state:#288459}.truck-marker.off{--truck-state:#7d8c91}
 .truck-marker:after,.vehicle-list-icon:after{content:"";position:absolute;z-index:3;right:0;bottom:1px;width:11px;height:11px;border:2px solid #fff;border-radius:50%;background:var(--truck-state);box-shadow:0 1px 3px rgba(20,40,42,.18)}
 .truck-glyph{position:relative;z-index:2;display:block;width:54px;height:40px;object-fit:contain;pointer-events:none;user-select:none}
-.truck-heading{position:absolute;z-index:4;left:22px;top:-9px;width:8px;color:#173f35;font-size:10px;line-height:10px;transform-origin:4px 31px;text-shadow:0 1px 2px #fff,0 -1px 2px #fff}
+.truck-marker:after{width:9px;height:9px;border-width:1.5px}
+.truck-marker>.truck-glyph{width:52px;height:36px;transform:scaleX(var(--truck-facing,1));transform-origin:50% 50%;transition:transform .25s ease}
+.truck-direction{position:absolute;z-index:1;left:3px;bottom:0;width:17px;height:17px;border:1.5px solid #fff;border-radius:50%;background:#173f35;box-shadow:0 2px 4px rgba(20,40,42,.28)}
+.truck-direction:after{content:"";position:absolute;left:3px;top:2px;width:8px;height:10px;border-radius:2px;background:#d9f06b;clip-path:polygon(50% 0,100% 38%,68% 38%,68% 100%,32% 100%,32% 38%,0 38%);transform:rotate(var(--truck-heading,0deg));transform-origin:50% 6px}
 .truck-popup{display:grid;min-width:190px;gap:5px;color:#172d32}.truck-popup>strong{font-size:13px}.truck-popup>span,.truck-popup>small{color:#687b7c;font-size:10px}.truck-popup>b{width:max-content;border-radius:10px;padding:3px 7px;font-size:9px}.truck-popup>b.moving{color:#245c36;background:#dcefe0}.truck-popup>b.off{color:#4e5d60;background:#e1e7e8}.truck-popup>p{margin:3px 0;font-size:10px}
 .legend-truck{color:#245c36!important}
 .vehicle-live-row{display:flex;align-items:center;gap:9px;width:100%;padding:8px;border:1px solid transparent;border-radius:6px;background:#f2f5f2;color:var(--ink);text-align:left;cursor:pointer}.vehicle-live-row:hover{border-color:#b9c9be;background:#fff}.vehicle-live-row>span:nth-child(2){display:grid;min-width:0;gap:3px}.vehicle-live-row strong,.vehicle-live-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.vehicle-live-row strong{font-size:9px}.vehicle-live-row small{color:var(--muted);font-size:8px}
@@ -556,7 +559,7 @@
 
 .truck-back{margin:0 0 14px;padding:0;border:0;background:none;color:var(--green);font-size:12px;font-weight:600;cursor:pointer}
 .truck-head{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
-.truck-head-glyph{width:86px;height:auto}
+.truck-head-glyph{width:72px;height:auto}
 .truck-head-name{flex:1 1 260px;min-width:0}
 .truck-head-name h2{margin:0;font-size:30px;letter-spacing:-.02em}
 .truck-head-name p{margin:6px 0 0;color:var(--muted);font-size:12px;white-space:pre-wrap}

@@ -21,8 +21,7 @@ FILES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/exploracion-gps": ("gps-maps.html", "text/html; charset=utf-8"),
          "/style.css": ("style.css", "text/css; charset=utf-8"),
          "/artisa-logo.png": ("artisa-logo.png", "image/png"),
-         "/artisa-truck-3d.png": ("artisa-truck-3d.png", "image/png"),
-         "/artisa-truck-side-3d.png": ("artisa-truck-side-3d.png", "image/png"),
+         "/artisa-truck-box-white-green.png": ("artisa-truck-box-white-green.png", "image/png"),
          "/artisa-fleet-cover.jpg": ("artisa-fleet-cover.jpg", "image/jpeg")}
 
 

@@ -28,16 +28,14 @@ class FlotaTests(unittest.TestCase):
     def test_fleet_status_today_and_series(self):
         ahora = T + timedelta(minutes=10)
         hoy = date(2026, 10, 14)
-        def ultimo(params):
-            if params[0] == "AB1234":  # reportó hace 4 min a 62 km/h
-                return [{"asset_id": "AB1234", "asset_name": "906", "report_date": T + timedelta(minutes=6),
-                         "latitude": -22.45, "longitude": -68.92, "speed": 62, "heading": 90, "ignition": 1,
-                         "event_name": "Posición", "driver_name": "Juan", "driver_last_name": "Pérez"}]
-            return []
+        ultimo = [{"asset_id": "AB1234", "asset_name": "906", "report_date": T + timedelta(minutes=6),  # hace 4 min
+                   "latitude": -22.45, "longitude": -68.92, "speed": 62, "heading": 90, "ignition": 1,
+                   "event_name": "Posición", "driver_name": "Juan", "driver_last_name": "Pérez"}]
         cursor = FakeCursor([
+            ("FROM telemetria_api AS gps", ultimo),
+            ("FROM raw_gps AS gps", []),
             ("FROM vehiculos", [{"asset_id": "AB1234"}, {"asset_id": "CD5678"}]),
             ("FROM rutas_version", []),
-            ("ORDER BY report_date DESC LIMIT 1", ultimo),
             ("FROM reporte_diario WHERE", [
                 {"fecha": hoy, "asset_id": "AB1234", "asset_name": "906", "km_observados": 50.04, "viajes": 2,
                  "minutos_detenido": 30.2, "primer_reporte": T, "ultimo_reporte": T + timedelta(minutes=6)},
