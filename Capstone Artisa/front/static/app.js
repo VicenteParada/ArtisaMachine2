@@ -2060,7 +2060,6 @@ function drawPrediction() {
   const cells = predictionCells(days);
   const total = routes ? cells.length : days.reduce((sum, item) => sum + item.total, 0);
   // Resumen de la selección
-  $("prediction-total-label").textContent = config.totalLabel;
   $("prediction-total").textContent = format(total);
   $("prediction-total-detail").textContent = days.length === 1
     ? predictionDayLabel(days[0].fecha, "long") : `En ${days.length} días · camiones en movimiento`;
@@ -2301,12 +2300,29 @@ function togglePredictionPlay() {
 function renderPrediction(data) {
   predictionState.data = data;
   const status = $("prediction-status");
+  const config = predictionConfig();
+  // La pestaña elegida se marca siempre, aunque su modelo aún no tenga resultados.
+  for (const tab of document.querySelectorAll("[data-prediction-tab]")) {
+    const selected = tab.dataset.predictionTab === predictionState.tipo;
+    tab.classList.toggle("is-active", selected);
+    tab.setAttribute("aria-selected", String(selected));
+  }
+  $("prediction-legend-heat").hidden = predictionState.tipo !== "calor";
+  $("prediction-legend-routes").hidden = predictionState.tipo !== "rutas";
+  $("prediction-chart-unit").textContent = config.chartUnit;
+  $("prediction-total-label").textContent = config.totalLabel;
   if (!data || data.status !== "ok" || !data.dias.length) {
     status.textContent = "Pendiente";
     status.className = "status neutral";
     $("prediction-intro").textContent = (data && data.message) ||
       "La predicción se calcula sola cuando hay al menos 21 días cerrados.";
-    $("prediction-wheel").replaceChildren();
+    // No dejar a la vista los datos del otro modelo.
+    for (const id of ["prediction-total", "prediction-peak", "prediction-error", "prediction-base"]) $(id).textContent = "—";
+    for (const id of ["prediction-total-detail", "prediction-peak-detail", "prediction-error-detail", "prediction-base-detail",
+      "prediction-selection"]) $(id).textContent = "";
+    for (const id of ["prediction-wheel", "prediction-daily-chart", "prediction-methods-chart"]) $(id).replaceChildren();
+    if (predictionState.layer && predictionState.map) predictionState.map.removeLayer(predictionState.layer);
+    predictionState.layer = null;
     return;
   }
   const m = data.metricas || {};
@@ -2316,15 +2332,6 @@ function renderPrediction(data) {
   status.className = "status " + (usesModel ? "" : "neutral");
   const today = localToday();
   const first = data.dias[0].fecha, last = data.dias[data.dias.length - 1].fecha;
-  const config = predictionConfig();
-  for (const tab of document.querySelectorAll("[data-prediction-tab]")) {
-    const selected = tab.dataset.predictionTab === predictionState.tipo;
-    tab.classList.toggle("is-active", selected);
-    tab.setAttribute("aria-selected", String(selected));
-  }
-  $("prediction-legend-heat").hidden = predictionState.tipo !== "calor";
-  $("prediction-legend-routes").hidden = predictionState.tipo !== "rutas";
-  $("prediction-chart-unit").textContent = config.chartUnit;
   $("prediction-intro").textContent =
     `${config.intro} entre el ${predictionDayLabel(first, "long")} y el ` +
     `${predictionDayLabel(last, "long")} (${data.dias.length} días). Gira la ruleta para elegir un día, ` +

@@ -50,6 +50,8 @@ def prediction(cursor, tipo="calor"):
             return None
         for fila in cursor.fetchall():
             por_dia[fila["fecha"]].append([fila["route_id"], round(float(fila["valor"]), 1)])
+        if not por_dia:
+            return None  # versión anterior a las rutas completas: Machine la recalcula sola
     else:
         cursor.execute(
             "SELECT fecha, celda_lat, celda_lon, valor FROM prediccion_celda WHERE version_id=%s ORDER BY fecha",
