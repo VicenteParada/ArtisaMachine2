@@ -7,7 +7,7 @@
     GET /api/gps?desde=YYYY-MM-DD&hasta=YYYY-MM-DD   maximo 14 dias, ambos incluidos
         -> {desde, hasta, camiones: [asset_id...], conductores: [nombre o null...], cam: [indice en camiones...],
             t: [segundos desde 'desde' 00:00...], lat: [lat*1e5...], lon: [lon*1e5...]}
-    GET /api/faenas -> {faenas: [{nombre, area_m2, geocerca: GeoJSON}...]}
+  El fondo, el selector de capas y las faenas vienen de /mapa-base.js, igual que en el resto de Artisa.
   Si la API queda en otro host, cambiar API_BASE.
 -->
 <html lang="es">
@@ -15,9 +15,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mapas de telemetria</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="/mapa-base.css?v=20261014-mapa-unico">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="/mapa-base.js?v=20261014-mapa-unico"></script>
 <style>
   :root {
     --fondo: #f4f8f5;
@@ -78,10 +80,6 @@
   .leyenda .barra-color { display: flex; height: 10px; margin: 6px 0 2px; }
   .leyenda .barra-color span { flex: 1; }
   .leyenda .marcas { display: flex; justify-content: space-between; color: var(--suave); }
-  .pin-faena {
-    width: 14px; height: 14px; border-radius: 50%; background: #2e7d32;
-    border: 2px solid #fff; box-shadow: 0 0 3px rgba(0, 0, 0, .5);
-  }
   .solo-calor .selector-vista { display: none; }
   .etiqueta { color: var(--acento); font-size: 11px; font-weight: 700; }
   .titulo { display: flex; flex-direction: column; gap: 2px; align-self: center; }
@@ -263,101 +261,14 @@ async function pedir(ruta) {
 }
 
 // ---------------------------------------------------------------------------
-// Mapa y mapas base (con respaldo automatico si el proveedor activo falla)
+// Mapa: el mismo fondo, selector de capas y faenas que el resto de Artisa (mapa-base.js)
 // ---------------------------------------------------------------------------
-const mapa = L.map("mapa", {preferCanvas: true, maxZoom: 19}).setView([-33.45, -70.66], 6);
+const base = ArtisaMapaBase.crear(document.getElementById("mapa"), {pedir: ruta => pedir(ruta), zoom: 6});
+const mapa = base.mapa;
 L.control.scale().addTo(mapa);
 window.addEventListener("message", event => {
   if (event.origin === location.origin && event.data === "artisa:show-map") mapa.invalidateSize();
 });
-
-const MAPAS_BASE = {
-  "Calles y lugares (OpenStreetMap)": L.tileLayer(
-    "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    {attribution: "&copy; OpenStreetMap contributors", maxNativeZoom: 19, maxZoom: 19}),
-  "Satélite (Esri)": L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    {attribution: "Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, GIS User Community",
-     maxNativeZoom: 18, maxZoom: 19}),
-};
-MAPAS_BASE["Calles y lugares (OpenStreetMap)"].addTo(mapa);
-
-// Referencia oficial de Esri: nombres y límites visibles sobre la fotografía satelital.
-// Se añade solo con World Imagery y queda debajo de los trazos GPS.
-mapa.createPane("etiquetas-satelitales");
-mapa.getPane("etiquetas-satelitales").style.zIndex = "350";
-mapa.getPane("etiquetas-satelitales").style.pointerEvents = "none";
-const ETIQUETAS_SATELITALES = L.tileLayer(
-  "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-  {pane: "etiquetas-satelitales", attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, OpenStreetMap contributors, GIS User Community",
-   maxNativeZoom: 18, maxZoom: 19});
-const SATELITE_ESRI = MAPAS_BASE["Satélite (Esri)"];
-SATELITE_ESRI.on("add", () => ETIQUETAS_SATELITALES.addTo(mapa));
-SATELITE_ESRI.on("remove", () => ETIQUETAS_SATELITALES.remove());
-
-(function respaldoMapaBase(capas, umbral) {
-  let cambios = 0;
-  capas.forEach((capa, i) => {
-    let errores = 0, cargas = 0;
-    capa.on("tileload", () => { cargas++; });
-    capa.on("tileerror", () => {
-      errores++;
-      if (errores >= umbral && errores > cargas && mapa.hasLayer(capa) && cambios < capas.length - 1) {
-        cambios++;
-        mapa.removeLayer(capa);
-        mapa.addLayer(capas[(i + 1) % capas.length]);
-        console.warn("Mapa base con fallas, cambiando de proveedor");
-      }
-    });
-    capa.on("add", () => { errores = 0; cargas = 0; });
-  });
-})(Object.values(MAPAS_BASE), 6);
-
-// ---------------------------------------------------------------------------
-// Faenas
-// ---------------------------------------------------------------------------
-let faenas = [];
-
-function centroGeojson(geom) {
-  // Centroide (lat, lon) del anillo exterior mas grande; soporta Polygon y MultiPolygon
-  const poligonos = geom.type === "Polygon" ? [geom.coordinates] : geom.coordinates;
-  let mejor = null, mejorArea = -1;
-  for (const poligono of poligonos) {
-    const anillo = poligono[0];
-    let a = 0, cx = 0, cy = 0;
-    for (let i = 0; i < anillo.length; i++) {
-      const [x0, y0] = anillo[i], [x1, y1] = anillo[(i + 1) % anillo.length];
-      const cruz = x0 * y1 - x1 * y0;
-      a += cruz; cx += (x0 + x1) * cruz; cy += (y0 + y1) * cruz;
-    }
-    let lat, lon;
-    if (Math.abs(a) < 1e-15) {
-      lon = anillo.reduce((s, p) => s + p[0], 0) / anillo.length;
-      lat = anillo.reduce((s, p) => s + p[1], 0) / anillo.length;
-    } else {
-      lon = cx / (3 * a); lat = cy / (3 * a);
-    }
-    if (Math.abs(a) > mejorArea) { mejor = [lat, lon]; mejorArea = Math.abs(a); }
-  }
-  return mejor;
-}
-
-function capaFaenas(conMarcadores) {
-  const capa = L.featureGroup();
-  for (const f of faenas) {
-    const area = f.area_m2 != null ? `${Math.round(f.area_m2)} m2` : "s/d";
-    const etiqueta = `<b>${esc(f.nombre)}</b><br>área: ${area}`;
-    const poligono = L.geoJSON(f.geojson, {style: {color: "green", weight: 2, fillOpacity: conMarcadores ? 0.2 : 0.15}});
-    if (conMarcadores) poligono.bindPopup(etiqueta, {maxWidth: 250});
-    else poligono.bindTooltip(esc(f.nombre), {sticky: true});
-    poligono.addTo(capa);
-    if (conMarcadores) {
-      L.marker(f.centro, {icon: L.divIcon({className: "", html: '<div class="pin-faena"></div>', iconSize: [14, 14]})})
-        .bindTooltip(esc(f.nombre)).bindPopup(etiqueta, {maxWidth: 250}).addTo(capa);
-    }
-  }
-  return capa;
-}
 
 // ---------------------------------------------------------------------------
 // Datos GPS
@@ -463,7 +374,7 @@ function vistaCalor(D) {
   const calor = L.heatLayer(puntos, {radius: 8, blur: 10, minOpacity: 0.3, max: 1, maxZoom: 18});
   const encuadre = {limites: limitesDatos(D.lat, D.lon), opciones: {padding: [40, 40], maxZoom: 12}};
   return {
-    overlays: {"Densidad GPS": calor, "Faenas": capaFaenas(true)},
+    overlays: {"Densidad GPS del período": calor},
     resumen: `${periodo(D)}: ${nf.format(D.n)} reportes GPS de ${D.nPatentes} camiones.`,
     encuadre,
   };
@@ -508,9 +419,8 @@ function vistaRutas(D) {
     }
     overlays[`Camión ${nombre}`] = grupo;
   });
-  overlays["Faenas"] = capaFaenas(false);
   return {
-    overlays, controlCerrado: true,
+    overlays,
     resumen: `${periodo(D)}: recorridos de ${camiones.length} camiones (${nf.format(dibujados)} reportes dibujados).`,
     encuadre: {limites: limitesDatos(D.lat, D.lon), opciones: {padding: [30, 30]}},
   };
@@ -667,7 +577,7 @@ async function vistaUso(D, progreso) {
     `${periodo(D)}: ${nf.format(u.length)} reportes GPS de ${new Set(Array.from(u, i => D.cam[i])).size} camiones.`,
     `Tramos dibujados: ${nf.format(n)} · sin dibujar ${nf.format(pares.length - n)} (más de ${P.MAX_GAP_MIN} min sin reportes o salto de GPS).`,
   ];
-  if (!n) return {overlays: {"Faenas": capaFaenas(false)}, resumen: resumen.join("\n")};
+  if (!n) return {overlays: {}, resumen: resumen.join("\n")};
 
   // Camion de cada linea, numerado desde 0
   const numero = new Map(), camion = new Int32Array(n);
@@ -773,7 +683,7 @@ async function vistaUso(D, progreso) {
     linea.on("popupopen", evento => L.DomEvent.disableScrollPropagation(evento.popup.getElement()));
   }
   return {
-    overlays: {"Uso de rutas": capa, "Faenas": capaFaenas(false)},
+    overlays: {"Uso de rutas": capa},
     leyenda: leyendaContinua(COLORES, 1, vmax, "Camiones distintos cerca del tramo (rojo = pocos, verde = muchos)"),
     resumen: resumen.join("\n"),
     encuadre: {limites: limitesDatos(lats, lons), opciones: {padding: [30, 30]}},
@@ -936,8 +846,7 @@ function vistaPuntos(D) {
 
   const lado = CELDA_M * (2 * RADIO_CELDAS + 1);
   return {
-    overlays: {"Puntos GPS": new CapaPuntos({lat, lon, cam, dia, seg, niv, colores, dias, camiones: D.camiones}),
-               "Faenas": capaFaenas(false)},
+    overlays: {"Puntos GPS": new CapaPuntos({lat, lon, cam, dia, seg, niv, colores, dias, camiones: D.camiones})},
     leyenda: leyendaPasos(colores, cortes, `Reportes GPS en un cuadro de ~${lado} m (rojo = pocos, verde = muchos)`),
     resumen: `${periodo(D)}: ${nf.format(n)} puntos GPS de ${new Set(cam).size} camiones. `
       + `Mayor concentración: ${nf.format(maxConc)} reportes en un cuadro de ~${lado} m.`,
@@ -1022,7 +931,7 @@ function quitarMostrado() {
   if (!mostrado) return;
   for (const capa of Object.values(mostrado.overlays)) mapa.removeLayer(capa);
   if (mostrado.leyenda) mostrado.leyenda.remove();
-  mostrado.control.remove();
+  base.ponerControl();
   mostrado = null;
 }
 
@@ -1049,7 +958,7 @@ async function mostrarVista(nombre) {
   }
   if (miTurno !== turno) return;
   for (const capa of Object.values(v.overlays)) capa.addTo(mapa);
-  v.control = L.control.layers(MAPAS_BASE, v.overlays, {collapsed: !!v.controlCerrado}).addTo(mapa);
+  v.control = base.ponerControl(v.overlays);
   if (nombre === "rutas") mejorarControlCamiones(v.control);
   if (v.leyenda) v.leyenda.addTo(mapa);
   mostrado = v;
@@ -1115,17 +1024,8 @@ async function cargar() {
   avisoCarga();
   const reloj = setInterval(avisoCarga, 1000);
   try {
-    const [gps, rf] = await Promise.all([
-      pedir(`/api/gps?desde=${desde}&hasta=${hasta}`),
-      faenas.length ? null : pedir("/api/faenas").catch(e => { console.warn("Sin faenas:", e); return null; }),
-    ]);
+    const gps = await pedir(`/api/gps?desde=${desde}&hasta=${hasta}`);
     clearInterval(reloj);
-    if (rf) {
-      faenas = rf.faenas.filter(f => f.geocerca).map(f => {
-        const geojson = typeof f.geocerca === "string" ? JSON.parse(f.geocerca) : f.geocerca;
-        return {nombre: f.nombre, area_m2: f.area_m2, geojson, centro: centroGeojson(geojson)};
-      });
-    }
     if (!gps.t.length) { estado(`No hay reportes GPS entre ${desde} y ${hasta}.`); return; }
     datos = prepararDatos(gps);
     await mostrarVista(vistaActual);

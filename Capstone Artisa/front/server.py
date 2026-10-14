@@ -18,11 +18,21 @@ ROOT = Path(__file__).with_name("static")
 FILES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/app.js": ("app.js", "text/javascript; charset=utf-8"),
          "/map-data.js": ("map-data.js", "text/javascript; charset=utf-8"),
+         "/mapa-base.js": ("mapa-base.js", "text/javascript; charset=utf-8"),
+         "/mapa-base.css": ("mapa-base.css", "text/css; charset=utf-8"),
          "/exploracion-gps": ("gps-maps.html", "text/html; charset=utf-8"),
          "/style.css": ("style.css", "text/css; charset=utf-8"),
          "/artisa-logo.png": ("artisa-logo.png", "image/png"),
          "/artisa-truck-box-white-green.png": ("artisa-truck-box-white-green.png", "image/png"),
          "/artisa-fleet-cover.jpg": ("artisa-fleet-cover.jpg", "image/jpeg")}
+
+
+def static_cache(raw_path):
+    """Los estáticos con ?v= cambian de URL en cada versión: el navegador los guarda un año.
+    Los demás se revalidan cada hora. Las páginas HTML y la API nunca se guardan."""
+    if "v=" in urlsplit(raw_path).query:
+        return "public, max-age=31536000, immutable"
+    return "public, max-age=3600"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -40,11 +50,12 @@ class Handler(BaseHTTPRequestHandler):
         super().setup()
         self.connection.settimeout(5)
 
-    def reply(self, status, body, content_type="application/json; charset=utf-8", csp=None):
+    def reply(self, status, body, content_type="application/json; charset=utf-8", csp=None,
+              cache="no-store"):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy", csp or "default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://unpkg.com 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https://unpkg.com https://tile.openstreetmap.org https://server.arcgisonline.com; frame-src 'self'; frame-ancestors 'none'")
         self.end_headers()
@@ -109,8 +120,10 @@ class Handler(BaseHTTPRequestHandler):
                        "https://tile.openstreetmap.org https://server.arcgisonline.com; "
                        "frame-ancestors 'self'")
                 self.reply(200, content, content_type, csp=csp)
-            else:
+            elif content_type.startswith("text/html"):
                 self.reply(200, content, content_type)
+            else:
+                self.reply(200, content, content_type, cache=static_cache(self.path))
         else:
             self.reply(404, b'{"error":"Ruta no encontrada"}')
 

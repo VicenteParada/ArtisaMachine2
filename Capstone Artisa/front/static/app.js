@@ -277,9 +277,6 @@ let selectedVehicleId = null;
 const truckMarkers = new Map();
 const routeMapLayers = new Map();
 let openPopupVehicleId = null;   // ficha de camión abierta (se reabre tras actualizar el mapa)
-let faenaLayer = null;
-let densityLayer = null;
-let densityDay = null;
 
 // Mientras llega la clasificación se muestra igual la vista de rutas (con «Cargando…»); solo
 // si Machine aún no tiene rutas se pasa a los mapas de telemetría.
@@ -588,6 +585,9 @@ function applyMapLayerVisibility() {
   applyRouteFilter();
 }
 
+// Los cuatro mapas comparten fondo, selector de capas, faenas y densidad (mapa-base.js).
+const mapPedir = (path, timeoutMs) => api(path, {timeoutMs});
+
 function initializeFleetMap() {
   const container = $("heatmap-map");
   if (fleetMap || !container) return;
@@ -597,35 +597,7 @@ function initializeFleetMap() {
     return;
   }
   container.replaceChildren();
-  fleetMap = L.map(container, {preferCanvas: true, zoomControl: true})
-    .setView([-33.45, -70.66], 5);
-  const streets = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(fleetMap);
-  const satellite = L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    {maxNativeZoom: 18, maxZoom: 19,
-     attribution: "Tiles &copy; Esri &mdash; Esri, Maxar, Earthstar Geographics, GIS User Community"});
-  fleetMap.createPane("satelliteLabelsPane").style.zIndex = "350";
-  fleetMap.getPane("satelliteLabelsPane").style.pointerEvents = "none";
-  const satelliteLabels = L.tileLayer(
-    "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-    {pane: "satelliteLabelsPane", maxNativeZoom: 18, maxZoom: 19,
-     attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, OpenStreetMap contributors"});
-  satellite.on("add", () => satelliteLabels.addTo(fleetMap));
-  satellite.on("remove", () => satelliteLabels.remove());
-  fleetMap.createPane("faenaPane").style.zIndex = "405";
-  faenaLayer = L.featureGroup();
-  densityLayer = L.layerGroup();
-  faenaLayer.on("add", loadFaenas);
-  densityLayer.on("add", loadDensity);
-  L.control.layers(
-    {"Calles y lugares (OpenStreetMap)": streets, "Satélite (Esri)": satellite},
-    {"Faenas": faenaLayer, "Densidad GPS (día anterior)": densityLayer},
-    {collapsed: true, position: "topleft"}
-  ).addTo(fleetMap);
-  faenaLayer.addTo(fleetMap);
+  fleetMap = ArtisaMapaBase.crear(container, {pedir: mapPedir}).mapa;
   const pendingNote = document.createElement("div");
   pendingNote.id = "map-pending-note";
   pendingNote.className = "map-pending-note";
@@ -644,77 +616,6 @@ function initializeFleetMap() {
   truckLayer = L.layerGroup();
   selectedRouteLayer = L.featureGroup().addTo(fleetMap);
   applyMapLayerVisibility();
-}
-
-function mapOverlayNote(text) {
-  let note = $("map-overlay-note");
-  if (!note) {
-    note = document.createElement("div");
-    note.id = "map-overlay-note";
-    note.className = "map-pending-note map-overlay-note";
-    $("heatmap-map").append(note);
-  }
-  note.textContent = text || "";
-  note.hidden = !text;
-}
-
-async function loadFaenas() {
-  if (faenaLayer.getLayers().length) return;
-  try {
-    const payload = await api("/api/faenas", {timeoutMs: 30000});
-    for (const faena of payload.faenas || []) {
-      if (!faena.geocerca) continue;
-      const geometry = typeof faena.geocerca === "string" ? JSON.parse(faena.geocerca) : faena.geocerca;
-      const area = faena.area_m2 != null ? format(Math.round(faena.area_m2)) + " m²" : "sin dato";
-      const polygon = L.geoJSON(geometry, {
-        pane: "faenaPane", style: {color: "#2e7d32", weight: 2, fillOpacity: 0.18}
-      }).bindTooltip(textTooltip(faena.nombre), {sticky: true}).addTo(faenaLayer);
-      L.marker(polygon.getBounds().getCenter(), {
-        icon: L.divIcon({className: "", html: '<div class="faena-pin"></div>', iconSize: [14, 14]})
-      }).bindTooltip(textTooltip(faena.nombre + " · área " + area)).addTo(faenaLayer);
-    }
-  } catch (error) {
-    mapOverlayNote("No se pudieron cargar las faenas: " + error.message);
-  }
-}
-
-function previousChileDay() {
-  const today = new Intl.DateTimeFormat("en-CA", {timeZone: HISTORY_ZONE}).format(new Date());
-  return new Date(Date.parse(today) - 86400000).toISOString().slice(0, 10);
-}
-
-async function loadDensity() {
-  const day = previousChileDay();
-  if (densityDay === day && densityLayer.getLayers().length) return;
-  if (!L.heatLayer) {
-    mapOverlayNote("No se pudo cargar la librería del mapa de calor.");
-    return;
-  }
-  densityLayer.clearLayers();
-  densityDay = day;
-  mapOverlayNote("Cargando densidad GPS del " + day.split("-").reverse().join("-") + "…");
-  try {
-    const gps = await api(`/api/gps?desde=${day}&hasta=${day}`, {timeoutMs: 120000});
-    if (densityDay !== day) return;
-    // Celdas de ~100 m (lat/lon x 1e5 -> 1e3), igual que el explorador de telemetría.
-    const cells = new Map();
-    for (let i = 0; i < gps.lat.length; i++) {
-      const key = Math.round(gps.lat[i] / 100) + "," + Math.round(gps.lon[i] / 100);
-      cells.set(key, (cells.get(key) || 0) + 1);
-    }
-    let max = 1;
-    for (const value of cells.values()) max = Math.max(max, value);
-    const points = [];
-    for (const [key, value] of cells) {
-      const [lat, lon] = key.split(",").map(Number);
-      points.push([lat / 1000, lon / 1000, Math.log1p(value) / Math.log1p(max)]);
-    }
-    L.heatLayer(points, {radius: 8, blur: 10, minOpacity: 0.3, max: 1, maxZoom: 18}).addTo(densityLayer);
-    mapOverlayNote(points.length ? "" : "Sin reportes GPS el " + day + ".");
-  } catch (error) {
-    densityDay = null;
-    mapOverlayNote("No se pudo cargar la densidad GPS: " + error.message);
-  }
 }
 
 function openTruckPopup(vehicleId) {
@@ -1959,10 +1860,8 @@ function predictionRouteTip(label, value, dayCount) {
 
 function ensurePredictionMap() {
   if (predictionState.map || !window.L) return predictionState.map;
-  predictionState.map = L.map($("prediction-map"), {zoomControl: true}).setView([-24.5, -70], 6);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(predictionState.map);
+  predictionState.map = ArtisaMapaBase.crear($("prediction-map"),
+    {pedir: mapPedir, centro: [-24.5, -70], zoom: 6, preferCanvas: false}).mapa;
   return predictionState.map;
 }
 
@@ -2977,10 +2876,7 @@ function renderTruckHistory(data) {
 // --- Mapa del día ---
 function ensureTruckMap() {
   if (truckView.map || !window.L) return truckView.map;
-  truckView.map = L.map($("truck-map"), {zoomControl: true, preferCanvas: true}).setView([-23.6, -70.4], 7);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(truckView.map);
+  truckView.map = ArtisaMapaBase.crear($("truck-map"), {pedir: mapPedir, centro: [-23.6, -70.4], zoom: 7}).mapa;
   truckView.map.createPane("truckMarks").style.zIndex = 650;
   truckView.map.on("zoomend", applyTripLanes);
   return truckView.map;

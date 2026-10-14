@@ -417,10 +417,6 @@
 .heatmap-layout.is-historical .route-insights{display:none}
 .heatmap-method[hidden]{display:none}
 /* Capas del mapa clasificado */
-.faena-pin{width:14px;height:14px;border-radius:50%;background:#2e7d32;border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.5)}
-.map-overlay-note{top:auto;bottom:28px}
-.map-overlay-note[hidden]{display:none}
-#heatmap-map .leaflet-control-layers{font-size:11px;line-height:1.5}
 .route-filter-panel[hidden],.map-layer-panel[hidden]{display:none}
 
 /* Predicción de actividad (debajo del Mapa de rutas) */
