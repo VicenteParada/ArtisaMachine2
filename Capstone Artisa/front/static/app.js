@@ -2420,7 +2420,7 @@ const TRIP_COLORS = ["#1f6b4f", "#2563eb", "#9333ea", "#0e7490", "#db2777", "#4d
 const tripColor = (number) => TRIP_COLORS[(number - 1) % TRIP_COLORS.length];
 const truckView = {fleet: null, filter: "todos", query: "", sort: "nombre", id: null, day: null, detail: null,
   map: null, layer: null, trips: new Map(), base: [], focus: null, play: null, request: 0,
-  boardDay: null, dayRows: null, dayState: null, dayLoading: false, tab: "reportes", pin: null};
+  boardDay: null, dayRows: null, dayState: null, dayLoading: false, tab: "flota", pin: null};
 
 function truckHash() {
   const match = window.location.hash.match(/^#camiones(?:\/([A-Za-z0-9_-]{1,16}))?(?:\/(\d{4}-\d{2}-\d{2}))?$/);
@@ -2529,7 +2529,8 @@ function fleetRow(truck) {
   const title = document.createElement("strong");
   title.textContent = truck.nombre;
   const sub = document.createElement("small");
-  sub.textContent = [truck.asset_id !== truck.nombre ? truck.asset_id : null, truck.conductor].filter(Boolean).join(" · ") || "Sin conductor informado";
+  sub.className = "fleet-identity";
+  sub.append(...truckIdentity(truck.asset_id, truck.conductor, null));
   name.append(title, sub);
   const state = document.createElement("span");
   state.className = "fleet-state";
@@ -2701,15 +2702,37 @@ function fleetTruck(id) {
   return truckView.fleet && truckView.fleet.camiones ? truckView.fleet.camiones.find((truck) => truck.asset_id === id) : null;
 }
 
+// Patente con aspecto de placa, conductor y última ruta (con el color de su nivel de uso).
+function truckIdentity(plate, driver, route) {
+  const nodes = [];
+  const plateNode = document.createElement("span");
+  plateNode.className = "plate";
+  plateNode.textContent = plate;
+  plateNode.title = "Patente";
+  nodes.push(plateNode);
+  const driverNode = document.createElement("span");
+  driverNode.className = "driver" + (driver ? "" : " is-empty");
+  driverNode.title = "Conductor";
+  driverNode.textContent = driver ? driver.toLocaleLowerCase("es-CL").replace(/(^|\s)\S/g, (c) => c.toLocaleUpperCase("es-CL")) : "Sin conductor informado";
+  nodes.push(driverNode);
+  if (route) {
+    const routeNode = document.createElement("span");
+    routeNode.className = "last-route";
+    routeNode.style.setProperty("--route", ROUTE_COLORS[route.usage_level] || "#718785");
+    routeNode.title = "Última ruta clasificada";
+    routeNode.textContent = route.label;
+    nodes.push(routeNode);
+  }
+  return nodes;
+}
+
 function renderTruckHead() {
   const live = fleetTruck(truckView.id);
   const detail = truckView.detail && truckView.detail.asset_id === truckView.id ? truckView.detail : null;
   const name = (live && live.nombre) || (detail && detail.nombre) || truckView.id;
   $("truck-name").textContent = "Camión " + name;
   const driver = (detail && detail.conductor) || (live && live.conductor);
-  $("truck-meta").textContent = [name !== truckView.id ? "Patente " + truckView.id : null,
-    driver ? "Conductor: " + driver : "Sin conductor informado",
-    live && live.ruta ? "Última ruta: " + live.ruta.label : null].filter(Boolean).join("   ·   ");
+  $("truck-meta").replaceChildren(...truckIdentity(truckView.id, driver, live && live.ruta));
   const state = $("truck-state");
   state.className = "truck-state state-" + (live ? live.estado : "sin_datos");
   state.innerHTML = '<i class="state-dot"></i>';
@@ -3516,7 +3539,7 @@ async function downloadTruckImage() {
     setTimeout(() => URL.revokeObjectURL(link.href), 5000);
   } finally {
     button.disabled = false;
-    button.textContent = "Descargar imagen del recorrido";
+    button.textContent = "↓ Imagen del recorrido";
   }
 }
 

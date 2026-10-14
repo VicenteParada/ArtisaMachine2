@@ -6,11 +6,11 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/style.css?v=20261014-reporte">
+  <link rel="stylesheet" href="/style.css?v=20261014-detalles">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
   <script src="/map-data.js" defer></script>
-  <script src="/app.js?v=20261014-reporte" defer></script>
+  <script src="/app.js?v=20261014-detalles" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -114,11 +114,11 @@
           <div id="telemetry-connection" class="telemetry-connection warning" role="status" aria-live="polite" hidden></div>
           <p id="telemetry-pending" class="fleet-api-pending" role="status" hidden>La API de la empresa aún no está conectada: se muestran los datos históricos disponibles.</p>
           <div class="fleet-tabs" role="tablist" aria-label="Qué quieres ver">
-            <button type="button" role="tab" class="fleet-tab" data-fleet-tab="reportes" aria-selected="true" aria-controls="live-reports"><strong>Reportes en vivo</strong><small id="fleet-tab-reportes-note">Lo último que llegó de la API</small></button>
-            <button type="button" role="tab" class="fleet-tab" data-fleet-tab="flota" aria-selected="false" aria-controls="fleet-panel-flota"><strong>Camiones</strong><small id="fleet-tab-flota-note">Estado y actividad por día</small></button>
+            <button type="button" role="tab" class="fleet-tab" data-fleet-tab="flota" aria-selected="true" aria-controls="fleet-panel-flota"><strong>Camiones</strong><small id="fleet-tab-flota-note">Estado y actividad por día</small></button>
+            <button type="button" role="tab" class="fleet-tab" data-fleet-tab="reportes" aria-selected="false" aria-controls="live-reports"><strong>Reportes en vivo</strong><small id="fleet-tab-reportes-note">Lo último que llegó de la API</small></button>
             <button type="button" role="tab" class="fleet-tab" data-fleet-tab="mes" aria-selected="false" aria-controls="month-panel"><strong>Resumen del mes</strong><small>Un día por fila y descarga CSV</small></button>
           </div>
-          <div id="fleet-panel-flota" class="fleet-panel" role="tabpanel" hidden>
+          <div id="fleet-panel-flota" class="fleet-panel" role="tabpanel">
           <div class="board-day">
             <div class="board-day-controls">
               <button type="button" class="button secondary" id="board-prev" aria-label="Día anterior">◀</button>
@@ -144,7 +144,7 @@
           <div id="fleet-board" class="fleet-board" aria-live="polite"><p class="fleet-empty">Cargando la flota…</p></div>
           </div>
 
-          <div class="fleet-panel" id="live-reports" role="tabpanel">
+          <div class="fleet-panel" id="live-reports" role="tabpanel" hidden>
             <p class="fleet-panel-head"><span id="telemetry-range">Se actualiza cada minuto</span> · <strong>Toca un reporte para ver el recorrido de ese camión y dónde estaba en ese momento.</strong></p>
             <div id="telemetry-content">
               <p class="fleet-more-note"><strong id="telemetry-count">—</strong> reportes guardados · <strong id="vehicle-count">—</strong> <span id="vehicle-count-note">camiones con reportes en las últimas 24 h</span> · <span id="telemetry-quality"></span></p>
@@ -165,7 +165,7 @@
           <button type="button" id="truck-back" class="text-button truck-back">← Camiones en vivo</button>
           <div class="truck-head">
             <img class="truck-head-glyph" src="/artisa-truck-box-white-green.png?v=20261014" alt="" aria-hidden="true">
-            <div class="truck-head-name"><h2 id="truck-name">—</h2><p id="truck-meta">—</p></div>
+            <div class="truck-head-name"><h2 id="truck-name">—</h2><p id="truck-meta" class="truck-identity">—</p></div>
             <span id="truck-state" class="truck-state"></span>
           </div>
           <div class="truck-day-controls">
@@ -174,7 +174,7 @@
             <button type="button" class="button secondary" id="truck-next" aria-label="Día siguiente">▶</button>
             <button type="button" class="button secondary" id="truck-today">Hoy</button>
             <button type="button" class="button secondary" id="truck-yesterday">Ayer</button>
-            <button type="button" class="button truck-image-button" id="truck-image">Descargar imagen del recorrido</button>
+            <button type="button" class="button truck-image-button" id="truck-image">↓ Imagen del recorrido</button>
           </div>
           <p id="truck-day-note" class="truck-day-note" aria-live="polite"></p>
           <div class="truck-kpis">
