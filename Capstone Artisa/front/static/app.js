@@ -1779,6 +1779,7 @@ async function refreshAll() {
   pendingRequests.clear();
   refreshing = false;
   telemetryRefreshing = false;
+  liveVehiclesRefreshing = false;
   predictionState.loading = false;
   predictionState.cache = {};
   try {

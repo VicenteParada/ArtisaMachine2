@@ -89,6 +89,58 @@ def last_drivers(cursor, positions):
     return found
 
 
+# Columnas propias de cada fuente: el histórico no trae rumbo ni encendido.
+LATEST_SOURCES = (
+    ("telemetria_api", "api", "gps.speed, gps.heading, gps.ignition, gps.event_name, "
+                              "gps.driver_name, gps.driver_last_name"),
+    ("raw_gps", "historico", "gps.speed, NULL AS heading, NULL AS ignition, gps.event_name, "
+                             "gps.driver_name, gps.driver_last_name"),
+)
+
+
+def _latest_reports(cursor, table, extra):
+    """Un solo reporte, el más reciente, por cada camión del catálogo en la tabla dada."""
+    # La subconsulta correlacionada aprovecha el índice (asset_id, report_date) y elige un
+    # solo report_id por camión. Agrupar únicamente por MAX(report_date) no basta: la fuente
+    # puede entregar miles de reportes con la misma hora máxima para un mismo vehículo.
+    try:
+        cursor.execute(
+            f"""SELECT gps.asset_id, gps.asset_name, gps.report_date, gps.latitude, gps.longitude,
+                       {extra}
+                FROM {table} AS gps
+                INNER JOIN (
+                    SELECT vehicle.asset_id,
+                           (SELECT source.report_id
+                            FROM {table} AS source
+                            WHERE source.asset_id = vehicle.asset_id
+                            ORDER BY source.report_date DESC
+                            LIMIT 1) AS report_id
+                    FROM vehiculos AS vehicle
+                    INNER JOIN tipos_vehiculo AS vehicle_type
+                      ON vehicle_type.id_tipo = vehicle.id_tipo
+                    WHERE vehicle_type.nombre = 'camion'
+                ) AS latest
+                  ON latest.report_id = gps.report_id
+                ORDER BY gps.asset_id"""
+        )
+    except pymysql.err.ProgrammingError:
+        return []
+    return cursor.fetchall()
+
+
+def _vehicle(row, fuente, driver=None, route_id=None):
+    driver = driver or row
+    return {
+        "vehicle_id": row["asset_id"], "vehicle_name": row["asset_name"] or row["asset_id"],
+        "patente": row["asset_id"],
+        "driver_name": driver.get("driver_name"), "driver_last_name": driver.get("driver_last_name"),
+        "latitude": row["latitude"], "longitude": row["longitude"],
+        "timestamp": _iso(row["report_date"]), "speed_kmh": row["speed"],
+        "heading": row["heading"], "ignition": row["ignition"], "event": row["event_name"],
+        "route_id": route_id, "fuente": fuente,
+    }
+
+
 def latest_positions(cursor, route_by_asset):
     """Última posición conocida de cada camión (API en vivo o histórico, la más reciente),
     con su patente (asset_id) y el último conductor informado."""
@@ -99,107 +151,32 @@ def latest_positions(cursor, route_by_asset):
     trucks = [row["asset_id"] for row in cursor.fetchall()]
     truck_ids = set(trucks)
     best_by_asset = {}
-    # La subconsulta correlacionada aprovecha el índice (asset_id, report_date) y elige un
-    # solo report_id por camión. Agrupar únicamente por MAX(report_date) no basta: la fuente
-    # puede entregar miles de reportes con la misma hora máxima para un mismo vehículo.
-    for table, extra in (
-        ("telemetria_api", "gps.speed, gps.heading, gps.ignition, gps.event_name, "
-                           "gps.driver_name, gps.driver_last_name"),
-        ("raw_gps", "gps.speed, NULL AS heading, NULL AS ignition, gps.event_name, "
-                    "gps.driver_name, gps.driver_last_name"),
-    ):
-        try:
-            cursor.execute(
-                f"""SELECT gps.asset_id, gps.asset_name, gps.report_date, gps.latitude, gps.longitude,
-                           {extra}
-                    FROM {table} AS gps
-                    INNER JOIN (
-                        SELECT vehicle.asset_id,
-                               (SELECT source.report_id
-                                FROM {table} AS source
-                                WHERE source.asset_id = vehicle.asset_id
-                                ORDER BY source.report_date DESC
-                                LIMIT 1) AS report_id
-                        FROM vehiculos AS vehicle
-                        INNER JOIN tipos_vehiculo AS vehicle_type
-                          ON vehicle_type.id_tipo = vehicle.id_tipo
-                        WHERE vehicle_type.nombre = 'camion'
-                    ) AS latest
-                      ON latest.report_id = gps.report_id
-                    ORDER BY gps.asset_id"""
-            )
-        except pymysql.err.ProgrammingError:
-            continue
-        for row in cursor.fetchall():
+    for table, fuente, extra in LATEST_SOURCES:
+        for row in _latest_reports(cursor, table, extra):
             asset_id = row["asset_id"]
             if asset_id not in truck_ids:
                 continue
             best = best_by_asset.get(asset_id)
             if best is None or row["report_date"] > best["report_date"]:
-                best_by_asset[asset_id] = dict(
-                    row, fuente="api" if table == "telemetria_api" else "historico"
-                )
+                best_by_asset[asset_id] = dict(row, fuente=fuente)
     fallback_drivers = last_drivers(cursor, best_by_asset)
     vehicles = []
     for asset_id in trucks:
         best = best_by_asset.get(asset_id)
         if best:
             driver = best if best.get("driver_name") else fallback_drivers.get(asset_id, best)
-            vehicles.append({
-                "vehicle_id": asset_id, "vehicle_name": best["asset_name"] or asset_id,
-                "patente": asset_id,
-                "driver_name": driver.get("driver_name"), "driver_last_name": driver.get("driver_last_name"),
-                "latitude": best["latitude"], "longitude": best["longitude"],
-                "timestamp": _iso(best["report_date"]), "speed_kmh": best["speed"],
-                "heading": best["heading"], "ignition": best["ignition"], "event": best["event_name"],
-                "route_id": route_by_asset.get(asset_id), "fuente": best["fuente"],
-            })
+            vehicles.append(_vehicle(best, best["fuente"], driver, route_by_asset.get(asset_id)))
     return vehicles
 
 
 def live_positions(cursor):
-    """Último reporte recibido por cada camión desde la API de la empresa.
+    """Último reporte de cada camión desde la API de la empresa, sin geometrías ni rutas.
 
-    Esta consulta no carga geometrías ni recalcula las rutas clasificadas; permite mover los
-    marcadores cada minuto sin esperar la respuesta completa de /api/mapa.
+    Permite mover los marcadores cada minuto sin esperar la respuesta completa de /api/mapa;
+    el navegador conserva la ruta y el conductor que ya conocía.
     """
-    try:
-        cursor.execute(
-            """SELECT gps.asset_id, gps.asset_name, gps.report_date, gps.latitude, gps.longitude,
-                      gps.speed, gps.heading, gps.ignition, gps.event_name,
-                      gps.driver_name, gps.driver_last_name
-               FROM telemetria_api AS gps
-               INNER JOIN (
-                   SELECT vehicle.asset_id,
-                          (SELECT source.report_id
-                           FROM telemetria_api AS source
-                           WHERE source.asset_id = vehicle.asset_id
-                           ORDER BY source.report_date DESC
-                           LIMIT 1) AS report_id
-                   FROM vehiculos AS vehicle
-                   INNER JOIN tipos_vehiculo AS vehicle_type
-                     ON vehicle_type.id_tipo = vehicle.id_tipo
-                   WHERE vehicle_type.nombre = 'camion'
-               ) AS latest ON latest.report_id = gps.report_id
-               ORDER BY gps.asset_id"""
-        )
-    except pymysql.err.ProgrammingError:
-        return []
-    return [{
-        "vehicle_id": row["asset_id"],
-        "vehicle_name": row["asset_name"] or row["asset_id"],
-        "patente": row["asset_id"],
-        "driver_name": row.get("driver_name"),
-        "driver_last_name": row.get("driver_last_name"),
-        "latitude": row["latitude"],
-        "longitude": row["longitude"],
-        "timestamp": _iso(row["report_date"]),
-        "speed_kmh": row["speed"],
-        "heading": row["heading"],
-        "ignition": row["ignition"],
-        "event": row["event_name"],
-        "fuente": "api",
-    } for row in cursor.fetchall()]
+    table, fuente, extra = LATEST_SOURCES[0]
+    return [_vehicle(row, fuente) for row in _latest_reports(cursor, table, extra)]
 
 
 def _route(row):

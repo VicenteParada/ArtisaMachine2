@@ -96,6 +96,18 @@ class MapContractTests(unittest.TestCase):
         vehicle = rutas_api.latest_positions(cursor, {})[0]
         self.assertEqual((vehicle["driver_name"], vehicle["driver_last_name"]), ("RICHARD", "FUENTES"))
 
+    def test_live_positions_only_read_the_company_api(self):
+        cursor = FakeCursor([
+            ("FROM telemetria_api AS gps", [{"asset_id": "TFWK19", "asset_name": None,
+                                             "report_date": datetime(2026, 10, 14, 11, 41),
+                                             "latitude": -29.4, "longitude": -71.1, "speed": 87.0,
+                                             "heading": 180, "ignition": 1, "event_name": "Reporte por tiempo",
+                                             "driver_name": "RICHARD", "driver_last_name": "FUENTES"}]),
+        ])
+        vehicle, = rutas_api.live_positions(cursor)
+        self.assertEqual((vehicle["vehicle_name"], vehicle["fuente"], vehicle["route_id"]),
+                         ("TFWK19", "api", None))  # raw_gps no está en el cursor: fallaría si se consultara
+
 
 class JourneyTests(unittest.TestCase):
     def test_journey_splits_gps_jumps_and_uses_chile_time(self):
