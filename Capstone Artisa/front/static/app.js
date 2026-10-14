@@ -1467,6 +1467,8 @@ function renderTelemetry(summary, dataset, state) {
   $("telemetry-range").textContent = connection.ultimo_dato
     ? `Último reporte ${formatLocal(connection.ultimo_dato)} · contacto con la API ${connection.ultimo_exito ? formatLocal(connection.ultimo_exito) : "sin contacto aún"}`
     : "La API está configurada, pero todavía no entrega reportes.";
+  $("fleet-tab-reportes-note").textContent = connection.ultimo_dato
+    ? "Último reporte " + formatAge((Date.now() - new Date(connection.ultimo_dato)) / 1000) : "Lo último que llegó de la API";
   $("telemetry-quality").textContent =
     `${format(connection.guardados || 0)} guardados · ${format(connection.rechazados || 0)} rechazados de ${format(connection.leidos || 0)} leídos`;
 
@@ -1724,7 +1726,7 @@ async function loadHistoryMonth(month) {
       const link = document.createElement("button");
       link.type = "button"; link.className = "history-day-link";
       link.textContent = day.fecha;
-      link.addEventListener("click", () => { setBoardDay(day.fecha); $("fleet-view").scrollIntoView({behavior: "smooth"}); });
+      link.addEventListener("click", () => { setFleetTab("flota"); setBoardDay(day.fecha); });
       const first = document.createElement("td"); first.append(link);
       const [label] = HISTORY_STATES[day.estado] || [day.estado];
       tr.append(first, cell(label), cell(format(day.camiones)), cell(format(day.reportes)), cell(format(day.km_observados, 1)));
@@ -2634,6 +2636,9 @@ function renderFleet() {
     dato: (a, b) => (a.edad_minutos ?? Infinity) - (b.edad_minutos ?? Infinity) || byName(a, b)
   };
   trucks.sort(sorters[truckView.sort] || byName);
+  $("fleet-tab-flota-note").textContent = boardIsToday()
+    ? `${format(summary.total)} camiones · ${format(summary.en_ruta)} en ruta ahora`
+    : `${format(truckView.dayRows ? truckView.dayRows.size : 0)} con actividad el ${predictionDayLabel(boardDay())}`;
   // En un día anterior, primero los que tuvieron actividad.
   if (!boardIsToday()) trucks.sort((a, b) => Number(Boolean(truckDay(b))) - Number(Boolean(truckDay(a))));
   $("fleet-board").replaceChildren(...(trucks.length ? trucks.map(fleetRow)
@@ -3485,9 +3490,20 @@ $("board-prev").addEventListener("click", () => setBoardDay(shiftDay(boardDay(),
 $("board-next").addEventListener("click", () => setBoardDay(shiftDay(boardDay(), 1)));
 $("board-today").addEventListener("click", () => setBoardDay(null));
 $("board-yesterday").addEventListener("click", () => setBoardDay(shiftDay(localToday(), -1)));
-$("month-panel").addEventListener("toggle", () => {
-  if ($("month-panel").open && historyState.month !== boardDay().slice(0, 7)) loadHistoryMonth(boardDay().slice(0, 7));
-});
+// Tres tareas en el mismo espacio: la lista de camiones, los reportes en vivo y el mes.
+function setFleetTab(tab) {
+  truckView.tab = tab;
+  for (const button of document.querySelectorAll("[data-fleet-tab]")) {
+    button.setAttribute("aria-selected", String(button.dataset.fleetTab === tab));
+  }
+  $("fleet-panel-flota").hidden = tab !== "flota";
+  $("live-reports").hidden = tab !== "reportes";
+  $("month-panel").hidden = tab !== "mes";
+  if (tab === "mes" && historyState.month !== boardDay().slice(0, 7)) loadHistoryMonth(boardDay().slice(0, 7));
+}
+for (const button of document.querySelectorAll("[data-fleet-tab]")) {
+  button.addEventListener("click", () => setFleetTab(button.dataset.fleetTab));
+}
 $("truck-show-all").addEventListener("click", showWholeDay);
 window.addEventListener("hashchange", () => { if (!truckHash()) stopTruckPlay(); });
 setInterval(() => {
