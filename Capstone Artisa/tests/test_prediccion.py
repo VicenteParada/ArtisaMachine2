@@ -30,6 +30,29 @@ def matriz_semanal(dias=56, celdas=300, semilla=1):
 
 @unittest.skipIf(prediccion is None, "numpy se valida dentro del contenedor Machine")
 class PrediccionTests(unittest.TestCase):
+    def test_reads_each_daily_source_in_one_query(self):
+        class Cursor:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, params):
+                self.calls.append((sql, params))
+
+            def fetchall(self):
+                return [{"source": len(self.calls)}]
+
+        cursor = Cursor()
+        filas = prediccion.leer_dia(cursor, date(2026, 10, 6), ["CAMION-1", "CAMION-2"])
+
+        self.assertEqual(filas, [{"source": 1}, {"source": 2}])
+        self.assertEqual(len(cursor.calls), 2)
+        self.assertIn("FROM raw_gps USE INDEX (idx_raw_gps_asset_fecha)", cursor.calls[0][0])
+        self.assertIn("FROM telemetria_api USE INDEX (idx_telemetria_api_asset_fecha)", cursor.calls[1][0])
+        for sql, params in cursor.calls:
+            self.assertIn("asset_id IN (%s,%s)", sql)
+            self.assertEqual(params[:2], ("CAMION-1", "CAMION-2"))
+            self.assertEqual(params[-1], prediccion.VEL_MOVIMIENTO)
+
     def test_counts_moving_reports_once_per_cell(self):
         t = datetime(2026, 10, 6, 15)
         filas = [

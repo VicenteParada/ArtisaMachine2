@@ -184,17 +184,23 @@ CONTADORES = {"calor": contar_filas, "rutas": contar_tramos}
 def leer_dia(cursor, dia, lista_camiones):
     """Reportes en movimiento del día local, con el índice (camión, fecha) como el cierre diario."""
     inicio, fin = dias.limites_utc(dia)
+    if not lista_camiones:
+        return []
     filas = []
-    for asset_id in lista_camiones:
-        for tabla, indice in (("raw_gps", "idx_raw_gps_asset_fecha"),
-                              ("telemetria_api", "idx_telemetria_api_asset_fecha")):
-            cursor.execute(
-                f"""SELECT asset_id, report_date, latitude, longitude, speed
-                    FROM {tabla} USE INDEX ({indice})
-                    WHERE asset_id = %s AND report_date >= %s AND report_date < %s AND speed > %s""",
-                (asset_id, inicio, fin, VEL_MOVIMIENTO),
-            )
-            filas.extend(cursor.fetchall())
+    marcas = ",".join(["%s"] * len(lista_camiones))
+    parametros = (*lista_camiones, inicio, fin, VEL_MOVIMIENTO)
+    # Un solo recorrido del índice por fuente. Antes se ejecutaban dos consultas por
+    # camión (casi 200 por día); el conjunto de filas y los filtros son idénticos.
+    for tabla, indice in (("raw_gps", "idx_raw_gps_asset_fecha"),
+                          ("telemetria_api", "idx_telemetria_api_asset_fecha")):
+        cursor.execute(
+            f"""SELECT asset_id, report_date, latitude, longitude, speed
+                FROM {tabla} USE INDEX ({indice})
+                WHERE asset_id IN ({marcas})
+                  AND report_date >= %s AND report_date < %s AND speed > %s""",
+            parametros,
+        )
+        filas.extend(cursor.fetchall())
     return filas
 
 
