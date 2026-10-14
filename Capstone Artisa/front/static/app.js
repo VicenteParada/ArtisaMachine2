@@ -110,7 +110,7 @@ function restoreSession() {
   activeToken = saved;
   $("login-error").textContent = "";
   $("login-error").hidden = true;
-  if (!location.hash) history.replaceState(null, "", "#datos-reales");
+  if (!location.hash) history.replaceState(null, "", "#camiones");
   syncDatasetView();
   if (appShell.hidden) showApp();
   scheduleExpiration();
@@ -141,7 +141,7 @@ loginForm.addEventListener("submit", async (event) => {
     try { localStorage.setItem(TOKEN_KEY, payload.token); }
     catch { throw new Error("Permite el almacenamiento local para mantener tu sesión."); }
     clearPassword();
-    history.replaceState(null, "", "#datos-reales");
+    history.replaceState(null, "", "#camiones");
     restoreSession();
   } catch (loginError) {
     clearPassword();
@@ -203,22 +203,31 @@ async function api(path, options = {}) {
 
 function syncDatasetView() {
   let view = "real";
-  if (window.location.hash === "#mapa-calor") view = "heatmap";
+  if (window.location.hash.startsWith("#camiones")) view = "trucks";
+  else if (window.location.hash === "#mapa-calor") view = "heatmap";
   else if (window.location.hash === "#dashboard") view = "dashboard";
   else if (window.location.hash === "#prediccion") view = "prediction";
+  // Arquitectura es una vista aparte; el resto de las vistas parte directo en su contenido.
+  const overview = window.location.hash === "#flujo";
+  document.querySelector(".heading").hidden = !overview;
+  $("flujo").hidden = !overview;
+  document.querySelector(".dataset-tabs").hidden = overview;
   for (const space of document.querySelectorAll("[data-dataset-view]")) {
-    space.hidden = space.dataset.datasetView !== view;
+    space.hidden = overview || space.dataset.datasetView !== view;
   }
   for (const tab of document.querySelectorAll("[data-dataset-tab]")) {
     const selected = tab.dataset.datasetTab === view;
     tab.classList.toggle("is-active", selected);
     tab.setAttribute("aria-current", selected ? "page" : "false");
   }
-  const overview = window.location.hash === "#flujo";
   $("overview-link").classList.toggle("active", overview);
+  document.querySelector(".topbar strong").textContent = overview ? "Arquitectura"
+    : {trucks: "Camiones", heatmap: "Mapa de rutas", prediction: "Predicción", real: "Reportes", dashboard: "Dashboard"}[view];
   for (const link of document.querySelectorAll(".sidebar [data-dataset-link]")) {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
   }
+  if (overview) return;
+  if (view === "trucks") syncTruckView();
   if (view === "heatmap") {
     window.setTimeout(openExplorer, 50);
   }
@@ -1719,6 +1728,15 @@ function renderHistoryDay(data) {
       cell(format(truck.viajes), "recorridos entre paradas"),
       cell(formatMinutes(truck.minutos_detenido), `${format(truck.paradas || 0)} ${Number(truck.paradas) === 1 ? "parada" : "paradas"} de 10 min o más`)
     );
+    // El recorrido completo del día (mapa e imagen) está en la ficha del camión.
+    const routeCell = document.createElement("td");
+    const routeButton = document.createElement("button");
+    routeButton.type = "button";
+    routeButton.className = "history-route-button";
+    routeButton.textContent = "Ver recorrido";
+    routeButton.addEventListener("click", (event) => { event.stopPropagation(); openTruck(truck.asset_id, data.fecha); });
+    routeCell.append(routeButton);
+    tr.append(routeCell);
     const open = () => {
       for (const row of body.querySelectorAll(".is-selected")) row.classList.remove("is-selected");
       tr.classList.add("is-selected");
@@ -1729,7 +1747,7 @@ function renderHistoryDay(data) {
     body.append(tr);
   }
   if (!(data.camiones || []).length) {
-    emptyRow(body, 7, state ? "Ningún camión reportó este día." : "Este día todavía no tiene resumen calculado.");
+    emptyRow(body, 8, state ? "Ningún camión reportó este día." : "Este día todavía no tiene resumen calculado.");
   }
   if (historyState.detail && historyState.detail.day !== data.fecha) closeTruckDetail();
 }
@@ -2479,6 +2497,591 @@ for (const id of ["prediction-range-from", "prediction-range-to"]) {
 document.addEventListener("visibilitychange", () => { if (document.hidden) stopPredictionPlay(); });
 window.addEventListener("hashchange", () => { if (window.location.hash !== "#prediccion") stopPredictionPlay(); });
 setInterval(() => { if (window.location.hash === "#prediccion") loadPrediction(); }, PREDICTION_REFRESH_MS);
+
+// --- Camiones: flota en vivo y ficha de cada camión por día (/api/camiones) ----------------
+// La flota se lee de la última posición de cada camión; la ficha, del cierre diario
+// (resumen, viajes y paradas) y de los reportes GPS del día. No se inventan recorridos.
+const TRUCK_STATES = {
+  en_ruta: "En ruta", detenido: "Detenido", sin_senal: "Sin señal reciente", sin_datos: "Sin datos"
+};
+const TRUCK_REFRESH_MS = 60000;
+const TRUCK_COLORS = {route: "#1f6b4f", halo: "#ffffff", stop: "#e07a1f", start: "#1f6b4f", end: "#172d32", gap: "#b9c4c1"};
+const truckView = {fleet: null, filter: "todos", query: "", sort: "nombre", id: null, day: null, detail: null,
+  map: null, layer: null, tripLayers: new Map(), request: 0, timer: null};
+
+function truckHash() {
+  const match = window.location.hash.match(/^#camiones(?:\/([A-Za-z0-9_-]{1,16}))?(?:\/(\d{4}-\d{2}-\d{2}))?$/);
+  return match ? {id: match[1] || null, day: match[2] || null} : null;
+}
+
+function openTruck(id, day) {
+  window.location.hash = "#camiones/" + encodeURIComponent(id) + (day ? "/" + day : "");
+}
+
+// Hora local "YYYY-MM-DD HH:MM:SS" (la API ya la entrega en hora de Chile).
+const clock = (value) => value ? value.slice(11, 16) : "—";
+const minuteOfDay = (value) => value ? Number(value.slice(11, 13)) * 60 + Number(value.slice(14, 16)) : 0;
+
+function truckAge(minutes) {
+  return minutes === null || minutes === undefined ? "Sin reportes" : formatAge(minutes * 60);
+}
+
+function syncTruckView() {
+  const route = truckHash();
+  if (!route) return;
+  $("fleet-view").hidden = Boolean(route.id);
+  $("truck-view").hidden = !route.id;
+  if (!truckView.fleet) loadFleet();
+  if (route.id) {
+    const day = route.day || localToday();
+    if (route.id !== truckView.id || day !== truckView.day || !truckView.detail) loadTruckDay(route.id, day);
+    else if (truckView.map) window.setTimeout(() => truckView.map.invalidateSize(), 50);
+  }
+}
+
+async function loadFleet() {
+  try {
+    const data = await api("/api/camiones", {timeoutMs: 90000});
+    truckView.fleet = data;
+    renderFleet();
+    if (truckView.detail) renderTruckHead();
+  } catch (error) {
+    $("fleet-status").textContent = "No se pudo actualizar";
+    $("fleet-status").className = "status warning";
+    if (!truckView.fleet) $("fleet-board").replaceChildren(fleetMessage("No se pudo cargar la flota: " + error.message));
+  }
+}
+
+function fleetMessage(text) {
+  const note = document.createElement("p");
+  note.className = "fleet-empty";
+  note.textContent = text;
+  return note;
+}
+
+function sparkline(points) {
+  const width = 140, height = 30, max = Math.max(1, ...points.map((p) => p.km));
+  const step = width / Math.max(1, points.length);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("class", "fleet-spark");
+  svg.setAttribute("aria-hidden", "true");
+  points.forEach((point, index) => {
+    const bar = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    const h = point.km ? Math.max(2, (point.km / max) * (height - 2)) : 1;
+    bar.setAttribute("x", String(index * step + 1));
+    bar.setAttribute("y", String(height - h));
+    bar.setAttribute("width", String(Math.max(1, step - 2)));
+    bar.setAttribute("height", String(h));
+    bar.setAttribute("rx", "1.5");
+    if (!point.km) bar.setAttribute("class", "empty");
+    if (index === points.length - 1) bar.setAttribute("class", point.km ? "today" : "empty");
+    svg.append(bar);
+  });
+  return svg;
+}
+
+function fleetRow(truck) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "fleet-row state-" + truck.estado;
+  row.addEventListener("click", () => openTruck(truck.asset_id));
+  const name = document.createElement("span");
+  name.className = "fleet-name";
+  const title = document.createElement("strong");
+  title.textContent = truck.nombre;
+  const sub = document.createElement("small");
+  sub.textContent = [truck.asset_id !== truck.nombre ? truck.asset_id : null, truck.conductor].filter(Boolean).join(" · ") || "Sin conductor informado";
+  name.append(title, sub);
+  const state = document.createElement("span");
+  state.className = "fleet-state";
+  const label = document.createElement("strong");
+  label.innerHTML = '<i class="state-dot"></i>';
+  label.append(TRUCK_STATES[truck.estado] + (truck.estado === "en_ruta" && truck.velocidad ? ` · ${format(truck.velocidad)} km/h` : ""));
+  const age = document.createElement("small");
+  age.textContent = truckAge(truck.edad_minutos);
+  state.append(label, age);
+  const today = document.createElement("span");
+  today.className = "fleet-today";
+  if (truck.hoy) {
+    today.innerHTML = "";
+    for (const [value, unit] of [[format(truck.hoy.km, 1), "km"], [format(truck.hoy.viajes), truck.hoy.viajes === 1 ? "viaje" : "viajes"],
+      [formatMinutes(truck.hoy.minutos_detenido), "detenido"]]) {
+      const item = document.createElement("span");
+      const strong = document.createElement("b");
+      strong.textContent = value;
+      item.append(strong, " " + unit);
+      today.append(item);
+    }
+  } else {
+    today.textContent = "Sin actividad hoy";
+    today.classList.add("is-empty");
+  }
+  row.append(name, state, today, sparkline(truck.serie || []));
+  return row;
+}
+
+function renderFleet() {
+  const data = truckView.fleet;
+  if (!data || data.status !== "ok") {
+    $("fleet-board").replaceChildren(fleetMessage("La flota aparecerá cuando el catálogo de camiones esté cargado."));
+    return;
+  }
+  const summary = data.resumen;
+  for (const key of ["todos", "en_ruta", "detenido", "sin_senal"]) {
+    $("fleet-count-" + key).textContent = format(key === "todos" ? summary.total : summary[key] + (key === "sin_senal" ? summary.sin_datos : 0));
+  }
+  $("fleet-km-today").textContent = format(summary.km_hoy, 0);
+  $("fleet-status").textContent = `Actualizado ${new Intl.DateTimeFormat("es-CL", {timeStyle: "short", timeZone: HISTORY_ZONE}).format(new Date(data.generado_en))}`;
+  $("fleet-status").className = "status";
+  for (const button of document.querySelectorAll("[data-fleet-filter]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.fleetFilter === truckView.filter));
+  }
+  const query = truckView.query.trim().toLocaleLowerCase("es-CL");
+  let trucks = data.camiones.filter((truck) => truckView.filter === "todos" || truck.estado === truckView.filter
+    || (truckView.filter === "sin_senal" && truck.estado === "sin_datos"));
+  if (query) {
+    trucks = trucks.filter((truck) => [truck.nombre, truck.asset_id, truck.conductor].some((value) =>
+      value && value.toLocaleLowerCase("es-CL").includes(query)));
+  }
+  const byName = (a, b) => a.nombre.localeCompare(b.nombre, "es-CL", {numeric: true});
+  const sorters = {
+    nombre: byName,
+    km: (a, b) => ((b.hoy && b.hoy.km) || 0) - ((a.hoy && a.hoy.km) || 0) || byName(a, b),
+    dato: (a, b) => (a.edad_minutos ?? Infinity) - (b.edad_minutos ?? Infinity) || byName(a, b)
+  };
+  trucks.sort(sorters[truckView.sort] || byName);
+  $("fleet-board").replaceChildren(...(trucks.length ? trucks.map(fleetRow)
+    : [fleetMessage(query ? "Ningún camión coincide con la búsqueda." : "No hay camiones en este estado.")]));
+}
+
+async function loadTruckDay(id, day) {
+  const request = ++truckView.request;
+  truckView.id = id;
+  truckView.day = day;
+  $("truck-date").value = day;
+  $("truck-date").max = localToday();
+  $("truck-next").disabled = day >= localToday();
+  $("truck-day-note").textContent = "Cargando el día…";
+  $("truck-image").disabled = true;
+  renderTruckHead();
+  try {
+    const data = await api(`/api/camiones/${encodeURIComponent(id)}?fecha=${day}`, {timeoutMs: 90000});
+    if (request !== truckView.request) return;
+    truckView.detail = data;
+    renderTruckDay();
+  } catch (error) {
+    if (request !== truckView.request) return;
+    truckView.detail = null;
+    $("truck-day-note").textContent = "No se pudo cargar este día: " + error.message;
+  }
+}
+
+function fleetTruck(id) {
+  return truckView.fleet && truckView.fleet.camiones ? truckView.fleet.camiones.find((truck) => truck.asset_id === id) : null;
+}
+
+function renderTruckHead() {
+  const live = fleetTruck(truckView.id);
+  const detail = truckView.detail && truckView.detail.asset_id === truckView.id ? truckView.detail : null;
+  const name = (live && live.nombre) || (detail && detail.nombre) || truckView.id;
+  $("truck-name").textContent = "Camión " + name;
+  const driver = (detail && detail.conductor) || (live && live.conductor);
+  $("truck-meta").textContent = [name !== truckView.id ? "Patente " + truckView.id : null,
+    driver ? "Conductor: " + driver : "Sin conductor informado",
+    live && live.ruta ? "Última ruta: " + live.ruta.label : null].filter(Boolean).join("   ·   ");
+  const state = $("truck-state");
+  state.className = "truck-state state-" + (live ? live.estado : "sin_datos");
+  state.innerHTML = '<i class="state-dot"></i>';
+  state.append(live ? `${TRUCK_STATES[live.estado]} · ${truckAge(live.edad_minutos)}` : "Estado en vivo no disponible");
+}
+
+function dayStatusNote(data) {
+  if (!data.resumen) return "Este camión no tiene reportes este día.";
+  if (data.estado_dia === "en_curso") return "Hoy, en curso: las cifras se actualizan cada pocos minutos hasta las 00:00.";
+  if (data.estado_dia === "esperando_datos") return "El día terminó, pero faltan reportes de la API: las cifras son provisorias.";
+  return "Día cerrado (00:00 a 00:00, hora de Chile).";
+}
+
+function renderTruckDay() {
+  const data = truckView.detail;
+  renderTruckHead();
+  const summary = data.resumen;
+  $("truck-day-note").textContent = `${predictionDayLabel(data.fecha, "long")} · ${dayStatusNote(data)}`;
+  $("truck-km").textContent = summary ? format(summary.km, 1) : "—";
+  const average = (data.historial || []).filter((item) => item.fecha !== data.fecha && item.km > 0);
+  const mean = average.length ? average.reduce((sum, item) => sum + item.km, 0) / average.length : null;
+  $("truck-km-note").textContent = summary && mean
+    ? `Su promedio en días con actividad: ${format(mean, 0)} km` : " ";
+  $("truck-trips").textContent = summary ? format(summary.viajes) : "—";
+  $("truck-stopped").textContent = summary ? formatMinutes(summary.minutos_detenido) : "—";
+  $("truck-stopped-note").textContent = summary ? `${format(summary.paradas)} ${summary.paradas === 1 ? "parada" : "paradas"} de 10 min o más` : " ";
+  $("truck-span").textContent = summary ? `${clock(summary.primer)} – ${clock(summary.ultimo)}` : "—";
+  $("truck-span-note").textContent = summary ? `${formatMinutes(summary.minutos_activo)} entre ambos` : " ";
+  $("truck-image").disabled = !(data.recorrido && data.recorrido.lineas.length);
+  const signal = data.recorrido && data.recorrido.cortes
+    ? ` Hubo ${format(data.recorrido.cortes)} ${data.recorrido.cortes === 1 ? "corte" : "cortes"} de señal (${formatMinutes(data.recorrido.minutos_sin_senal)} sin reportes).` : "";
+  $("truck-map-note").textContent = "Línea verde: todo lo que el GPS registró en el día. Los saltos de GPS no se dibujan." + signal;
+  renderTruckRibbon(data);
+  renderTruckEvents(data);
+  renderTruckHistory(data);
+  drawTruckMap(data);
+}
+
+// Orden cronológico de viajes, paradas e intervalos sin datos.
+function truckTimeline(data) {
+  const items = [
+    ...data.viajes.map((trip) => ({kind: "viaje", from: trip.inicio, to: trip.fin, trip})),
+    ...data.eventos.map((event) => ({kind: event.tipo, from: event.desde, to: event.hasta, event}))
+  ];
+  return items.sort((a, b) => a.from.localeCompare(b.from));
+}
+
+function renderTruckRibbon(data) {
+  const ribbon = $("truck-ribbon");
+  ribbon.replaceChildren();
+  const dayStart = data.fecha + " 00:00:00";
+  for (const item of truckTimeline(data)) {
+    // Un tramo que empezó el día anterior se recorta a las 00:00.
+    const from = item.from < dayStart ? 0 : minuteOfDay(item.from);
+    const to = item.to.slice(0, 10) > data.fecha ? 1440 : minuteOfDay(item.to);
+    if (to <= from) continue;
+    const block = document.createElement("span");
+    block.className = "ribbon-block " + (item.kind === "viaje" ? "move" : item.kind === "parada" ? "stop" : "gap");
+    block.style.left = (from / 14.4) + "%";
+    block.style.width = Math.max(0.25, (to - from) / 14.4) + "%";
+    block.title = item.kind === "viaje"
+      ? `Viaje ${item.trip.numero}: ${clock(item.from)}–${clock(item.to)} · ${format(item.trip.km, 1)} km`
+      : `${item.kind === "parada" ? "Detenido" : "Sin datos"}: ${clock(item.from)}–${clock(item.to)} (${formatMinutes(item.event.minutos)})`;
+    if (item.trip) {
+      block.addEventListener("mouseenter", () => highlightTrip(item.trip.numero, true));
+      block.addEventListener("mouseleave", () => highlightTrip(item.trip.numero, false));
+    }
+    ribbon.append(block);
+  }
+  if (data.fecha === localToday()) {
+    const now = document.createElement("span");
+    now.className = "ribbon-now";
+    const parts = new Intl.DateTimeFormat("en-GB", {hour: "2-digit", minute: "2-digit", hour12: false, timeZone: HISTORY_ZONE}).format(new Date()).split(":");
+    now.style.left = ((Number(parts[0]) * 60 + Number(parts[1])) / 14.4) + "%";
+    now.title = "Ahora";
+    ribbon.append(now);
+  }
+  if (!ribbon.children.length) ribbon.append(Object.assign(document.createElement("span"), {className: "ribbon-empty", textContent: "Sin viajes ni paradas registrados este día"}));
+}
+
+function renderTruckEvents(data) {
+  const list = $("truck-events");
+  list.replaceChildren();
+  let stopNumber = 0;
+  for (const item of truckTimeline(data)) {
+    const li = document.createElement("li");
+    const time = document.createElement("time");
+    time.textContent = clock(item.from);
+    const body = document.createElement("div");
+    const title = document.createElement("strong");
+    const detail = document.createElement("small");
+    if (item.kind === "viaje") {
+      const trip = item.trip;
+      li.className = "event move";
+      title.textContent = `Viaje ${trip.numero} · ${format(trip.km, 1)} km`;
+      detail.textContent = `${clock(trip.inicio)} a ${clock(trip.fin)} · ${formatMinutes(trip.minutos)}` +
+        (trip.abierto_inicio ? " · venía del día anterior" : "") + (trip.abierto_fin ? " · sigue al día siguiente" : "") +
+        (trip.con_saltos ? " · con cortes de señal" : "");
+      li.tabIndex = 0;
+      li.addEventListener("mouseenter", () => highlightTrip(trip.numero, true));
+      li.addEventListener("mouseleave", () => highlightTrip(trip.numero, false));
+      li.addEventListener("click", () => focusTrip(trip.numero));
+      li.addEventListener("keydown", (event) => { if (event.key === "Enter") focusTrip(trip.numero); });
+    } else if (item.kind === "parada") {
+      stopNumber += 1;
+      li.className = "event stop";
+      title.textContent = `Detenido ${formatMinutes(item.event.minutos)}`;
+      detail.textContent = `${clock(item.from)} a ${clock(item.to)} · ${item.event.nombre || "Lugar sin nombre"}`;
+      const mark = document.createElement("span");
+      mark.className = "event-stop-number";
+      mark.textContent = String(stopNumber);
+      body.append(mark);
+    } else {
+      li.className = "event gap";
+      title.textContent = `Sin datos ${formatMinutes(item.event.minutos)}`;
+      detail.textContent = `${clock(item.from)} a ${clock(item.to)} · el GPS no reportó y no se sabe dónde estuvo`;
+    }
+    body.append(title, detail);
+    li.append(time, body);
+    list.append(li);
+  }
+  if (!list.children.length) {
+    const li = document.createElement("li");
+    li.className = "event empty";
+    li.textContent = data.resumen
+      ? "Hubo reportes, pero ningún viaje de más de 1 km ni paradas de 10 min."
+      : "Sin reportes este día. Prueba con otro día en el calendario o en el gráfico de abajo.";
+    list.append(li);
+  }
+}
+
+function renderTruckHistory(data) {
+  const chart = $("truck-history");
+  const byDay = new Map((data.historial || []).map((item) => [item.fecha, item]));
+  const days = Array.from({length: 30}, (_, k) => shiftDay(data.fecha, k - 29));
+  const max = Math.max(1, ...days.map((day) => (byDay.get(day) || {}).km || 0));
+  chart.replaceChildren(...days.map((day) => {
+    const item = byDay.get(day);
+    const button = document.createElement("button");
+    button.type = "button";
+    const weekday = predictionDate(day).getUTCDay();
+    button.className = "history-bar" + (day === data.fecha ? " is-selected" : "") + (weekday === 0 || weekday === 6 ? " weekend" : "");
+    button.title = `${predictionDayLabel(day, "long")}: ` + (item ? `${format(item.km, 1)} km · ${format(item.viajes)} viajes` : "sin reportes");
+    const bar = document.createElement("i");
+    bar.style.height = item && item.km ? Math.max(3, (item.km / max) * 100) + "%" : "2px";
+    const label = document.createElement("span");
+    label.textContent = String(Number(day.slice(8)));
+    button.append(bar, label);
+    button.addEventListener("click", () => openTruck(data.asset_id, day));
+    return button;
+  }));
+}
+
+function ensureTruckMap() {
+  if (truckView.map || !window.L) return truckView.map;
+  truckView.map = L.map($("truck-map"), {zoomControl: true, preferCanvas: true}).setView([-23.6, -70.4], 7);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(truckView.map);
+  return truckView.map;
+}
+
+function pinIcon(text, className) {
+  return L.divIcon({className: "truck-pin-icon", html: `<span class="truck-pin ${className}">${text}</span>`,
+    iconSize: [26, 26], iconAnchor: [13, 13]});
+}
+
+function drawTruckMap(data) {
+  const map = ensureTruckMap();
+  if (!map) return;
+  window.setTimeout(() => map.invalidateSize(), 30);
+  if (truckView.layer) map.removeLayer(truckView.layer);
+  truckView.tripLayers.clear();
+  const layer = L.featureGroup();
+  const lines = data.recorrido ? data.recorrido.lineas : [];
+  if (lines.length) {
+    L.polyline(lines, {color: TRUCK_COLORS.halo, weight: 8, opacity: 0.9, lineJoin: "round", lineCap: "round", interactive: false}).addTo(layer);
+    L.polyline(lines, {color: TRUCK_COLORS.route, weight: 4, opacity: 0.95, lineJoin: "round", lineCap: "round", interactive: false}).addTo(layer);
+  }
+  for (const trip of data.viajes) {
+    const tripLayer = L.polyline(trip.lineas, {color: "#d5ee9c", weight: 7, opacity: 0, lineJoin: "round"})
+      .bindTooltip(`Viaje ${trip.numero}: ${clock(trip.inicio)}–${clock(trip.fin)} · ${format(trip.km, 1)} km`, {sticky: true});
+    tripLayer.on("mouseover", () => highlightTrip(trip.numero, true));
+    tripLayer.on("mouseout", () => highlightTrip(trip.numero, false));
+    tripLayer.addTo(layer);
+    truckView.tripLayers.set(trip.numero, tripLayer);
+  }
+  let stopNumber = 0;
+  for (const event of data.eventos) {
+    if (event.tipo !== "parada" || !event.lugar) continue;
+    stopNumber += 1;
+    L.marker(event.lugar, {icon: pinIcon(String(stopNumber), "stop"), zIndexOffset: 400})
+      .bindTooltip(`Detenido ${formatMinutes(event.minutos)} · ${clock(event.desde)}–${clock(event.hasta)}` +
+        (event.nombre ? ` · ${event.nombre}` : ""))
+      .addTo(layer);
+  }
+  if (lines.length) {
+    const first = lines[0][0], lastLine = lines[lines.length - 1], last = lastLine[lastLine.length - 1];
+    L.marker(first, {icon: pinIcon("A", "start"), zIndexOffset: 600})
+      .bindTooltip(`Primer punto del día · ${clock(data.recorrido.inicio)}`).addTo(layer);
+    L.marker(last, {icon: pinIcon("B", "end"), zIndexOffset: 600})
+      .bindTooltip(`Último punto · ${clock(data.recorrido.fin)}`).addTo(layer);
+  }
+  layer.addTo(map);
+  truckView.layer = layer;
+  if (layer.getLayers().length) map.fitBounds(layer.getBounds(), {padding: [28, 28], maxZoom: 14});
+}
+
+function highlightTrip(number, on) {
+  const layer = truckView.tripLayers.get(number);
+  if (layer) layer.setStyle({opacity: on ? 0.95 : 0});
+}
+
+function focusTrip(number) {
+  const layer = truckView.tripLayers.get(number);
+  if (!layer || !truckView.map) return;
+  truckView.map.fitBounds(layer.getBounds(), {padding: [40, 40], maxZoom: 15});
+  highlightTrip(number, true);
+  window.setTimeout(() => highlightTrip(number, false), 2500);
+}
+
+// --- Imagen del recorrido ---
+// Se dibuja en un lienzo: mapa base de OpenStreetMap si el navegador lo permite (si no,
+// fondo liso), el recorrido, las paradas numeradas y un encabezado con las cifras del día.
+const TILE = 256;
+const mercator = (lat, lon, zoom) => {
+  const scale = TILE * 2 ** zoom, sin = Math.sin(lat * Math.PI / 180);
+  return [(lon + 180) / 360 * scale, (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale];
+};
+
+function loadTile(url) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    const timer = setTimeout(() => resolve(null), 8000);
+    image.onload = () => { clearTimeout(timer); resolve(image); };
+    image.onerror = () => { clearTimeout(timer); resolve(null); };
+    image.src = url;
+  });
+}
+
+async function drawTruckImage(data, withTiles) {
+  const width = 1600, height = 1100, header = 170, footer = 70, pad = 50;
+  const canvas = document.createElement("canvas");
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#eef2ee";
+  ctx.fillRect(0, 0, width, height);
+  const points = data.recorrido.lineas.flat();
+  const lats = points.map((p) => p[0]), lons = points.map((p) => p[1]);
+  const box = {w: width - pad * 2, h: height - header - footer - pad};
+  let zoom = 17;
+  for (; zoom > 3; zoom--) {
+    const [x0, y0] = mercator(Math.max(...lats), Math.min(...lons), zoom);
+    const [x1, y1] = mercator(Math.min(...lats), Math.max(...lons), zoom);
+    if (x1 - x0 <= box.w && y1 - y0 <= box.h) break;
+  }
+  const [cx0, cy0] = mercator(Math.max(...lats), Math.min(...lons), zoom);
+  const [cx1, cy1] = mercator(Math.min(...lats), Math.max(...lons), zoom);
+  const origin = [(cx0 + cx1) / 2 - width / 2, (cy0 + cy1) / 2 - (header + (height - footer)) / 2];
+  const project = ([lat, lon]) => { const [x, y] = mercator(lat, lon, zoom); return [x - origin[0], y - origin[1]]; };
+  let tilesDrawn = 0;
+  if (withTiles) {
+    const tiles = [];
+    const maxTile = 2 ** zoom;
+    for (let tx = Math.floor(origin[0] / TILE); tx <= Math.floor((origin[0] + width) / TILE); tx++) {
+      for (let ty = Math.floor((origin[1] + header) / TILE); ty <= Math.floor((origin[1] + height - footer) / TILE); ty++) {
+        if (ty < 0 || ty >= maxTile) continue;
+        const wrapped = ((tx % maxTile) + maxTile) % maxTile;
+        tiles.push(loadTile(`https://tile.openstreetmap.org/${zoom}/${wrapped}/${ty}.png`).then((image) => ({image, tx, ty})));
+      }
+    }
+    for (const {image, tx, ty} of await Promise.all(tiles)) {
+      if (image) { ctx.drawImage(image, tx * TILE - origin[0], ty * TILE - origin[1]); tilesDrawn += 1; }
+    }
+    if (tilesDrawn) {
+      ctx.fillStyle = "rgba(244,246,243,.28)";
+      ctx.fillRect(0, header, width, height - header - footer);
+    }
+  }
+  const stroke = (color, lineWidth) => {
+    ctx.strokeStyle = color; ctx.lineWidth = lineWidth; ctx.lineJoin = "round"; ctx.lineCap = "round";
+    for (const line of data.recorrido.lineas) {
+      ctx.beginPath();
+      line.forEach((point, index) => { const [x, y] = project(point); if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+      ctx.stroke();
+    }
+  };
+  stroke("#ffffff", 11);
+  stroke(TRUCK_COLORS.route, 5.5);
+  const pin = (point, text, fill) => {
+    const [x, y] = project(point);
+    ctx.beginPath(); ctx.arc(x, y, 17, 0, Math.PI * 2);
+    ctx.fillStyle = fill; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+    ctx.fillStyle = "#ffffff"; ctx.font = "700 16px Inter, Arial, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(text, x, y + 1);
+  };
+  let stopNumber = 0;
+  for (const event of data.eventos) {
+    if (event.tipo === "parada" && event.lugar) pin(event.lugar, String(++stopNumber), TRUCK_COLORS.stop);
+  }
+  const lines = data.recorrido.lineas;
+  pin(lines[0][0], "A", TRUCK_COLORS.start);
+  const lastLine = lines[lines.length - 1];
+  pin(lastLine[lastLine.length - 1], "B", TRUCK_COLORS.end);
+  // Encabezado
+  ctx.fillStyle = "#172d32";
+  ctx.fillRect(0, 0, width, header);
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#d5ee9c"; ctx.font = "600 20px Inter, Arial, sans-serif";
+  ctx.fillText("Artisa · recorrido del día", pad, 52);
+  ctx.fillStyle = "#ffffff"; ctx.font = "700 44px Inter, Arial, sans-serif";
+  const label = predictionDayLabel(data.fecha, "long");
+  ctx.fillText(`Camión ${data.nombre}  ·  ${label.charAt(0).toUpperCase() + label.slice(1)}`, pad, 106);
+  const summary = data.resumen;
+  ctx.fillStyle = "#b8c9c4"; ctx.font = "400 22px Inter, Arial, sans-serif";
+  ctx.fillText([
+    summary ? `${format(summary.km, 1)} km` : null,
+    summary ? `${format(summary.viajes)} ${summary.viajes === 1 ? "viaje" : "viajes"}` : null,
+    summary ? `${formatMinutes(summary.minutos_detenido)} detenido` : null,
+    summary ? `reportes de ${clock(summary.primer)} a ${clock(summary.ultimo)}` : null,
+    data.conductor ? `conductor ${data.conductor}` : null
+  ].filter(Boolean).join("   ·   "), pad, 146);
+  // Pie
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, height - footer, width, footer);
+  ctx.font = "400 18px Inter, Arial, sans-serif"; ctx.fillStyle = "#4d6264";
+  const legend = [[TRUCK_COLORS.start, "A  primer punto"], [TRUCK_COLORS.stop, "1, 2…  paradas de 10 min o más"], [TRUCK_COLORS.end, "B  último punto"]];
+  let x = pad;
+  for (const [color, text] of legend) {
+    ctx.beginPath(); ctx.arc(x + 9, height - footer / 2, 9, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+    ctx.fillStyle = "#4d6264"; ctx.fillText(text, x + 26, height - footer / 2 + 6);
+    x += ctx.measureText(text).width + 70;
+  }
+  ctx.textAlign = "right";
+  ctx.fillText(`GPS real, sin unir saltos${tilesDrawn ? " · mapa © OpenStreetMap" : ""} · hora de Chile`, width - pad, height - footer / 2 + 6);
+  return canvas;
+}
+
+async function downloadTruckImage() {
+  const data = truckView.detail;
+  if (!data || !data.recorrido || !data.recorrido.lineas.length) return;
+  const button = $("truck-image");
+  button.disabled = true;
+  button.textContent = "Generando imagen…";
+  try {
+    let canvas = await drawTruckImage(data, true);
+    let blob;
+    try {
+      blob = await new Promise((resolve, reject) => {
+        try { canvas.toBlob((value) => value ? resolve(value) : reject(new Error("vacío")), "image/png"); }
+        catch (error) { reject(error); }
+      });
+    } catch {
+      // El mapa base no permitió exportarse: se genera igual, sin fondo de mapa.
+      canvas = await drawTruckImage(data, false);
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    }
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `recorrido-${data.nombre}-${data.fecha}.png`.replace(/[^\w.-]+/g, "_");
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Descargar imagen del recorrido";
+  }
+}
+
+for (const button of document.querySelectorAll("[data-fleet-filter]")) {
+  button.addEventListener("click", () => { truckView.filter = button.dataset.fleetFilter; renderFleet(); });
+}
+$("fleet-search").addEventListener("input", () => { truckView.query = $("fleet-search").value; renderFleet(); });
+$("fleet-sort").addEventListener("change", () => { truckView.sort = $("fleet-sort").value; renderFleet(); });
+$("truck-back").addEventListener("click", () => { window.location.hash = "#camiones"; });
+$("truck-date").addEventListener("change", () => { if ($("truck-date").value) openTruck(truckView.id, $("truck-date").value); });
+$("truck-prev").addEventListener("click", () => openTruck(truckView.id, shiftDay(truckView.day || localToday(), -1)));
+$("truck-next").addEventListener("click", () => {
+  const next = shiftDay(truckView.day || localToday(), 1);
+  if (next <= localToday()) openTruck(truckView.id, next);
+});
+$("truck-today").addEventListener("click", () => openTruck(truckView.id, localToday()));
+$("truck-yesterday").addEventListener("click", () => openTruck(truckView.id, shiftDay(localToday(), -1)));
+$("truck-image").addEventListener("click", downloadTruckImage);
+setInterval(() => {
+  if (!token() || !truckHash()) return;
+  loadFleet();
+  if (truckView.id && truckView.day === localToday() && !$("truck-view").hidden) loadTruckDay(truckView.id, truckView.day);
+}, TRUCK_REFRESH_MS);
+
 
 restoreSession();
 setInterval(refresh, 300000);

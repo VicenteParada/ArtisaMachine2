@@ -14,7 +14,7 @@ import pymysql
 from common import dias
 from common.db import connect_db
 from common.http import JsonHandler, serve
-from endpoints import prediccion_api, rutas_api
+from endpoints import camiones_api, prediccion_api, rutas_api
 
 
 STARTED_AT = time.monotonic()
@@ -46,6 +46,7 @@ PENDING_RESPONSES = {
         "status": "pending", "dias": [],
         "message": "La predicción se calcula con al menos 21 días cerrados.",
     },
+    "/api/camiones": {"status": "pending", "camiones": [], "resumen": None},
     "/api/prediccion-rutas": {
         "status": "pending", "dias": [],
         "message": "La predicción por ruta se está calculando (o faltan días cerrados: necesita al menos 21). "
@@ -54,7 +55,8 @@ PENDING_RESPONSES = {
 }
 BUILDERS = {"/api/mapa": rutas_api.classified_map, "/api/dashboard": rutas_api.classified_dashboard,
             "/api/prediccion": prediccion_api.prediction,
-            "/api/prediccion-rutas": lambda cursor: prediccion_api.prediction(cursor, "rutas")}
+            "/api/prediccion-rutas": lambda cursor: prediccion_api.prediction(cursor, "rutas"),
+            "/api/camiones": camiones_api.fleet}
 
 
 # Telemetría actual (servicio telemetria). Mientras la API de la empresa no esté
@@ -311,6 +313,7 @@ def gps_points(cursor, desde, hasta):
 
 ASSET_RE = re.compile(r"[A-Za-z0-9_-]{1,16}")
 JOURNEY_RE = re.compile(r"/api/vehiculos/([A-Za-z0-9_-]{1,16})/recorrido")
+TRUCK_RE = re.compile(r"/api/camiones/([A-Za-z0-9_-]{1,16})")
 DETALLE_MAX = 1000
 
 
@@ -504,6 +507,7 @@ class Handler(JsonHandler):
                                          "/api/reportes/dia?fecha=YYYY-MM-DD", "/api/reportes/mes?mes=YYYY-MM",
                                          "/api/reportes/mes-completo?mes=YYYY-MM",
                                          "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
+                                         "/api/camiones/X?fecha=YYYY-MM-DD",
                                          *PENDING_RESPONSES]})
             return
         if path in BUILDERS:
@@ -523,6 +527,24 @@ class Handler(JsonHandler):
                 self.database_error(error)
                 return
             self.respond(200 if result else 404, result or {"error": "Camión sin reportes"})
+            return
+        truck = TRUCK_RE.fullmatch(path)
+        if truck:
+            try:
+                dia = date.fromisoformat(_param(parsed.query, "fecha") or dias.hoy().isoformat())
+            except ValueError:
+                self.respond(400, {"error": "Usa ?fecha=YYYY-MM-DD"})
+                return
+            if dia > dias.hoy():
+                self.respond(400, {"error": "La fecha no puede ser futura"})
+                return
+            try:
+                with connect_db(read_timeout=60) as connection, connection.cursor() as cursor:
+                    result = camiones_api.truck_detail(cursor, truck.group(1), dia)
+            except pymysql.MySQLError as error:
+                self.database_error(error)
+                return
+            self.respond(200 if result else 404, result or {"error": "No es un camión del catálogo"})
             return
         if path in PENDING_RESPONSES:
             self.respond(200, PENDING_RESPONSES[path])

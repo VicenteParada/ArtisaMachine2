@@ -190,20 +190,21 @@ def _local(value):
     return value.replace(tzinfo=timezone.utc).astimezone(dias.zona()).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def truck_journey(cursor, asset_id):
-    """Recorrido observado del camión en su último día con datos (hora de Chile)."""
-    latest = None
-    for table in ("telemetria_api", "raw_gps"):
-        try:
-            cursor.execute(f"SELECT MAX(report_date) AS ultimo FROM {table} WHERE asset_id=%s", (asset_id,))
-        except pymysql.err.ProgrammingError:
-            continue
-        value = (cursor.fetchone() or {}).get("ultimo")
-        if value and (latest is None or value > latest):
-            latest = value
-    if latest is None:
-        return None
-    day = dias.dia_local(latest)
+def truck_journey(cursor, asset_id, day=None):
+    """Recorrido observado del camión en un día (hora de Chile); por defecto, su último día con datos."""
+    if day is None:
+        latest = None
+        for table in ("telemetria_api", "raw_gps"):
+            try:
+                cursor.execute(f"SELECT MAX(report_date) AS ultimo FROM {table} WHERE asset_id=%s", (asset_id,))
+            except pymysql.err.ProgrammingError:
+                continue
+            value = (cursor.fetchone() or {}).get("ultimo")
+            if value and (latest is None or value > latest):
+                latest = value
+        if latest is None:
+            return None
+        day = dias.dia_local(latest)
     start, end = dias.limites_utc(day)
     rows = []
     for table, extra in (("telemetria_api", "driver_name, driver_last_name"),
