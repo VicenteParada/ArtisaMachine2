@@ -35,6 +35,20 @@ def static_cache(raw_path):
     return "public, max-age=3600"
 
 
+# Segundos que el proxy espera a endpoints. Deben ser al menos los del navegador (app.js):
+# si el proxy corta antes, una consulta lenta pero válida se ve como "endpoints no disponibles".
+# Nginx espera hasta 150 s.
+SLOW_PREFIXES = (("/api/gps", 120), ("/api/prediccion", 120), ("/api/mapa", 90),
+                 ("/api/camiones", 90), ("/api/dashboard", 60))
+
+
+def upstream_timeout(path):
+    for prefix, seconds in SLOW_PREFIXES:
+        if path == prefix or path.startswith(prefix + "/") or path.startswith(prefix + "-"):
+            return seconds
+    return 20
+
+
 class Handler(BaseHTTPRequestHandler):
     # Los chequeos de salud de Docker (cada 5 s) no se registran si responden bien;
     # así los registros muestran solo lo útil. Los errores siempre se registran.
@@ -80,9 +94,7 @@ class Handler(BaseHTTPRequestHandler):
             if body is not None:
                 request.add_header("Content-Type", self.headers.get("Content-Type", "application/octet-stream"))
             try:
-                # Un día GPS puede tardar más que las respuestas pequeñas del panel.
-                slow = {"/api/gps": 120, "/api/mapa": 90, "/api/dashboard": 60}
-                timeout = slow.get(urlsplit(self.path).path, 20)
+                timeout = upstream_timeout(urlsplit(self.path).path)
                 upstream = urlopen(request, timeout=timeout)
             except HTTPError as error:
                 upstream = error

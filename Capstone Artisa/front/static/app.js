@@ -62,6 +62,7 @@ function clearSessionWork() {
   refreshing = false;
   liveVehiclesRefreshing = false;
   $("refresh").disabled = false;
+  window.clearTimeout(fleetRetry);
 }
 
 function clearPassword() {
@@ -115,7 +116,9 @@ function restoreSession() {
   syncDatasetView();
   if (appShell.hidden) showApp();
   scheduleExpiration();
-  if (changed) refresh();
+  // Al abrir la página se cargan todas las secciones, no solo la visible: así, al cambiar
+  // de pestaña los datos ya están (o vienen en camino).
+  if (changed) { refresh(); refreshTelemetry(); loadFleet(); }
 }
 
 loginForm.addEventListener("submit", async (event) => {
@@ -289,6 +292,8 @@ function setMapMode(mode, remember = false, pending = Boolean(currentMapData) &&
   // El explorador histórico no usa las listas de rutas y vehículos: ocupa todo el ancho.
   explorer.closest(".heatmap-layout").classList.toggle("is-historical", historical);
   document.querySelector(".heatmap-method").hidden = historical;
+  // La lista de rutas y camiones es de las rutas clasificadas: en telemetría no se muestra.
+  document.querySelector(".atlas-side").hidden = historical;
   // Los filtros y capas solo aplican a las rutas clasificadas.
   for (const panel of document.querySelectorAll(".route-filter-panel, .map-layer-panel")) panel.hidden = historical;
   explorer.hidden = !historical;
@@ -2351,14 +2356,30 @@ function syncTruckView() {
   }
 }
 
-async function loadFleet() {
+// Una sola petición de flota a la vez: la carga inicial y la pestaña no la duplican.
+let fleetLoading = null;
+let fleetRetry = null;
+const FLEET_RETRY_MS = 10000;
+
+function loadFleet() {
+  if (!fleetLoading) fleetLoading = fetchFleet().finally(() => { fleetLoading = null; });
+  return fleetLoading;
+}
+
+async function fetchFleet() {
+  window.clearTimeout(fleetRetry);
+  const version = sessionVersion;
   try {
     const data = await api("/api/camiones", {timeoutMs: 90000});
     truckView.fleet = data;
     renderFleet();
     if (truckView.detail) renderTruckHead();
   } catch (error) {
-    if (!truckView.fleet) $("fleet-board").replaceChildren(fleetMessage("No se pudo cargar la flota: " + error.message));
+    if (version !== sessionVersion || !token() || truckView.fleet) return;
+    // Mientras endpoints está ocupado (por ejemplo, calculando el mapa) se reintenta solo.
+    $("fleet-board").replaceChildren(fleetMessage("No se pudo cargar la flota: " + error.message +
+      " Reintentando en " + FLEET_RETRY_MS / 1000 + " s…"));
+    fleetRetry = window.setTimeout(loadFleet, FLEET_RETRY_MS);
   }
 }
 
