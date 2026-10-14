@@ -551,13 +551,6 @@ function setMonitorTab(tab) {
   $("monitor-search").placeholder = activeMonitorTab === "routes"
     ? "Buscar ruta…"
     : "Buscar camión…";
-  // Al mirar la lista de camiones se encienden en el mapa (al entrar parte solo con rutas).
-  if (activeMonitorTab === "vehicles" && !mapLayerVisibility.vehicles) {
-    mapLayerVisibility.vehicles = true;
-    const toggle = document.querySelector('[data-map-layer="vehicles"]');
-    if (toggle) toggle.checked = true;
-    applyMapLayerVisibility();
-  }
   renderMonitorLists();
 }
 
@@ -583,11 +576,13 @@ function applyMapLayerVisibility() {
   // ella. "Vista general" muestra todo.
   const routeOf = new Map((currentMapData ? currentMapData.vehicles : []).map((v) => [v.vehicle_id, v.route_id]));
   for (const [vehicleId, marker] of truckMarkers) {
-    const visible = selectedRouteId ? routeOf.get(vehicleId) === selectedRouteId : true;
+    // Con la casilla «Camiones» apagada solo se ve el camión elegido en la lista.
+    const visible = !mapLayerVisibility.vehicles ? vehicleId === selectedVehicleId
+      : selectedRouteId ? routeOf.get(vehicleId) === selectedRouteId : true;
     if (visible && !truckLayer.hasLayer(marker)) truckLayer.addLayer(marker);
     if (!visible && truckLayer.hasLayer(marker)) truckLayer.removeLayer(marker);
   }
-  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles);
+  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles || Boolean(selectedVehicleId));
   applyRouteFilter();
 }
 
@@ -830,11 +825,6 @@ function selectVehicle(vehicle, focus = true) {
   selectedVehicleId = vehicle.vehicle_id;
   selectedRouteId = null;
   for (const record of routeMapLayers.values()) record.line.closeTooltip();
-  if (!mapLayerVisibility.vehicles) {
-    mapLayerVisibility.vehicles = true;
-    const toggle = document.querySelector('[data-map-layer="vehicles"]');
-    if (toggle) toggle.checked = true;
-  }
   applyMapLayerVisibility();
   refreshSelectionStyles();
   const status = vehicleStatus(vehicle);
