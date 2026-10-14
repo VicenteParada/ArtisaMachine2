@@ -66,14 +66,13 @@ TIPOS = {
               "min_valor": 0.5, "max_por_dia": None, "min_dias_activos": 1},
     "rutas": {"tabla": "actividad_tramo_dia", "estado": "actividad_tramo_estado",
               "claves": ("a_lat", "a_lon", "b_lat", "b_lon"), "valor": "camiones", "salida": "prediccion_tramo",
-              "min_valor": 0.3, "max_por_dia": 8000, "min_dias_activos": 3, "trazos": True},
+              "min_valor": 0.3, "max_por_dia": 8000, "min_dias_activos": 3, "rutas_completas": True},
 }
-# Dibujo de los tramos: de centro a centro de celda se ven como una escalera. Para el mapa
-# se guarda, por tramo, el trozo de un viaje real (viajes_camion) que lo cruzó, buscado en
-# los últimos DIAS_TRAZADO días cerrados. Es solo la forma de la línea; el valor sigue
-# siendo el del tramo.
-DIAS_TRAZADO = 28
-TOLERANCIA_TRAZO = 0.0002  # ~20 m al simplificar el trozo
+# Mapa de rutas predichas: el modelo predice por tramo, pero la web muestra rutas completas
+# (las de la clasificación activa, dibujadas con su viaje real representativo), cada una con
+# un solo valor: la mediana de los camiones predichos en los tramos que recorre. Así una
+# ruta no cambia de color a lo largo del camino.
+TOLERANCIA_RUTA = 0.0002  # ~20 m al simplificar la línea de cada ruta
 PARAMS = {"metric": "l1", "learning_rate": 0.05, "num_leaves": 15,
           "min_data_in_leaf": 30, "seed": 42, "verbose": -1, "num_threads": 1}  # 1 hilo: no acapara la CPU
 # "regression_l1" minimiza directamente el error absoluto (el que se compara); "poisson"
@@ -137,24 +136,21 @@ def distancia_km(lat0, lon0, lat1, lon1):
     return 2 * 6371.0 * math.asin(math.sqrt(a))
 
 
-def muestras(lat0, lon0, lat1, lon1):
-    """Puntos del segmento cada media celda o menos (incluye ambos extremos)."""
-    pasos = int(max(abs(lat1 - lat0), abs(lon1 - lon0)) * ESCALA * 2) + 1
-    return [(lat0 + (lat1 - lat0) * k / pasos, lon0 + (lon1 - lon0) * k / pasos) for k in range(pasos + 1)]
-
-
 def trazar(lat0, lon0, lat1, lon1):
     """Celdas que cruza el segmento, en orden (vecinas, también en diagonal)."""
+    pasos = int(max(abs(lat1 - lat0), abs(lon1 - lon0)) * ESCALA * 2) + 1
     celdas = []
-    for lat, lon in muestras(lat0, lon0, lat1, lon1):
-        c = celda(lat, lon)
+    for k in range(pasos + 1):
+        c = celda(lat0 + (lat1 - lat0) * k / pasos, lon0 + (lon1 - lon0) * k / pasos)
         if not celdas or celdas[-1] != c:
             celdas.append(c)
     return celdas
 
 
-def clave_tramo(a, b):
-    return a + b if a < b else b + a
+def tramos_segmento(lat0, lon0, lat1, lon1):
+    """Tramos (pares de celdas vecinas, sin sentido) que cruza un segmento."""
+    cadena = trazar(lat0, lon0, lat1, lon1)
+    return {a + b if a < b else b + a for a, b in zip(cadena, cadena[1:])}
 
 
 def contar_tramos(filas):
@@ -177,9 +173,7 @@ def contar_tramos(filas):
                 continue
             if distancia_km(la0, lo0, la1, lo1) / (minutos / 60) > VEL_MAX_KMH:
                 continue
-            cadena = trazar(la0, lo0, la1, lo1)
-            for a, b in zip(cadena, cadena[1:]):
-                tramos.add(clave_tramo(a, b))
+            tramos |= tramos_segmento(la0, lo0, la1, lo1)
         conteo.update(tramos)
     return conteo
 
@@ -300,9 +294,9 @@ def cargar_matriz(cursor, lista_dias, tipo="calor"):
     return celdas, matriz
 
 
-# --- Trazado sobre caminos reales ----------------------------------------------------------
+# --- Rutas completas ---------------------------------------------------------------------
 
-def simplificar(puntos, tolerancia=TOLERANCIA_TRAZO):
+def simplificar(puntos, tolerancia=TOLERANCIA_RUTA):
     """Douglas-Peucker: quita puntos que no cambian la forma en más de `tolerancia` grados."""
     if len(puntos) < 3:
         return list(puntos)
@@ -324,46 +318,44 @@ def simplificar(puntos, tolerancia=TOLERANCIA_TRAZO):
     return [puntos[k] for k in sorted(conservar)]
 
 
-def piezas_viaje(linea):
-    """Trozos de un recorrido real, por tramo: {tramo: [(lat, lon), ...]}.
-
-    Cada trozo va desde la mitad de la pasada por una celda hasta la mitad de la pasada por
-    la siguiente, así los trozos de un mismo viaje empalman sin cortes. Las celdas salen de
-    las mismas muestras que usa el conteo (trazar), así los tramos coinciden.
-    """
-    puntos = []
-    for (la0, lo0), (la1, lo1) in zip(linea, linea[1:]):
-        puntos.extend(muestras(la0, lo0, la1, lo1)[1 if puntos else 0:])
-    pasadas = []  # [celda, primer índice, último índice]
-    for i, (lat, lon) in enumerate(puntos):
-        c = celda(lat, lon)
-        if pasadas and pasadas[-1][0] == c:
-            pasadas[-1][2] = i
-        else:
-            pasadas.append([c, i, i])
-    piezas = {}
-    for k, (a, b) in enumerate(zip(pasadas, pasadas[1:])):
-        inicio = a[1] if k == 0 else (a[1] + a[2]) // 2
-        fin = b[2] if k == len(pasadas) - 2 else (b[1] + b[2]) // 2
-        piezas.setdefault(clave_tramo(a[0], b[0]), puntos[inicio:fin + 1])
-    return piezas
+def lineas_ruta(geometria):
+    """GeoJSON (LineString o MultiLineString) a listas de (lat, lon)."""
+    coordenadas = geometria["coordinates"]
+    if geometria["type"] == "LineString":
+        coordenadas = [coordenadas]
+    return [[(lat, lon) for lon, lat in linea] for linea in coordenadas if len(linea) >= 2]
 
 
-def trazos(cursor, claves, hasta):
-    """Forma real de cada tramo: el trozo de un viaje reciente que lo cruzó."""
-    faltan = set(claves)
-    encontrados = {}
-    for atras in range(DIAS_TRAZADO):
-        if not faltan:
-            break
-        cursor.execute("SELECT geometria FROM viajes_camion WHERE fecha=%s", (hasta - timedelta(days=atras),))
-        for fila in cursor.fetchall():
-            for linea in json.loads(fila["geometria"] or "[]"):
-                for clave, pieza in piezas_viaje([(lat, lon) for lon, lat in linea]).items():
-                    if clave in faltan:
-                        faltan.discard(clave)
-                        encontrados[clave] = [(round(lat, 5), round(lon, 5)) for lat, lon in simplificar(pieza)]
-    return encontrados
+def rutas_activas(cursor):
+    """Rutas de la clasificación activa: [{route_id, label, lineas, tramos}]."""
+    cursor.execute(
+        """SELECT r.route_id, r.label, r.geometria FROM rutas_clasificadas AS r
+           INNER JOIN rutas_version AS v ON v.id = r.version_id AND v.activa = 1 ORDER BY r.route_id"""
+    )
+    rutas = []
+    for fila in cursor.fetchall():
+        lineas = lineas_ruta(json.loads(fila["geometria"]))
+        tramos = set()
+        for linea in lineas:
+            for (la0, lo0), (la1, lo1) in zip(linea, linea[1:]):
+                tramos |= tramos_segmento(la0, lo0, la1, lo1)
+        if tramos:
+            rutas.append({"route_id": fila["route_id"], "label": fila["label"], "lineas": lineas, "tramos": tramos})
+    return rutas
+
+
+def valores_rutas(rutas, celdas, pronostico):
+    """{route_id: {fecha: camiones}}: mediana de lo predicho en los tramos de cada ruta
+    (un tramo sin predicción cuenta como 0)."""
+    posicion = {tuple(c): i for i, c in enumerate(celdas)}
+    resultado = {}
+    for ruta in rutas:
+        indices = [posicion.get(t) for t in ruta["tramos"]]
+        resultado[ruta["route_id"]] = {
+            fecha: round(float(np.median([0.0 if i is None else valores[i] for i in indices])), 2)
+            for fecha, valores in pronostico.items()
+        }
+    return resultado
 
 
 # --- Modelo ------------------------------------------------------------------------------
@@ -532,11 +524,13 @@ def guardar_version(connection, base_hasta, celdas, pronostico, metricas, n_cami
         publicados.extend((fecha, celdas[i], round(float(valores[i]), 2))
                           for i in orden if valores[i] >= cfg["min_valor"])
     with connection.cursor() as cursor:
-        formas = {}
-        if cfg.get("trazos"):
-            claves = {clave for _, clave, _ in publicados}
-            formas = trazos(cursor, claves, base_hasta)
-            metricas.update(tramos_publicados=len(claves), tramos_con_camino=len(formas))
+        rutas, por_ruta = [], {}
+        if cfg.get("rutas_completas"):
+            rutas = rutas_activas(cursor)
+            por_ruta = {ruta_id: {f: v for f, v in dias_ruta.items() if v >= cfg["min_valor"]}
+                        for ruta_id, dias_ruta in valores_rutas(rutas, celdas, pronostico).items()}
+            rutas = [r for r in rutas if por_ruta[r["route_id"]]]
+            metricas.update(rutas_publicadas=len(rutas))
         cursor.execute(
             """INSERT INTO prediccion_version (creado_en,tipo,base_hasta,desde,hasta,camiones,activa,metricas_json)
                VALUES (UTC_TIMESTAMP(6),%s,%s,%s,%s,%s,0,%s)""",
@@ -545,12 +539,12 @@ def guardar_version(connection, base_hasta, celdas, pronostico, metricas, n_cami
         )
         version = cursor.lastrowid
         filas = [(version, fecha, *clave, valor) for fecha, clave, valor in publicados]
-        datos = [(version, *clave, json.dumps(forma, separators=(",", ":"))) for clave, forma in formas.items()]
-        for k in range(0, len(datos), 2000):
-            cursor.executemany(
-                "INSERT INTO prediccion_trazo (version_id,a_lat,a_lon,b_lat,b_lon,puntos) VALUES (%s,%s,%s,%s,%s,%s)",
-                datos[k:k + 2000],
-            )
+        for ruta in rutas:
+            lineas = [[[round(lat, 5), round(lon, 5)] for lat, lon in simplificar(linea)] for linea in ruta["lineas"]]
+            cursor.execute("INSERT INTO prediccion_ruta_forma (version_id,route_id,label,geometria) VALUES (%s,%s,%s,%s)",
+                           (version, ruta["route_id"], ruta["label"], json.dumps(lineas, separators=(",", ":"))))
+            cursor.executemany("INSERT INTO prediccion_ruta (version_id,fecha,route_id,valor) VALUES (%s,%s,%s,%s)",
+                               [(version, f, ruta["route_id"], v) for f, v in sorted(por_ruta[ruta["route_id"]].items())])
         columnas = ",".join(cfg["claves"])
         marcas = ",".join(["%s"] * (len(cfg["claves"]) + 3))
         for k in range(0, len(filas), 5000):
@@ -563,8 +557,9 @@ def guardar_version(connection, base_hasta, celdas, pronostico, metricas, n_cami
                        "LIMIT 18446744073709551615 OFFSET %s", (tipo, CONSERVAR_VERSIONES))
         for vieja in [fila["id"] for fila in cursor.fetchall()]:
             cursor.execute(f"DELETE FROM {cfg['salida']} WHERE version_id=%s", (vieja,))
-            if cfg.get("trazos"):
-                cursor.execute("DELETE FROM prediccion_trazo WHERE version_id=%s", (vieja,))
+            if cfg.get("rutas_completas"):
+                cursor.execute("DELETE FROM prediccion_ruta WHERE version_id=%s", (vieja,))
+                cursor.execute("DELETE FROM prediccion_ruta_forma WHERE version_id=%s", (vieja,))
             cursor.execute("DELETE FROM prediccion_version WHERE id=%s", (vieja,))
     connection.commit()
     return version
@@ -608,7 +603,7 @@ def necesita_calculo(cursor, utc_now):
         version = version_activa(cursor, tipo)
         if (version is None or version["base_hasta"] < hasta
                 or version["metricas"].get("huella_camiones") != huella_actual
-                or (TIPOS[tipo].get("trazos") and "tramos_con_camino" not in version["metricas"])
+                or (TIPOS[tipo].get("rutas_completas") and "rutas_publicadas" not in version["metricas"])
                 or horizonte(version) < str(dias.hoy(utc_now) + timedelta(days=DIAS_ADELANTE))):
             tipos.append(tipo)
     return tipos
@@ -660,8 +655,8 @@ def ejecutar(connection, utc_now, tipos=None, latido=sin_latido):
         version = guardar_version(connection, base_hasta, celdas, pronostico, metricas, len(lista_camiones), tipo)
         print(f"Predicción {tipo}: versión {version} · {publicar[0]}..{publicar[-1]} · método {metricas['metodo']} · "
               f"errores en prueba {metricas['errores']} en {metricas['segundos']} s"
-              + (f" · {metricas['tramos_con_camino']} de {metricas['tramos_publicados']} tramos sobre camino real"
-                 if "tramos_con_camino" in metricas else ""), flush=True)
+              + (f" · {metricas['rutas_publicadas']} rutas completas" if "rutas_publicadas" in metricas else ""),
+              flush=True)
         resultados[tipo] = metricas
         latido()
     print(f"Predicción: listo en {round(time.monotonic() - comienzo, 1)} s", flush=True)

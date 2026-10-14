@@ -125,19 +125,21 @@ class PrediccionTests(unittest.TestCase):
         self.assertEqual(conteo[tramo], 2)  # A y B, aunque A aparezca dos veces
         self.assertEqual(max(conteo.values()), 2)
 
-    def test_route_pieces_follow_the_real_trip_and_join(self):
-        # Un viaje en diagonal suave: los trozos siguen sus puntos y empalman entre sí.
-        linea = [(-22.4551 - 0.0004 * k, -68.9249 + 0.003 * k) for k in range(12)]
-        piezas = prediccion.piezas_viaje(linea)
-        conteo = prediccion.contar_tramos([{"asset_id": "A", "report_date": datetime(2026, 10, 6, 15, k),
-                                            "latitude": la, "longitude": lo, "speed": 60}
-                                           for k, (la, lo) in enumerate(linea)])
-        self.assertEqual(set(piezas), set(conteo))  # mismos tramos que cuenta el modelo
-        orden = sorted(piezas.values(), key=lambda p: p[0][1])
-        for anterior, siguiente in zip(orden, orden[1:]):
-            self.assertEqual(anterior[-1], siguiente[0])  # sin cortes entre tramos
-        self.assertEqual(orden[0][0], linea[0])
-        self.assertEqual(orden[-1][-1], linea[-1])
+    def test_complete_route_gets_one_value(self):
+        # Ruta de 3 km hacia el este: 3 tramos. Mediana de lo predicho en ellos.
+        geometria = {"type": "LineString", "coordinates": [[-68.925, -22.455], [-68.895, -22.455]]}
+        lineas = prediccion.lineas_ruta(geometria)
+        ruta = {"route_id": "R-1", "lineas": lineas, "tramos": set()}
+        for (la0, lo0), (la1, lo1) in zip(lineas[0], lineas[0][1:]):
+            ruta["tramos"] |= prediccion.tramos_segmento(la0, lo0, la1, lo1)
+        self.assertEqual(len(ruta["tramos"]), 3)
+        celdas = sorted(ruta["tramos"]) + [(1, 1, 1, 2)]
+        dia = date(2026, 10, 16)
+        pronostico = {dia: np.array([2.0, 8.0, 3.0, 50.0])}  # el último tramo no es de la ruta
+        self.assertEqual(prediccion.valores_rutas([ruta], celdas, pronostico), {"R-1": {dia: 3.0}})
+        # Un tramo de la ruta sin predicción cuenta como 0.
+        self.assertEqual(prediccion.valores_rutas([ruta], celdas[1:], {dia: np.array([8.0, 3.0, 50.0])}),
+                         {"R-1": {dia: 3.0}})
 
     def test_simplify_keeps_shape(self):
         recta = [(0.0, 0.001 * k) for k in range(20)]

@@ -1943,7 +1943,7 @@ const PREDICTION_METHODS = {
   promedio_historico: "Promedio histórico"
 };
 const CONFIDENCE_LABELS = {alta: "Confianza alta", media: "Confianza media", baja: "Confianza baja", na: "Sin evaluar"};
-// Dos modelos en pestañas: mapa de calor (zonas) y rutas (tramos).
+// Dos modelos en pestañas: mapa de calor (zonas) y rutas completas.
 const PREDICTION_TYPES = {
   calor: {
     endpoint: "/api/prediccion", unit: "reportes", totalLabel: "Reportes esperados",
@@ -1954,12 +1954,12 @@ const PREDICTION_TYPES = {
       "(sobre 2 km/h) habrá en cada zona"
   },
   rutas: {
-    endpoint: "/api/prediccion-rutas", unit: "tramos", totalLabel: "Tramos con camiones esperados",
-    chartUnit: "Tramos", errorUnit: "camiones por tramo y día",
-    value: (item) => item.elementos, cardText: (item) => format(item.elementos) + " tramos",
-    intro: "Tramos de ruta por los que se espera que pasen camiones",
-    method: "Cada tramo une dos cuadros vecinos de ~1 km que los camiones cruzan entre dos reportes seguidos " +
-      "(5 min o menos y bajo 150 km/h). Para cada día se predice cuántos camiones distintos pasarán por cada tramo"
+    endpoint: "/api/prediccion-rutas", unit: "rutas", totalLabel: "Rutas con camiones esperados",
+    chartUnit: "Rutas", errorUnit: "camiones por tramo y día",
+    value: (item) => item.elementos, cardText: (item) => format(item.elementos) + " rutas",
+    intro: "Rutas por las que se espera que pasen camiones",
+    method: "El modelo predice cuántos camiones distintos pasarán por cada tramo de ~1 km. Cada ruta completa " +
+      "(de la clasificación de rutas) recibe un solo valor: la mediana de lo predicho en los tramos que recorre"
   }
 };
 const predictionState = {
@@ -1969,14 +1969,22 @@ const predictionState = {
 
 function predictionConfig() { return PREDICTION_TYPES[predictionState.tipo]; }
 
-// Colores de rutas: rojo = pocos camiones, naranja = medio, verde = muchos (igual que las rutas clasificadas).
-function routeHeatColor(ratio) {
-  const stops = [[0, [220, 38, 38]], [0.5, [249, 115, 22]], [1, [20, 83, 45]]];
-  const x = Math.max(0, Math.min(1, ratio));
-  const [i0, i1] = x <= 0.5 ? [0, 1] : [1, 2];
-  const t = (x - stops[i0][0]) / (stops[i1][0] - stops[i0][0]);
-  const c = stops[i0][1].map((v, k) => Math.round(v + (stops[i1][1][k] - v) * t));
-  return `rgb(${c[0]},${c[1]},${c[2]})`;
+// Nivel de cada ruta predicha con la misma regla que la clasificación de rutas:
+// verde sobre el percentil 67, rojo en el percentil 33 o menos, naranja entre ambos.
+function predictionRouteLevels(cells) {
+  const values = cells.map((cell) => cell[1]).sort((a, b) => a - b);
+  const percentile = (q) => {
+    if (!values.length) return 0;
+    const position = (values.length - 1) * q;
+    const low = Math.floor(position);
+    return values[low] + (values[Math.min(low + 1, values.length - 1)] - values[low]) * (position - low);
+  };
+  const p33 = percentile(1 / 3), p67 = percentile(2 / 3);
+  const levels = new Map();
+  for (const [id, value] of cells) {
+    levels.set(id, values[0] === values[values.length - 1] ? "MEDIUM" : value > p67 ? "HIGH" : value <= p33 ? "LOW" : "MEDIUM");
+  }
+  return levels;
 }
 
 function predictionDate(iso) { return new Date(iso + "T12:00:00Z"); }
@@ -2025,6 +2033,15 @@ function predictionCells(days) {
   return result;
 }
 
+function predictionRouteTip(label, value, dayCount) {
+  const tip = document.createElement("div");
+  const name = document.createElement("strong");
+  name.textContent = label;
+  tip.append(name, document.createElement("br"),
+    `~${format(value, 1)} camiones ${dayCount > 1 ? "por día (promedio)" : "esperados"}`);
+  return tip;
+}
+
 function ensurePredictionMap() {
   if (predictionState.map || !window.L) return predictionState.map;
   predictionState.map = L.map($("prediction-map"), {zoomControl: true}).setView([-24.5, -70], 6);
@@ -2057,13 +2074,13 @@ function drawPrediction() {
     const badge = document.createElement("span");
     badge.className = "confidence-badge " + confidence.level;
     badge.textContent = CONFIDENCE_LABELS[confidence.level];
-    const amount = routes ? `${format(days[0].elementos)} tramos con camiones esperados `
+    const amount = routes ? `${format(days[0].elementos)} rutas con camiones esperados `
       : `${format(days[0].total)} reportes esperados `;
     text.append(strong, " · " + amount, badge,
       confidence.error === null ? "" : ` · se equivoca ~${format(confidence.error, 2)} ${routes ? "camiones por tramo" : "por zona"}`);
   } else {
     text.textContent = `${predictionDayLabel(days[0].fecha, "long")} → ${predictionDayLabel(days[days.length - 1].fecha, "long")}` +
-      (routes ? ` · ${format(total)} tramos con camiones (promedio de camiones por día en cada tramo)`
+      (routes ? ` · ${format(total)} rutas con camiones (promedio de camiones por día en cada ruta)`
         : ` · ${format(total)} reportes esperados en ${days.length} días`);
   }
   // Mapa de calor
@@ -2071,34 +2088,36 @@ function drawPrediction() {
   if (map) {
     map.invalidateSize();
     if (predictionState.layer) map.removeLayer(predictionState.layer);
-    const max = cells.reduce((top, cell) => Math.max(top, cell[cell.length - 1]), 0);
     if (routes) {
-      // Tramos como líneas sobre el camino real de un viaje (data.trazos); sin trazo, recto
-      // y más tenue. De menos a más usados, para que los verdes queden encima.
+      // Una línea por ruta completa, de un solo color (su nivel). Primero las rojas, así
+      // donde dos rutas comparten camino queda encima la de más camiones.
       predictionState.renderer = predictionState.renderer || L.canvas({padding: 0.5});
       const layer = L.layerGroup();
-      const shapes = data.trazos || {};
-      const sorted = [...cells].sort((a, b) => a[4] - b[4]);
-      for (const [lat1, lon1, lat2, lon2, value] of sorted) {
-        const ratio = max ? Math.sqrt(value / max) : 0;
-        const shape = shapes[[lat1, lon1, lat2, lon2].join(",")];
-        L.polyline(shape || [[lat1, lon1], [lat2, lon2]], {
-          renderer: predictionState.renderer, color: routeHeatColor(ratio), weight: (shape ? 2.5 : 1.5) + ratio * 4,
-          opacity: (shape ? 0.6 : 0.35) + ratio * 0.4, lineCap: "round", lineJoin: "round"
-        }).bindTooltip(`${format(value, 1)} camiones ${days.length > 1 ? "por día (promedio)" : "esperados"}`, {sticky: true})
-          .addTo(layer);
+      const levels = predictionRouteLevels(cells);
+      const order = {LOW: 0, MEDIUM: 1, HIGH: 2};
+      const sorted = cells.filter(([id]) => data.rutas && data.rutas[id])
+        .sort((a, b) => order[levels.get(a[0])] - order[levels.get(b[0])] || a[1] - b[1]);
+      for (const [id, value] of sorted) {
+        const level = levels.get(id);
+        L.polyline(data.rutas[id].lineas, {
+          renderer: predictionState.renderer, color: ROUTE_COLORS[level],
+          weight: level === "HIGH" ? 5 : level === "MEDIUM" ? 4 : 3, opacity: 0.9, lineCap: "round", lineJoin: "round"
+        }).bindTooltip(predictionRouteTip(data.rutas[id].label, value, days.length), {sticky: true}).addTo(layer);
       }
       predictionState.layer = layer;
     } else {
       // Escala logarítmica, igual que el mapa de calor del cuaderno (np.log1p).
+      const max = cells.reduce((top, cell) => Math.max(top, cell[cell.length - 1]), 0);
       const points = cells.map(([lat, lon, value]) => [lat, lon, max ? Math.log1p(value) / Math.log1p(max) : 0]);
       predictionState.layer = L.heatLayer
         ? L.heatLayer(points, {radius: 9, blur: 11, minOpacity: 0.3, max: 1, maxZoom: 18, gradient: PREDICTION_GRADIENT})
         : L.layerGroup();
     }
     predictionState.layer.addTo(map);
-    if (!predictionState.fitted && cells.length) {
-      map.fitBounds(L.latLngBounds(cells.map((cell) => [cell[0], cell[1]])), {padding: [30, 30], maxZoom: 9});
+    const points = routes ? cells.flatMap(([id]) => (data.rutas && data.rutas[id] ? data.rutas[id].lineas.flat() : []))
+      : cells.map((cell) => [cell[0], cell[1]]);
+    if (!predictionState.fitted && points.length) {
+      map.fitBounds(L.latLngBounds(points), {padding: [30, 30], maxZoom: 9});
       predictionState.fitted = true;
     }
   }

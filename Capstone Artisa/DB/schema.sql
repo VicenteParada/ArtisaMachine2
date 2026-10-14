@@ -301,13 +301,20 @@ CREATE TABLE IF NOT EXISTS prediccion_tramo (
     PRIMARY KEY (version_id, fecha, a_lat, a_lon, b_lat, b_lon)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Forma de cada tramo en el mapa: el trozo de un viaje real que lo cruzó ([[lat, lon], ...]).
-CREATE TABLE IF NOT EXISTS prediccion_trazo (
+-- Predicción por ruta completa (rutas de la clasificación activa): mediana de los camiones
+-- predichos en sus tramos, y la línea de la ruta (su viaje real representativo).
+CREATE TABLE IF NOT EXISTS prediccion_ruta (
     version_id INT UNSIGNED NOT NULL,
-    a_lat INT NOT NULL,
-    a_lon INT NOT NULL,
-    b_lat INT NOT NULL,
-    b_lon INT NOT NULL,
-    puntos TEXT NOT NULL,
-    PRIMARY KEY (version_id, a_lat, a_lon, b_lat, b_lon)
+    fecha DATE NOT NULL,
+    route_id VARCHAR(16) NOT NULL,
+    valor FLOAT NOT NULL,
+    PRIMARY KEY (version_id, fecha, route_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS prediccion_ruta_forma (
+    version_id INT UNSIGNED NOT NULL,
+    route_id VARCHAR(16) NOT NULL,
+    label VARCHAR(255) NOT NULL,
+    geometria MEDIUMTEXT NOT NULL,
+    PRIMARY KEY (version_id, route_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

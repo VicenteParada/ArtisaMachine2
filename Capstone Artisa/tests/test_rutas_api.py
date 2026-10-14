@@ -142,24 +142,20 @@ class PredictionApiTests(unittest.TestCase):
 
 
 class RoutePredictionApiTests(unittest.TestCase):
-    def test_route_segments_as_lines(self):
+    def test_complete_routes_with_one_value_each(self):
         version = {"id": 3, "creado_en": datetime(2026, 10, 13, 4), "base_hasta": date(2026, 10, 12),
                    "desde": date(2026, 10, 13), "hasta": date(2026, 10, 27), "camiones": 116,
-                   "metricas_json": json.dumps({"metodo": "promedio_dia_semana"})}
-        tramos = [{"fecha": date(2026, 10, 13), "a_lat": -2246, "a_lon": -6893, "b_lat": -2246, "b_lon": -6892,
-                   "valor": 4.0}]
-        forma = [[-22.4551, -68.9249], [-22.4553, -68.9201], [-22.4549, -68.9151]]
-        trazos = [{"a_lat": -2246, "a_lon": -6893, "b_lat": -2246, "b_lon": -6892, "puntos": json.dumps(forma)}]
-        cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_tramo", tramos),
-                             ("FROM prediccion_trazo", trazos)])
+                   "metricas_json": json.dumps({"metodo": "promedio_dia_semana", "rutas_publicadas": 1})}
+        valores = [{"fecha": date(2026, 10, 13), "route_id": "R-ABC123", "valor": 4.0}]
+        linea = [[[-22.4551, -68.9249], [-22.4549, -68.9151]]]
+        formas = [{"route_id": "R-ABC123", "label": "Calama ↔ Faena", "geometria": json.dumps(linea)}]
+        cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_ruta_forma", formas),
+                             ("FROM prediccion_ruta ", valores)])
         data = prediccion_api.prediction(cursor, "rutas")
         self.assertEqual(data["tipo"], "rutas")
-        celda = data["dias"][0]["celdas"][0]
-        self.assertEqual(celda, [-22.455, -68.925, -22.455, -68.915, 4.0])
-        # La web busca la forma con los cuatro primeros valores unidos por comas (como JavaScript).
-        self.assertEqual(data["trazos"][",".join(repr(v) for v in celda[:4])], forma)
-        self.assertIn("-22.455,-68.925,-22.455,-68.915", data["trazos"])
-
+        self.assertEqual(data["dias"][0]["celdas"], [["R-ABC123", 4.0]])
+        self.assertEqual(data["rutas"]["R-ABC123"], {"label": "Calama ↔ Faena", "lineas": linea})
+        self.assertEqual(data["metricas"]["rutas_publicadas"], 1)
 
 if __name__ == "__main__":
     unittest.main()

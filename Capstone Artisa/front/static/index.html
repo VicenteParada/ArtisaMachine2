@@ -283,7 +283,7 @@
         <div class="section-top"><div><span class="eyebrow">MACHINE LEARNING · PREDICCIÓN</span><h2 id="prediction-title">Actividad esperada de la flota</h2></div><span id="prediction-status" class="status neutral">Cargando…</span></div>
         <div class="prediction-tabs" role="tablist" aria-label="Modelo de predicción">
           <button type="button" role="tab" class="prediction-tab is-active" data-prediction-tab="calor" aria-selected="true"><span>◉</span><span><strong>Mapa de calor</strong><small>Zonas con más movimiento</small></span></button>
-          <button type="button" role="tab" class="prediction-tab" data-prediction-tab="rutas" aria-selected="false"><span>⟋</span><span><strong>Rutas</strong><small>Tramos y camiones esperados</small></span></button>
+          <button type="button" role="tab" class="prediction-tab" data-prediction-tab="rutas" aria-selected="false"><span>⟋</span><span><strong>Rutas</strong><small>Rutas completas y camiones esperados</small></span></button>
         </div>
         <p id="prediction-intro" class="telemetry-intro">Zonas donde se espera más movimiento de camiones en los próximos días, según lo ocurrido en las últimas semanas.</p>
         <div class="real-metrics prediction-metrics" aria-label="Resumen de la predicción">
@@ -316,7 +316,7 @@
         </div>
         <div id="prediction-map" class="prediction-map" role="application" aria-label="Mapa de calor de la actividad esperada"></div>
         <div class="prediction-legend" id="prediction-legend-heat"><span>Menos actividad</span><i aria-hidden="true"></i><span>Más actividad</span><small>Es una predicción: no son posiciones reales de los camiones.</small></div>
-        <div class="prediction-legend routes" id="prediction-legend-routes" hidden><span>Pocos camiones</span><i aria-hidden="true"></i><span>Muchos camiones</span><small>Es una predicción por tramo de ~1 km, dibujada sobre el camino de un viaje real reciente; pasa el mouse para ver cuántos camiones.</small></div>
+        <div class="prediction-legend routes" id="prediction-legend-routes" hidden><span class="level high">Más camiones esperados</span><span class="level medium">Medio</span><span class="level low">Menos camiones</span><small>Es una predicción: cada ruta se dibuja con su viaje real representativo; pasa el mouse para ver su nombre y cuántos camiones.</small></div>
         <div class="prediction-charts">
           <article class="dashboard-card">
             <div class="dashboard-card-heading"><div><span class="eyebrow">PRÓXIMOS DÍAS</span><h3>Actividad esperada por día</h3></div><span class="chart-unit" id="prediction-chart-unit">Reportes</span></div>
