@@ -811,3 +811,44 @@
 .monitor-heading strong{font-size:14px}
 .monitor-heading b{padding:2px 8px;border-radius:10px;background:#eef2ef;color:var(--muted);font-size:11px}
 .truck-popup-link{margin-top:6px;color:var(--green)!important;font-size:11px;font-weight:600}
+
+/* Lista de camiones del mapa de rutas */
+.vehicle-list-icon:after{content:"";position:absolute;z-index:3;right:0;bottom:1px;width:11px;height:11px;border:2px solid #fff;border-radius:50%;background:var(--truck-state);box-shadow:0 1px 3px rgba(20,40,42,.18)}
+.vehicle-live-row{display:flex;align-items:center;gap:9px;width:100%;padding:8px;border:1px solid transparent;border-radius:6px;background:#f2f5f2;color:var(--ink);text-align:left;cursor:pointer}
+.vehicle-live-row:hover{border-color:#b9c9be;background:#fff}
+.vehicle-live-row>span:nth-child(2){display:grid;min-width:0;gap:3px}
+.vehicle-live-row strong,.vehicle-live-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vehicle-live-row strong{font-size:9px}
+.vehicle-live-row small{color:var(--muted);font-size:8px}
+.monitor-tabs{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.monitor-tab{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:6px;padding:9px 10px;background:#eef2ef;color:var(--muted);font-size:9px;font-weight:700}
+.monitor-tab b{border-radius:10px;padding:2px 6px;background:#fff;font-size:8px}
+.monitor-tab.is-active{border-color:#173f35;background:#173f35;color:#fff}
+.monitor-tab.is-active b{background:rgba(255,255,255,.18)}
+.vehicle-live-row{display:flex;align-items:center;gap:8px;width:100%;min-width:0;padding:8px;border:1px solid transparent;border-radius:6px;background:#f0f4f1;color:var(--ink);text-align:left;cursor:pointer}
+.vehicle-live-row:hover{border-color:#9db2a5;background:#fff}
+.vehicle-live-row.is-active{border-color:#173f35;background:#e4efe8;box-shadow:inset 0 0 0 1px #173f35}
+.vehicle-live-row>span:nth-child(2){display:grid;min-width:0;flex:1;gap:3px}
+.vehicle-live-row strong,.vehicle-live-row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vehicle-live-row strong{font-size:9px}
+.vehicle-live-row small{color:var(--muted);font-size:8px}
+.vehicle-list-icon{--truck-state:#d88632;position:relative;display:grid;place-items:center;width:62px;height:38px;flex:0 0 62px;border:0;background:transparent;filter:drop-shadow(0 2px 2px rgba(23,63,53,.2))}
+.vehicle-live-row.moving .vehicle-list-icon{--truck-state:#288459}
+.vehicle-live-row.off .vehicle-list-icon{--truck-state:#7d8c91}
+.vehicle-list-icon .truck-glyph{width:60px;height:32px}
+.vehicle-list-icon:after{width:10px;height:10px;right:-2px;bottom:-2px}
+.vehicle-live-row.is-active .vehicle-list-icon{filter:drop-shadow(0 0 4px rgba(151,194,79,.95)) drop-shadow(0 2px 2px rgba(23,63,53,.2))}
+.atlas .vehicle-live-row{width:100%;border-radius:8px}
+.atlas .vehicle-live-row strong{font-size:12px}
+.atlas .vehicle-live-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px;padding:8px 10px}
+.atlas .vehicle-live-row .fleet-identity{margin-top:4px}
+.vehicle-live-state{color:var(--green);font-size:11px;font-style:normal;font-weight:700;white-space:nowrap}
+.vehicle-live-row.off .vehicle-live-state{color:var(--muted);font-weight:500}
+.atlas .vehicle-live-row .fleet-identity .driver{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.selection-link{display:inline-block;margin-top:8px;color:var(--green)!important;font-size:11px;font-weight:700}
+.atlas .vehicle-live-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:8px}
+.atlas .vehicle-live-row strong{font-size:12px}
+.atlas .vehicle-live-row .fleet-identity{margin-top:4px}
+.atlas .vehicle-live-row .fleet-identity .driver{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vehicle-live-state{color:var(--green);font-size:11px;font-style:normal;font-weight:700;white-space:nowrap}
+.vehicle-live-row.off .vehicle-live-state{color:var(--muted);font-weight:500}

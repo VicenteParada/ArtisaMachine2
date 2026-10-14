@@ -6,11 +6,11 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/style.css?v=20261014-historico">
+  <link rel="stylesheet" href="/style.css?v=20261014-camiones-mapa">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
   <script src="/map-data.js" defer></script>
-  <script src="/app.js?v=20261014-historico" defer></script>
+  <script src="/app.js?v=20261014-camiones-mapa" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -312,11 +312,15 @@
           </article>
           <aside class="route-insights atlas-side" aria-label="Explorador de rutas y camiones">
             <article class="monitor-panel">
-              <div class="monitor-heading"><strong>Rutas</strong><b id="monitor-route-count">—</b></div>
+              <div class="monitor-tabs" role="tablist" aria-label="Elementos del mapa">
+                <button type="button" class="monitor-tab is-active" data-monitor-tab="routes" role="tab" aria-selected="true">Rutas <b id="monitor-route-count">—</b></button>
+                <button type="button" class="monitor-tab" data-monitor-tab="vehicles" role="tab" aria-selected="false">Camiones <b id="vehicle-live-count">—</b></button>
+              </div>
               <label class="monitor-search"><span>⌕</span><input id="monitor-search" type="search" placeholder="Buscar ruta…" aria-label="Buscar ruta"></label>
               <ul id="route-monitor-list" class="monitor-list" data-monitor-list="routes"><li>Esperando rutas…</li></ul>
+              <ul id="vehicle-live-list" class="monitor-list" data-monitor-list="vehicles" hidden><li>Esperando posiciones…</li></ul>
               <div id="map-selection-detail" class="map-selection-detail" aria-live="polite">
-                <span>Selección</span><strong>Elige una ruta</strong><p>El mapa la centra y muestra sus datos.</p>
+                <span>Selección</span><strong>Elige una ruta o un camión</strong><p>El mapa lo centra y muestra sus datos.</p>
               </div>
             </article>
           </aside>

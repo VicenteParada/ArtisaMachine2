@@ -260,6 +260,7 @@ const ROUTE_COLORS = Object.freeze({HIGH: "#14532d", MEDIUM: "#f97316", LOW: "#d
 // Mapa de rutas estudia el histórico: parte solo con las rutas; los camiones se encienden aparte.
 const mapLayerVisibility = {routes: true, vehicles: false};
 let activeRouteFilter = "ALL";
+let activeMonitorTab = "routes";
 let activeMapMode = "classified";
 let userChoseMapMode = false;
 let fleetMap = null;
@@ -398,6 +399,9 @@ function refreshSelectionStyles() {
   for (const button of document.querySelectorAll("[data-route-select]")) {
     button.classList.toggle("is-active", button.dataset.routeSelect === selectedRouteId);
   }
+  for (const button of document.querySelectorAll("[data-vehicle-select]")) {
+    button.classList.toggle("is-active", button.dataset.vehicleSelect === selectedVehicleId);
+  }
 }
 
 function routeMatchesFilter(route) {
@@ -482,8 +486,79 @@ function vehicleStatus(vehicle) {
 
 const TRUCK_MARKUP = '<img class="truck-glyph" src="/artisa-truck-box-white-green.png?v=20261014" alt="" aria-hidden="true">';
 
+function renderLiveFleet(vehicles) {
+  const list = $("vehicle-live-list");
+  if (!list) return;
+  $("vehicle-live-count").textContent = format(vehicles.length);
+  const query = $("monitor-search").value.trim().toLocaleLowerCase("es");
+  const ordered = [...vehicles]
+    .filter((vehicle) => `${vehicle.vehicle_id} ${vehicle.vehicle_name} ${vehicleDriver(vehicle)}`.toLocaleLowerCase("es").includes(query))
+    .sort((first, second) => Number(second.speed_kmh || 0) - Number(first.speed_kmh || 0));
+  list.replaceChildren();
+  for (const vehicle of ordered) {
+    const status = vehicleStatus(vehicle);
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "vehicle-live-row " + status.className;
+    button.dataset.vehicleSelect = vehicle.vehicle_id;
+    const icon = document.createElement("span");
+    icon.className = "vehicle-list-icon";
+    icon.innerHTML = TRUCK_MARKUP;
+    const copy = document.createElement("span");
+    const name = document.createElement("strong");
+    name.textContent = vehicle.vehicle_name || vehicle.vehicle_id;
+    const identity = document.createElement("small");
+    identity.className = "fleet-identity";
+    const driver = vehicleDriver(vehicle);
+    identity.append(...truckIdentity(vehicle.vehicle_id, driver === "No informado" ? null : driver, null));
+    copy.append(name, identity);
+    const state = document.createElement("em");
+    state.className = "vehicle-live-state";
+    state.textContent = status.className === "moving" && Number(vehicle.speed_kmh) > 3
+      ? format(vehicle.speed_kmh, 0) + " km/h" : status.label;
+    button.append(icon, copy, state);
+    button.addEventListener("click", () => selectVehicle(vehicle));
+    item.append(button);
+    list.append(item);
+  }
+  if (!ordered.length) {
+    const item = document.createElement("li");
+    item.className = "monitor-empty";
+    item.textContent = "No hay camiones para esta búsqueda.";
+    list.append(item);
+  }
+  refreshSelectionStyles();
+}
+
 function renderMonitorLists() {
-  if (currentMapData) renderRouteMonitor(currentMapData.routes);
+  if (!currentMapData) return;
+  renderRouteMonitor(currentMapData.routes);
+  renderLiveFleet(currentMapData.vehicles);
+}
+
+function setMonitorTab(tab) {
+  activeMonitorTab = tab === "vehicles" ? "vehicles" : "routes";
+  for (const button of document.querySelectorAll("[data-monitor-tab]")) {
+    const selected = button.dataset.monitorTab === activeMonitorTab;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+  }
+  for (const list of document.querySelectorAll("[data-monitor-list]")) {
+    list.hidden = list.dataset.monitorList !== activeMonitorTab;
+  }
+  $("monitor-search").value = "";
+  $("monitor-search").placeholder = activeMonitorTab === "routes"
+    ? "Buscar ruta…"
+    : "Buscar camión…";
+  // Al mirar la lista de camiones se encienden en el mapa (al entrar parte solo con rutas).
+  if (activeMonitorTab === "vehicles" && !mapLayerVisibility.vehicles) {
+    mapLayerVisibility.vehicles = true;
+    const toggle = document.querySelector('[data-map-layer="vehicles"]');
+    if (toggle) toggle.checked = true;
+    applyMapLayerVisibility();
+  }
+  renderMonitorLists();
 }
 
 function applyRouteFilter() {
@@ -772,6 +847,12 @@ function selectVehicle(vehicle, focus = true) {
     `${speed} · ${vehicle.event || "Sin evento"}`,
     `${Number(vehicle.latitude).toFixed(6)}, ${Number(vehicle.longitude).toFixed(6)} · ${formatUtc(vehicle.timestamp)}`
   );
+  // El recorrido del día está en Camiones en vivo: aquí solo se enlaza.
+  const link = document.createElement("a");
+  link.className = "selection-link";
+  link.href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
+  link.textContent = "Ver su recorrido de hoy en Camiones en vivo";
+  $("map-selection-detail").append(link);
   if (focus) focusTruck(vehicle.vehicle_id);
 }
 
@@ -789,7 +870,7 @@ function resetMapSelection() {
   selectedVehicleId = null;
   applyMapLayerVisibility();
   refreshSelectionStyles();
-  setSelectionDetail("Selección", "Elige una ruta", "El mapa la centra y muestra sus datos.");
+  setSelectionDetail("Selección", "Elige una ruta o un camión", "El mapa lo centra y muestra sus datos.");
   fitPendingMap(true);
 }
 
@@ -949,11 +1030,12 @@ function renderHeatmap(data) {
     pendingText(["heatmap-intro", "heatmap-zones", "map-last-update", "most-route-usage",
       "least-route-usage", "geo-model-detail", "heatmap-method", "map-selection-detail"],
       "Disponible cuando Machine genere resultados");
-    pendingText(["monitor-route-count"], "—");
+    pendingText(["monitor-route-count", "vehicle-live-count"], "—");
     for (const counter of document.querySelectorAll("[data-route-count]")) counter.textContent = "—";
     const item = document.createElement("li");
     item.textContent = "Pendiente de procesamiento Machine.";
     $("route-monitor-list").replaceChildren(item);
+    $("vehicle-live-list").replaceChildren(item.cloneNode(true));
     return;
   }
   const pendingNote = $("map-pending-note");
@@ -1705,7 +1787,13 @@ for (const input of document.querySelectorAll("[data-map-layer]")) {
     }
   });
 }
-$("monitor-search").addEventListener("input", () => renderRouteMonitor(currentMapData ? currentMapData.routes : []));
+for (const button of document.querySelectorAll("[data-monitor-tab]")) {
+  button.addEventListener("click", () => setMonitorTab(button.dataset.monitorTab));
+}
+$("monitor-search").addEventListener("input", () => {
+  if (activeMonitorTab === "routes") renderRouteMonitor(currentMapData ? currentMapData.routes : []);
+  else renderLiveFleet(currentMapData ? currentMapData.vehicles : []);
+});
 $("reset-map-view").addEventListener("click", resetMapSelection);
 for (const [id, key] of [["most-route-card", "mostUsed"], ["least-route-card", "leastUsed"]]) {
   $(id).addEventListener("click", () => {
