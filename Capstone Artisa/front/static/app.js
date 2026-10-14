@@ -252,8 +252,7 @@ function routeUsageSummary(route) {
   const properties = routeProperties(route);
   return route
     ? format(properties.usage_count || 0) + " recorridos · " +
-      format(properties.unique_vehicle_count || 0) + " vehículos · " +
-      (properties.usage_level || "Sin nivel")
+      format(properties.unique_vehicle_count || 0) + " camiones"
     : "Sin información";
 }
 
@@ -301,9 +300,7 @@ function setMapMode(mode, remember = false, pending = !currentMapData || machine
     button.setAttribute("aria-pressed", String(button.dataset.mapMode === activeMapMode));
     if (button.dataset.mapMode === "classified") button.disabled = pending;
   }
-  $("map-view-description").textContent = historical
-    ? "Reportes GPS guardados, día por día o en un rango de fechas. No cambia la clasificación de rutas."
-    : "Rutas completas clasificadas por uso y última posición de cada camión.";
+  $("atlas-stats").hidden = historical;
   for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer], [data-monitor-tab], #monitor-search, #reset-map-view")) {
     control.disabled = pending || historical;
   }
@@ -331,7 +328,15 @@ function updateRouteFilterCounts(routes) {
   for (const counter of document.querySelectorAll("[data-route-count]")) {
     counter.textContent = format(counts[counter.dataset.routeCount] || 0);
   }
+  // Barra de niveles del resumen: cuánto pesa cada nivel en el total de rutas.
+  for (const bar of document.querySelectorAll("[data-level-bar]")) {
+    const level = bar.dataset.levelBar;
+    bar.style.flexGrow = String(counts[level] || 0);
+    bar.title = `${ROUTE_LABELS[level]}: ${format(counts[level] || 0)} rutas`;
+  }
 }
+
+const ROUTE_LABELS = Object.freeze({HIGH: "Más usada", MEDIUM: "Uso medio", LOW: "Poco usada"});
 
 function setSelectionDetail(kind, title, description, metadata) {
   const detail = $("map-selection-detail");
@@ -428,10 +433,11 @@ function renderRouteMonitor(routes) {
     const name = document.createElement("strong");
     name.textContent = properties.label || properties.route_id;
     const label = document.createElement("small");
-    label.textContent = `${properties.route_id} · ${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} vehículos`;
+    label.textContent = `${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} camiones`;
     copy.append(name, label);
     const level = document.createElement("b");
-    level.textContent = properties.usage_level;
+    level.className = "level-pill " + String(properties.usage_level || "").toLowerCase();
+    level.textContent = ROUTE_LABELS[properties.usage_level] || properties.usage_level;
     button.append(color, copy, level);
     button.addEventListener("click", () => selectRoute(route));
     item.append(button);
@@ -503,13 +509,16 @@ function renderLiveFleet(vehicles) {
     const copy = document.createElement("span");
     const name = document.createElement("strong");
     name.textContent = vehicle.vehicle_name || vehicle.vehicle_id;
-    const detail = document.createElement("small");
-    const speed = vehicle.speed_kmh === null || vehicle.speed_kmh === undefined
-      ? "s/d"
-      : format(vehicle.speed_kmh, 1) + " km/h";
-    detail.textContent = status.label + " · " + speed + " · " + vehicleDriver(vehicle);
-    copy.append(name, detail);
-    button.append(icon, copy);
+    const identity = document.createElement("small");
+    identity.className = "fleet-identity";
+    const driver = vehicleDriver(vehicle);
+    identity.append(...truckIdentity(vehicle.vehicle_id, driver === "No informado" ? null : driver, null));
+    copy.append(name, identity);
+    const state = document.createElement("em");
+    state.className = "vehicle-live-state";
+    state.textContent = status.className === "moving" && Number(vehicle.speed_kmh) > 3
+      ? format(vehicle.speed_kmh, 0) + " km/h" : status.label;
+    button.append(icon, copy, state);
     button.addEventListener("click", () => selectVehicle(vehicle));
     item.append(button);
     list.append(item);
@@ -613,7 +622,7 @@ function initializeFleetMap() {
   L.control.layers(
     {"Calles y lugares (OpenStreetMap)": streets, "Satélite (Esri)": satellite},
     {"Faenas": faenaLayer, "Densidad GPS (día anterior)": densityLayer},
-    {collapsed: false, position: "topright"}
+    {collapsed: true, position: "topleft"}
   ).addTo(fleetMap);
   faenaLayer.addTo(fleetMap);
   const pendingNote = document.createElement("div");
@@ -867,6 +876,7 @@ async function showVehicleJourney(vehicle) {
   if (!journeyLayer) return;
   const request = ++journeyRequest;
   activeJourneyVehicleId = vehicle.vehicle_id;
+  $("journey-open").href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
   applyMapLayerVisibility();
   journeyLayer.clearLayers();
   const panel = $("journey-detail");
@@ -1029,7 +1039,7 @@ function renderFleetMap(data) {
   $("heatmap-source-status").textContent = processingHistory
     ? "Rutas disponibles · histórico en procesamiento" : "Rutas clasificadas";
   $("heatmap-intro").textContent =
-    "Verde: rutas más usadas · naranja: uso medio · rojo: poco usadas. Cada camión aparece en su última posición recibida." +
+    "Para estudiar el histórico: qué rutas usa la flota y cuánto, y dónde está cada camión ahora." +
     (processingHistory ? ` Clasificación parcial: ${coverage.dias_cerrados} de ${coverage.dias_ventana} días procesados en la ventana.` : "");
 
   const visibleBounds = L.latLngBounds([]);
@@ -1139,9 +1149,10 @@ function renderHeatmap(data) {
   ].filter(Boolean).join(" ");
 
   const window_ = metadata.window || {};
+  const shortDay = (iso) => new Intl.DateTimeFormat("es-CL", {day: "numeric", month: "short", timeZone: "UTC"})
+    .format(new Date(String(iso).slice(0, 10) + "T12:00:00Z"));
   $("geo-model-zones").textContent = window_.desde
-    ? "Viajes del " + formatDataDay(window_.desde) + " al " + formatDataDay(window_.hasta)
-    : "Clasificación vigente";
+    ? shortDay(window_.desde) + " – " + shortDay(window_.hasta) : "Clasificación vigente";
   $("geo-model-detail").textContent = metadata.road_matching ||
     "Rutas calculadas con la telemetría disponible.";
   renderFleetMap(data);
@@ -1843,6 +1854,13 @@ $("monitor-search").addEventListener("input", () => {
   else renderLiveFleet(currentMapData ? currentMapData.vehicles : []);
 });
 $("reset-map-view").addEventListener("click", resetMapSelection);
+for (const [id, key] of [["most-route-card", "mostUsed"], ["least-route-card", "leastUsed"]]) {
+  $(id).addEventListener("click", () => {
+    const target = currentMapData && currentMapData.ranking[key];
+    const route = target && currentMapData.routes.find((item) => routeProperties(item).route_id === routeProperties(target).route_id);
+    if (route && activeMapMode === "classified") selectRoute(route);
+  });
+}
 // Retirar el almacenamiento de la implementación anterior sin persistir el usuario.
 try {
   sessionStorage.removeItem("artisa_token");

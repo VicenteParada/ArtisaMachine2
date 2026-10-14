@@ -721,3 +721,88 @@
 .fleet-identity .driver::before{width:10px;height:10px;flex-basis:10px}
 .truck-image-button{border:1px solid #b9cbc4!important;border-radius:20px!important;background:#fff!important;color:var(--green)!important;font-weight:600}
 .truck-image-button:hover{border-color:var(--green)!important}
+
+/* Mapa de rutas como atlas: el mapa al centro, herramientas encima y el explorador al lado */
+.atlas .atlas-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.atlas .atlas-head h2{margin:0}
+.atlas-lede{margin:6px 0 0;max-width:640px;color:var(--muted);font-size:12px;line-height:1.6}
+.atlas .atlas-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin:16px 0 14px;padding:4px;border-radius:10px;background:#e9eeea}
+.atlas .atlas-modes .atlas-mode{display:grid;gap:2px;padding:10px 14px;border:0;border-radius:7px;background:transparent;color:var(--muted);text-align:left;font-size:inherit;font-weight:400;cursor:pointer}
+.atlas .atlas-modes .atlas-mode strong{color:var(--ink);font-size:13px}
+.atlas .atlas-modes .atlas-mode small{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.atlas .atlas-modes .atlas-mode[aria-pressed="true"]{background:#fff;color:var(--muted);box-shadow:0 1px 3px rgba(23,45,50,.12)}
+.atlas .atlas-modes .atlas-mode[aria-pressed="true"] strong{color:var(--green)}
+.atlas .atlas-modes .atlas-mode:disabled{opacity:.5}
+.atlas .atlas-modes .atlas-mode:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+
+.atlas-stats{display:grid;grid-template-columns:repeat(4,minmax(0,.8fr)) repeat(2,minmax(0,1.3fr));margin-bottom:14px;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}
+.atlas-stat{display:grid;align-content:start;gap:4px;min-width:0;padding:12px 16px;border:0;border-right:1px solid var(--line);background:none;color:var(--ink);text-align:left;font:inherit}
+.atlas-stat:last-child{border-right:0}
+.atlas-stat span{color:var(--muted);font-size:11px}
+.atlas-stat strong{font-size:20px;letter-spacing:-.01em;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.atlas-stat small{color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.atlas-levels span b{color:var(--ink);font-size:20px;margin-left:4px}
+.level-bar{display:flex;gap:2px;height:8px;margin-top:6px;border-radius:4px;overflow:hidden;background:#eef2ef}
+.level-bar i{display:block;flex:1 1 0;min-width:2px}
+.level-bar .high,.route-filter.high i,.atlas-foot .high,.level-pill.high{background:#14532d}
+.level-bar .medium,.route-filter.medium i,.atlas-foot .medium,.level-pill.medium{background:#f97316}
+.level-bar .low,.route-filter.low i,.atlas-foot .low,.level-pill.low{background:#dc2626}
+.atlas-pick{cursor:pointer;position:relative}
+.atlas-pick strong{font-size:14px}
+.atlas-pick::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:0 3px 3px 0;background:#14532d}
+.atlas-pick.least::before{background:#dc2626}
+.atlas-pick:hover{background:#f6faf3}
+@media(max-width:1100px){.atlas-stats{grid-template-columns:repeat(4,minmax(0,1fr))}.atlas-pick{grid-column:span 2;border-top:1px solid var(--line)}}
+@media(max-width:600px){.atlas-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.atlas-stat{border-bottom:1px solid var(--line)}}
+
+.atlas .atlas-stage{grid-template-columns:minmax(0,1fr) 340px;gap:14px;margin-top:0}
+.atlas .map-card{position:relative;padding:0;border:0;background:none}
+.atlas #heatmap-map.leaflet-container{height:min(72vh,720px);min-height:480px;border-radius:10px}
+.atlas .atlas-toolbar{position:absolute;z-index:500;top:10px;left:56px;right:10px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;pointer-events:none;margin:0;padding:0;border:0;background:none}
+.atlas .atlas-toolbar>*{pointer-events:auto}
+.atlas .route-filter-actions,.atlas .map-layer-actions{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:4px;border-radius:10px;background:rgba(255,255,255,.94);box-shadow:0 4px 16px rgba(23,45,50,.16);backdrop-filter:blur(4px)}
+.atlas .route-filter{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border:0;border-radius:7px;background:none;color:var(--ink);font-size:12px;font-weight:600;cursor:pointer}
+.atlas .route-filter i{width:10px;height:10px;border-radius:50%}
+.atlas .route-filter b{padding:1px 6px;border-radius:9px;background:#eef2ef;color:var(--muted);font-size:10px}
+.atlas .route-filter[aria-pressed="true"]{background:#172d32;color:#fff}
+.atlas .route-filter[aria-pressed="true"] b{background:rgba(255,255,255,.18);color:#fff}
+.atlas .map-layer-toggle{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer}
+.atlas .map-layer-toggle input{accent-color:var(--green)}
+.atlas .map-reset{padding:6px 10px;border:0;border-radius:7px;background:#e8f1ec;color:var(--green);font-size:12px;font-weight:600;cursor:pointer}
+.atlas .atlas-foot{position:absolute;z-index:500;left:10px;bottom:22px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;max-width:calc(100% - 20px);padding:7px 12px;border-radius:9px;background:rgba(255,255,255,.94);box-shadow:0 4px 16px rgba(23,45,50,.14);font-size:11px;color:var(--ink)}
+.atlas .atlas-foot span{display:inline-flex;align-items:center;gap:6px}
+.atlas .atlas-foot i{display:inline-block;width:18px;height:4px;border-radius:2px}
+.atlas .atlas-foot small{color:var(--muted);font-size:10px}
+.atlas .route-insights.atlas-side{display:block}
+.atlas .atlas-side .monitor-panel{display:flex;flex-direction:column;height:min(72vh,720px);min-height:480px;padding:12px;border-radius:10px;background:#fff}
+.atlas .atlas-side .monitor-list{flex:1;max-height:none;min-height:120px}
+.atlas .route-monitor-row,.atlas .vehicle-live-row{width:100%;border-radius:8px}
+.atlas .route-monitor-row strong,.atlas .vehicle-live-row strong{font-size:12px}
+.atlas .route-monitor-row small{font-size:10px}
+.level-pill{padding:2px 7px;border-radius:9px;color:#fff;font-size:9px;font-weight:700;white-space:nowrap}
+.atlas .vehicle-live-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;align-items:center;gap:10px;padding:8px 10px}
+.atlas .vehicle-live-row .fleet-identity{margin-top:4px}
+.vehicle-live-state{color:var(--green);font-size:11px;font-style:normal;font-weight:700;white-space:nowrap}
+.vehicle-live-row.off .vehicle-live-state{color:var(--muted);font-weight:500}
+.atlas .map-selection-detail,.atlas .journey-detail{margin-top:10px}
+.journey-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.journey-open{display:inline-flex;align-items:center;padding:8px 12px;border-radius:18px;background:#1f6b4f;color:#fff!important;font-size:12px;font-weight:600}
+.journey-open:hover{background:#185a42}
+.atlas .heatmap-layout.is-historical{grid-template-columns:minmax(0,1fr)}
+.atlas .map-view-stage .explorer-frame-wrap iframe{height:min(78vh,760px)}
+.atlas #heatmap-map .leaflet-control-layers{margin-top:10px}
+@media(max-width:1100px){.atlas .atlas-stage{grid-template-columns:minmax(0,1fr)}.atlas .atlas-side .monitor-panel{height:auto;max-height:640px}}
+@media(max-width:690px){.atlas .atlas-toolbar{position:static;margin-bottom:8px}.atlas .atlas-modes .atlas-mode small{display:none}.atlas .atlas-foot{position:static;margin-top:8px}}
+.atlas .route-filter::before{display:none!important}
+.atlas .atlas-stat:first-child strong{font-size:16px;white-space:normal}
+.atlas .atlas-stats{grid-template-columns:minmax(0,1fr) repeat(3,minmax(0,.8fr)) repeat(2,minmax(0,1.3fr))}
+.atlas .atlas-side .monitor-panel{overflow-y:auto}
+.atlas .atlas-side .monitor-list{flex:1 0 260px}
+.atlas .monitor-panel:has(#journey-detail:not([hidden])) #map-selection-detail{display:none}
+.atlas .journey-detail dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px}
+.atlas .journey-detail dl>div{display:grid;gap:1px;padding:0;border:0}
+.atlas .journey-detail dt{font-size:10px}
+.atlas .journey-detail dd{margin:0;text-align:left;font-size:12px}
+.atlas .vehicle-live-row .fleet-identity .driver{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:1100px){.atlas .atlas-stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:690px){.atlas .atlas-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.atlas .map-card{display:flex;flex-direction:column}.atlas .atlas-toolbar{order:-1}.atlas #heatmap-map.leaflet-container{height:60vh;min-height:380px}}

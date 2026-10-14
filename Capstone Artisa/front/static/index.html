@@ -6,11 +6,11 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/style.css?v=20261014-detalles">
+  <link rel="stylesheet" href="/style.css?v=20261014-atlas">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
   <script src="/map-data.js" defer></script>
-  <script src="/app.js?v=20261014-detalles" defer></script>
+  <script src="/app.js?v=20261014-atlas" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -264,84 +264,82 @@
       </section>
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
-      <section class="panel heatmap-panel">
-        <div class="section-top"><div><span class="eyebrow">MAPA DE RUTAS</span><h2>Rutas y flota</h2></div><span id="heatmap-source-status" class="status info">Cargando…</span></div>
-        <p id="heatmap-intro" class="telemetry-intro">Consultando la fuente del mapa y su cobertura histórica…</p>
-        <div class="route-filter-panel">
-          <span>Mostrar rutas</span>
-          <div class="route-filter-actions" role="group" aria-label="Filtrar rutas por nivel de uso">
-            <button type="button" class="route-filter is-active" data-route-filter="ALL" aria-pressed="true">Todas <b data-route-count="ALL">—</b></button>
-            <button type="button" class="route-filter" data-route-filter="HIGH" aria-pressed="false">Más usadas <b data-route-count="HIGH">—</b></button>
-            <button type="button" class="route-filter" data-route-filter="MEDIUM" aria-pressed="false">Uso medio <b data-route-count="MEDIUM">—</b></button>
-            <button type="button" class="route-filter" data-route-filter="LOW" aria-pressed="false">Poco usadas <b data-route-count="LOW">—</b></button>
+      <section class="panel heatmap-panel atlas" aria-labelledby="atlas-title">
+        <div class="atlas-head">
+          <div><h2 id="atlas-title">Mapa de rutas</h2><p id="heatmap-intro" class="atlas-lede">Consultando la clasificación…</p></div>
+          <span id="heatmap-source-status" class="status info">Cargando…</span>
+        </div>
+        <div class="atlas-modes map-view-selector" role="tablist" aria-label="Qué estudiar">
+          <button type="button" class="atlas-mode" data-map-mode="classified" aria-pressed="false" disabled><strong>Rutas clasificadas</strong><small>Rutas completas por nivel de uso y dónde está cada camión</small></button>
+          <button type="button" class="atlas-mode" data-map-mode="historical" aria-pressed="true"><strong>Mapas de telemetría</strong><small id="map-view-description">Reportes GPS guardados por día o rango</small></button>
+        </div>
+        <div class="atlas-stats" id="atlas-stats" aria-label="Resumen del período analizado">
+          <div class="atlas-stat"><span>Período</span><strong id="geo-model-zones">—</strong><small id="geo-model-detail" hidden></small></div>
+          <div class="atlas-stat"><span>Recorridos</span><strong id="heatmap-trips">—</strong></div>
+          <div class="atlas-stat atlas-levels"><span>Rutas <b id="heatmap-routes">—</b></span>
+            <div class="level-bar" aria-hidden="true"><i class="high" data-level-bar="HIGH"></i><i class="medium" data-level-bar="MEDIUM"></i><i class="low" data-level-bar="LOW"></i></div>
           </div>
+          <div class="atlas-stat"><span>Camiones</span><strong id="heatmap-vehicles">—</strong></div>
+          <button type="button" class="atlas-stat atlas-pick most" id="most-route-card"><span>Ruta más usada</span><strong id="most-route">—</strong><small id="most-route-usage">—</small></button>
+          <button type="button" class="atlas-stat atlas-pick least" id="least-route-card"><span>Ruta menos usada</span><strong id="least-route">—</strong><small id="least-route-usage">—</small></button>
         </div>
-        <div class="map-layer-panel">
-          <span>Capas del mapa</span>
-          <div class="map-layer-actions" role="group" aria-label="Controlar capas del mapa">
-            <label class="map-layer-toggle routes"><input type="checkbox" data-map-layer="routes" checked> Rutas</label>
-            <label class="map-layer-toggle vehicles"><input type="checkbox" data-map-layer="vehicles" checked> Vehículos</label>
-          </div>
-        </div>
-        <div class="real-metrics heatmap-metrics" aria-label="Resumen del mapa de calor">
-          <article><span>Recorridos analizados</span><strong id="heatmap-trips">—</strong><small>Trips asociados a rutas</small></article>
-          <article><span>Vehículos</span><strong id="heatmap-vehicles">—</strong><small>Última posición por vehículo</small></article>
-          <article><span>Rutas identificadas</span><strong id="heatmap-routes">—</strong><small>Agrupaciones de recorridos</small></article>
-        </div>
-        <div class="heatmap-layout">
+        <div class="heatmap-layout atlas-stage">
           <article class="map-card">
-            <div class="map-title"><div><strong>Monitoreo de rutas y flota</strong><small id="heatmap-zones">Cargando rutas…</small></div><div class="map-title-actions"><span id="map-last-update">Cargando…</span><button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button></div></div>
-            <div class="map-view-selector" role="group" aria-label="Vista del mapa">
-              <button type="button" data-map-mode="classified" aria-pressed="false" disabled>Rutas clasificadas</button>
-              <button type="button" data-map-mode="historical" aria-pressed="true">Mapas de telemetría</button>
-              <span id="map-view-description"></span>
-            </div>
             <div class="map-view-stage">
               <div id="explorer-routes" class="explorer-frame-wrap" hidden>
                 <iframe title="Mapas de telemetría histórica" data-explorer-frame="/exploracion-gps" referrerpolicy="no-referrer"></iframe>
               </div>
               <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa interactivo de rutas históricas y camiones" hidden><span class="map-loading">Cargando cartografía…</span></div>
             </div>
-            <div class="heat-legend" id="classified-map-legend" hidden><span>Uso bajo</span><i></i><span>Uso medio</span><i></i><span>Uso alto</span><i></i><b class="legend-truck">🚚 Camión</b><small>Trazos representativos de GPS; sin ajuste vial exacto</small></div>
+            <div class="atlas-toolbar route-filter-panel">
+              <div class="route-filter-actions" role="group" aria-label="Filtrar rutas por nivel de uso">
+                <button type="button" class="route-filter is-active" data-route-filter="ALL" aria-pressed="true">Todas <b data-route-count="ALL">—</b></button>
+                <button type="button" class="route-filter high" data-route-filter="HIGH" aria-pressed="false"><i></i>Más usadas <b data-route-count="HIGH">—</b></button>
+                <button type="button" class="route-filter medium" data-route-filter="MEDIUM" aria-pressed="false"><i></i>Uso medio <b data-route-count="MEDIUM">—</b></button>
+                <button type="button" class="route-filter low" data-route-filter="LOW" aria-pressed="false"><i></i>Poco usadas <b data-route-count="LOW">—</b></button>
+              </div>
+              <div class="map-layer-panel map-layer-actions" role="group" aria-label="Capas del mapa">
+                <label class="map-layer-toggle routes"><input type="checkbox" data-map-layer="routes" checked> Rutas</label>
+                <label class="map-layer-toggle vehicles"><input type="checkbox" data-map-layer="vehicles" checked> Camiones</label>
+                <button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button>
+              </div>
+            </div>
+            <div class="atlas-foot" id="classified-map-legend" hidden>
+              <span><i class="high"></i>Más usada</span><span><i class="medium"></i>Uso medio</span><span><i class="low"></i>Poco usada</span>
+              <small id="map-last-update">Cargando…</small><small id="heatmap-zones" hidden></small>
+            </div>
           </article>
-          <aside class="route-insights" aria-label="Explorador de rutas y vehículos">
+          <aside class="route-insights atlas-side" aria-label="Explorador de rutas y camiones">
             <article class="monitor-panel">
               <div class="monitor-tabs" role="tablist" aria-label="Elementos del mapa">
                 <button type="button" class="monitor-tab is-active" data-monitor-tab="routes" role="tab" aria-selected="true">Rutas <b id="monitor-route-count">—</b></button>
-                <button type="button" class="monitor-tab" data-monitor-tab="vehicles" role="tab" aria-selected="false">Vehículos <b id="vehicle-live-count">—</b></button>
+                <button type="button" class="monitor-tab" data-monitor-tab="vehicles" role="tab" aria-selected="false">Camiones <b id="vehicle-live-count">—</b></button>
               </div>
-              <label class="monitor-search"><span>⌕</span><input id="monitor-search" type="search" placeholder="Buscar ruta…" aria-label="Buscar rutas o vehículos"></label>
+              <label class="monitor-search"><span>⌕</span><input id="monitor-search" type="search" placeholder="Buscar ruta…" aria-label="Buscar rutas o camiones"></label>
               <ul id="route-monitor-list" class="monitor-list" data-monitor-list="routes"><li>Esperando rutas…</li></ul>
               <ul id="vehicle-live-list" class="monitor-list" data-monitor-list="vehicles" hidden><li>Esperando posiciones…</li></ul>
               <div id="map-selection-detail" class="map-selection-detail" aria-live="polite">
-                <span>SELECCIÓN DEL MAPA</span><strong>Selecciona una ruta o un vehículo</strong><p>El mapa centrará el elemento y mostrará sus datos sin modificar la clasificación.</p>
+                <span>Selección</span><strong>Elige una ruta o un camión</strong><p>El mapa lo centra y muestra sus datos.</p>
               </div>
               <div id="journey-detail" class="journey-detail" hidden aria-live="polite">
-                <strong>Recorrido observado del camión</strong>
+                <strong>Recorrido de hoy</strong>
                 <dl>
                   <div><dt>Patente</dt><dd id="journey-plate">—</dd></div>
                   <div><dt>Conductor</dt><dd id="journey-driver">—</dd></div>
                   <div><dt>Inicio observado</dt><dd id="journey-start">—</dd></div>
                   <div><dt>Última posición</dt><dd id="journey-end">—</dd></div>
                   <div><dt>Distancia GPS</dt><dd id="journey-distance">—</dd></div>
-                  <div><dt>Tiempo en movimiento</dt><dd id="journey-moving">—</dd></div>
-                  <div><dt>Cortes de señal (más de 5 min)</dt><dd id="journey-gaps">—</dd></div>
+                  <div><dt>En movimiento</dt><dd id="journey-moving">—</dd></div>
+                  <div><dt>Cortes de señal</dt><dd id="journey-gaps">—</dd></div>
                   <div><dt>Ruta histórica</dt><dd id="journey-route">—</dd></div>
                 </dl>
                 <small id="journey-note"></small>
-                <button id="journey-hide" type="button">Volver a vista general</button>
+                <div class="journey-actions"><a id="journey-open" class="journey-open" href="#camiones">Ver ficha completa del día</a><button id="journey-hide" type="button">Volver a vista general</button></div>
               </div>
-            </article>
-            <article class="route-highlight most"><span>RUTA MÁS USADA</span><strong id="most-route">Calculando…</strong><small id="most-route-usage">—</small></article>
-            <article class="route-highlight least"><span>RUTA MENOS USADA</span><strong id="least-route">Calculando…</strong><small id="least-route-usage">—</small></article>
-            <article class="geo-model">
-              <span class="eyebrow">PERÍODO ANALIZADO</span>
-              <strong id="geo-model-zones">Clasificación vigente</strong>
-              <small id="geo-model-detail">Preparando la telemetría.</small>
             </article>
           </aside>
         </div>
-        <details class="heatmap-method"><summary>¿Cómo se calcula este mapa?</summary><p id="heatmap-method">Esperando la metodología…</p></details>
+        <details class="heatmap-method"><summary>¿Cómo se clasifican las rutas?</summary><p id="heatmap-method">Esperando la metodología…</p></details>
       </section>
     </div>
     <div id="prediccion" class="dataset-space" data-dataset-view="prediction" hidden>
