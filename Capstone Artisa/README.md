@@ -46,8 +46,7 @@ flowchart LR
 
 | Sección | Contenido |
 |---|---|
-| Camiones (inicio) | Flota en vivo: estado de cada camión (en ruta, detenido, sin señal reciente), lo de hoy y sus km de 14 días. Ficha por camión y día: recorrido completo en el mapa, cinta de 24 horas, viajes y paradas paso a paso, últimos 30 días e imagen descargable del recorrido. |
-| Reportes | Últimos 30 reportes en vivo e historial por día y por mes. |
+| Camiones en vivo (inicio) | Estado de cada camión (en ruta, detenido, sin señal reciente) y lo que hizo hoy o cualquier día anterior. Ficha por camión y día: recorrido en el mapa con cada viaje, paradas, reproducción del día, últimos 30 días, reportes GPS del día e imagen descargable. Abajo, los últimos reportes recibidos en vivo y el resumen del mes con descarga CSV. |
 | Dashboard | Rutas por nivel de uso, ranking y estado de la flota. |
 | Predicción | Pestañas **Mapa de calor** y **Rutas**: hasta 15 días con ruleta de días, rango, recorrido animado, confianza por día y comparación de métodos. |
 | Mapa de rutas | **Rutas clasificadas** (filtros, camiones, recorrido del día, faenas, satélite y densidad GPS) y **Mapas de telemetría** (calor, rutas por camión, uso de rutas y puntos para un rango de hasta 14 días). |

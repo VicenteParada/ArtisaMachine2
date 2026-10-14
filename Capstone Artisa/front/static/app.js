@@ -72,7 +72,7 @@ function clearPassword() {
 
 function logout(message = "") {
   clearSessionWork();
-  if (typeof historyState !== "undefined") Object.assign(historyState, {day: null, month: null, detail: null, loadedOnce: false});
+  if (typeof historyState !== "undefined") Object.assign(historyState, {month: null, detail: null});
   activeMapMode = "historical";
   userChoseMapMode = false;
   for (const wrapper of document.querySelectorAll(".explorer-frame-wrap")) {
@@ -202,8 +202,8 @@ async function api(path, options = {}) {
 }
 
 function syncDatasetView() {
-  let view = "real";
-  if (window.location.hash.startsWith("#camiones")) view = "trucks";
+  let view = "trucks";
+  if (window.location.hash === "#datos-reales") { history.replaceState(null, "", "#camiones"); }
   else if (window.location.hash === "#mapa-calor") view = "heatmap";
   else if (window.location.hash === "#dashboard") view = "dashboard";
   else if (window.location.hash === "#prediccion") view = "prediction";
@@ -222,7 +222,7 @@ function syncDatasetView() {
   }
   $("overview-link").classList.toggle("active", overview);
   document.querySelector(".topbar strong").textContent = overview ? "Arquitectura"
-    : {trucks: "Camiones", heatmap: "Mapa de rutas", prediction: "Predicción", real: "Reportes", dashboard: "Dashboard"}[view];
+    : {trucks: "Camiones en vivo", heatmap: "Mapa de rutas", prediction: "Predicción", dashboard: "Dashboard"}[view];
   for (const link of document.querySelectorAll(".sidebar [data-dataset-link]")) {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
   }
@@ -1422,7 +1422,6 @@ async function refreshTelemetry() {
     if (version !== sessionVersion || !token()) return;
     renderTelemetry(telemetrySummary, telemetryDataset, {});
     telemetryLastOk = new Date();
-    refreshHistory();
   } catch (error) {
     if (version !== sessionVersion || !token()) return;
     if (!$("telemetry-content").hidden) {
@@ -1464,9 +1463,9 @@ function renderTelemetry(summary, dataset, state) {
   $("telemetry-count").textContent = format(summary.reportes || 0);
   $("vehicle-count").textContent = summary.vehiculos === null || summary.vehiculos === undefined
     ? "Sin dato" : format(summary.vehiculos);
-  $("vehicle-count-note").textContent = `Camiones con reportes en las últimas ${format(summary.vehiculos_ventana_horas || 24)} h`;
+  $("vehicle-count-note").textContent = `camiones con reportes en las últimas ${format(summary.vehiculos_ventana_horas || 24)} h`;
   $("telemetry-range").textContent = connection.ultimo_dato
-    ? `Último reporte recibido: ${formatLocal(connection.ultimo_dato)} · último contacto con la API: ${connection.ultimo_exito ? formatLocal(connection.ultimo_exito) : "sin contacto aún"} (hora de Chile)`
+    ? `Último reporte ${formatLocal(connection.ultimo_dato)} · contacto con la API ${connection.ultimo_exito ? formatLocal(connection.ultimo_exito) : "sin contacto aún"}`
     : "La API está configurada, pero todavía no entrega reportes.";
   $("telemetry-quality").textContent =
     `${format(connection.guardados || 0)} guardados · ${format(connection.rechazados || 0)} rechazados de ${format(connection.leidos || 0)} leídos`;
@@ -1603,8 +1602,7 @@ async function refresh() {
     if (state) renderState(state); else problems.push("estado del sistema");
     if (summaryResult.status === "fulfilled" && datasetResult.status === "fulfilled") {
       renderTelemetry(summaryResult.value, datasetResult.value, state || {});
-      refreshHistory();
-    } else problems.push("reportes");
+      } else problems.push("reportes");
     if (mapResult.status === "fulfilled" && window.ArtisaMapData) {
       const mapData = window.ArtisaMapData.adaptMapPayload(mapResult.value);
       renderHeatmap(mapData);
@@ -1634,7 +1632,7 @@ async function refresh() {
 }
 
 // --- Historial diario (00:00 a 00:00 hora de Chile) ---
-var historyState = {day: null, month: null, detail: null, loadedOnce: false};
+var historyState = {month: null, detail: null};
 const isoDayIn = (date, zone = HISTORY_ZONE) =>
   new Intl.DateTimeFormat("en-CA", {timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit"}).format(date);
 const localToday = () => isoDayIn(new Date());
@@ -1675,94 +1673,10 @@ function cell(text, small) {
   return td;
 }
 
-async function loadHistoryDay(day, quiet = false) {
-  if (!day) return;
-  const today = localToday();
-  if (day > today) day = today;
-  historyState.day = day;
-  $("history-date").value = day;
-  $("history-date").max = today;
-  $("history-next").disabled = day >= today;
-  if (!quiet) { $("history-status").textContent = "Consultando…"; $("history-status").className = "status neutral"; }
-  try {
-    const data = await api(`/api/reportes/dia?fecha=${day}`);
-    if (historyState.day !== day) return;
-    renderHistoryDay(data);
-    const month = day.slice(0, 7);
-    if (historyState.month !== month || quiet) loadHistoryMonth(month);
-  } catch (error) {
-    if (historyState.day !== day) return;
-    $("history-status").textContent = "No se pudo consultar";
-    $("history-status").className = "status warning";
-    $("history-note").textContent = error.message + " Se mantienen los últimos datos mostrados.";
-  }
-}
-
-function renderHistoryDay(data) {
-  const zone = data.zona || HISTORY_ZONE;
-  const state = data.estado;
-  const [label, className] = state ? (HISTORY_STATES[state.estado] || [state.estado, "status neutral"])
-    : ["Sin datos para este día", "status neutral"];
-  $("history-status").textContent = label;
-  $("history-status").className = className;
-  $("history-trucks").textContent = state ? format(state.camiones) : "—";
-  $("history-reports").textContent = state ? format(state.reportes) : "—";
-  $("history-discarded").textContent = state && state.descartados
-    ? `${format(state.descartados)} descartados por coordenadas inválidas` : "Reportes GPS válidos";
-  $("history-km").textContent = state ? format(state.km_observados, 1) : "—";
-  $("history-calculated").textContent = state ? formatLocalTime(state.calculado_en, zone) : "—";
-  $("history-calculated-note").textContent = state && state.recalculos
-    ? `Recalculado ${format(state.recalculos)} ${state.recalculos === 1 ? "vez" : "veces"} por reportes atrasados`
-    : "Hora de Chile";
-  $("history-note").textContent = state && state.estado === "esperando_datos"
-    ? "Las cifras son provisorias: el día se cierra cuando la API confirme los reportes hasta las 00:00."
-    : state && state.estado === "en_curso" ? "Cifras parciales del día de hoy; se actualizan cada pocos minutos." : "";
-
-  const body = $("history-rows");
-  body.replaceChildren();
-  for (const truck of data.camiones || []) {
-    const tr = document.createElement("tr");
-    tr.className = "history-row";
-    tr.tabIndex = 0;
-    tr.title = "Ver los reportes de este camión en el día";
-    tr.append(
-      cell(truck.asset_name || "Camión sin nombre", truck.asset_id),
-      cell(format(truck.reportes)),
-      cell(formatLocalTime(truck.primer_reporte, zone)),
-      cell(formatLocalTime(truck.ultimo_reporte, zone)),
-      cell(format(truck.km_observados, 1)),
-      cell(format(truck.viajes), "recorridos entre paradas"),
-      cell(formatMinutes(truck.minutos_detenido), `${format(truck.paradas || 0)} ${Number(truck.paradas) === 1 ? "parada" : "paradas"} de 10 min o más`)
-    );
-    // El recorrido completo del día (mapa e imagen) está en la ficha del camión.
-    const routeCell = document.createElement("td");
-    const routeButton = document.createElement("button");
-    routeButton.type = "button";
-    routeButton.className = "history-route-button";
-    routeButton.textContent = "Ver recorrido";
-    routeButton.addEventListener("click", (event) => { event.stopPropagation(); openTruck(truck.asset_id, data.fecha); });
-    routeCell.append(routeButton);
-    tr.append(routeCell);
-    const open = () => {
-      for (const row of body.querySelectorAll(".is-selected")) row.classList.remove("is-selected");
-      tr.classList.add("is-selected");
-      loadTruckDetail(truck.asset_id, truck.asset_name, data.fecha);
-    };
-    tr.addEventListener("click", open);
-    tr.addEventListener("keydown", (event) => { if (event.key === "Enter") open(); });
-    body.append(tr);
-  }
-  if (!(data.camiones || []).length) {
-    emptyRow(body, 8, state ? "Ningún camión reportó este día." : "Este día todavía no tiene resumen calculado.");
-  }
-  if (historyState.detail && historyState.detail.day !== data.fecha) closeTruckDetail();
-}
-
 async function loadTruckDetail(assetId, assetName, day, after = null) {
   const detail = after ? historyState.detail : {assetId, assetName, day, next: null, hasIgnition: false};
   historyState.detail = detail;
-  $("history-detail").hidden = false;
-  $("history-detail-title").textContent = `Reportes de ${assetName || assetId} · ${day} (hora de Chile)`;
+  $("history-detail-title").textContent = `${assetName || assetId} · ${predictionDayLabel(day, "long")} · hora de Chile`;
   const body = $("history-detail-rows");
   if (!after) { body.replaceChildren(); emptyRow(body, 4, "Cargando reportes…"); }
   $("history-detail-more").hidden = true;
@@ -1796,12 +1710,6 @@ async function loadTruckDetail(assetId, assetName, day, after = null) {
   }
 }
 
-function closeTruckDetail() {
-  historyState.detail = null;
-  $("history-detail").hidden = true;
-  for (const row of document.querySelectorAll("#history-rows .is-selected")) row.classList.remove("is-selected");
-}
-
 async function loadHistoryMonth(month) {
   historyState.month = month;
   $("history-month").value = month;
@@ -1816,7 +1724,7 @@ async function loadHistoryMonth(month) {
       const link = document.createElement("button");
       link.type = "button"; link.className = "history-day-link";
       link.textContent = day.fecha;
-      link.addEventListener("click", () => loadHistoryDay(day.fecha));
+      link.addEventListener("click", () => { setBoardDay(day.fecha); $("fleet-view").scrollIntoView({behavior: "smooth"}); });
       const first = document.createElement("td"); first.append(link);
       const [label] = HISTORY_STATES[day.estado] || [day.estado];
       tr.append(first, cell(label), cell(format(day.camiones)), cell(format(day.reportes)), cell(format(day.km_observados, 1)));
@@ -1889,24 +1797,8 @@ async function downloadHistoryMonth() {
   }
 }
 
-function refreshHistory() {
-  if (!token()) return;
-  if (!historyState.loadedOnce) {
-    historyState.loadedOnce = true;
-    loadHistoryDay(shiftDay(localToday(), -1));
-  } else if (historyState.day === localToday()) {
-    loadHistoryDay(historyState.day, true);  // hoy en curso: se mantiene al día
-  }
-}
-
-$("history-date").addEventListener("change", () => loadHistoryDay($("history-date").value));
-$("history-prev").addEventListener("click", () => loadHistoryDay(shiftDay(historyState.day || localToday(), -1)));
-$("history-next").addEventListener("click", () => loadHistoryDay(shiftDay(historyState.day || localToday(), 1)));
-$("history-yesterday").addEventListener("click", () => loadHistoryDay(shiftDay(localToday(), -1)));
-$("history-today").addEventListener("click", () => loadHistoryDay(localToday()));
 $("history-month").addEventListener("change", () => { if ($("history-month").value) loadHistoryMonth($("history-month").value); });
 $("history-month-download").addEventListener("click", downloadHistoryMonth);
-$("history-detail-close").addEventListener("click", closeTruckDetail);
 $("history-detail-more").addEventListener("click", () => {
   const detail = historyState.detail;
   if (detail && detail.next) loadTruckDetail(detail.assetId, detail.assetName, detail.day, detail.next);
@@ -2516,7 +2408,8 @@ const TRUCK_COLORS = {base: "#9db5aa", halo: "#ffffff", stop: "#e07a1f", start: 
 const TRIP_COLORS = ["#1f6b4f", "#2563eb", "#9333ea", "#0e7490", "#db2777", "#4d7c0f", "#475569"];
 const tripColor = (number) => TRIP_COLORS[(number - 1) % TRIP_COLORS.length];
 const truckView = {fleet: null, filter: "todos", query: "", sort: "nombre", id: null, day: null, detail: null,
-  map: null, layer: null, trips: new Map(), base: [], focus: null, play: null, request: 0};
+  map: null, layer: null, trips: new Map(), base: [], focus: null, play: null, request: 0,
+  boardDay: null, dayRows: null, dayState: null, dayLoading: false};
 
 function truckHash() {
   const match = window.location.hash.match(/^#camiones(?:\/([A-Za-z0-9_-]{1,16}))?(?:\/(\d{4}-\d{2}-\d{2}))?$/);
@@ -2555,8 +2448,6 @@ async function loadFleet() {
     renderFleet();
     if (truckView.detail) renderTruckHead();
   } catch (error) {
-    $("fleet-status").textContent = "No se pudo actualizar";
-    $("fleet-status").className = "status warning";
     if (!truckView.fleet) $("fleet-board").replaceChildren(fleetMessage("No se pudo cargar la flota: " + error.message));
   }
 }
@@ -2590,11 +2481,26 @@ function sparkline(points) {
   return svg;
 }
 
+// El tablero muestra hoy (estado en vivo) o un día anterior (resumen del cierre diario).
+const boardDay = () => truckView.boardDay || localToday();
+const boardIsToday = () => boardDay() === localToday();
+const shortTime = (value) => value ? new Intl.DateTimeFormat("es-CL", {timeStyle: "short", timeZone: HISTORY_ZONE}).format(new Date(value)) : "—";
+
+// Lo que hizo el camión en el día del tablero: {km, viajes, minutos_detenido, primer, ultimo, reportes} o null.
+function truckDay(truck) {
+  if (boardIsToday()) return truck.hoy;
+  const row = truckView.dayRows && truckView.dayRows.get(truck.asset_id);
+  return row ? {km: row.km_observados, viajes: row.viajes, minutos_detenido: row.minutos_detenido,
+    primer: shortTime(row.primer_reporte), ultimo: shortTime(row.ultimo_reporte), reportes: row.reportes} : null;
+}
+
 function fleetRow(truck) {
+  const today = boardIsToday();
+  const day = truckDay(truck);
   const row = document.createElement("button");
   row.type = "button";
-  row.className = "fleet-row state-" + truck.estado;
-  row.addEventListener("click", () => openTruck(truck.asset_id));
+  row.className = "fleet-row state-" + (today ? truck.estado : day ? "dia" : "sin_datos");
+  row.addEventListener("click", () => openTruck(truck.asset_id, today ? null : boardDay()));
   const name = document.createElement("span");
   name.className = "fleet-name";
   const title = document.createElement("strong");
@@ -2605,29 +2511,95 @@ function fleetRow(truck) {
   const state = document.createElement("span");
   state.className = "fleet-state";
   const label = document.createElement("strong");
-  label.innerHTML = '<i class="state-dot"></i>';
-  label.append(TRUCK_STATES[truck.estado] + (truck.estado === "en_ruta" && truck.velocidad ? ` · ${format(truck.velocidad)} km/h` : ""));
-  const age = document.createElement("small");
-  age.textContent = truckAge(truck.edad_minutos);
-  state.append(label, age);
-  const today = document.createElement("span");
-  today.className = "fleet-today";
-  if (truck.hoy) {
-    today.innerHTML = "";
-    for (const [value, unit] of [[format(truck.hoy.km, 1), "km"], [format(truck.hoy.viajes), truck.hoy.viajes === 1 ? "viaje" : "viajes"],
-      [formatMinutes(truck.hoy.minutos_detenido), "detenido"]]) {
+  const note = document.createElement("small");
+  if (today) {
+    label.innerHTML = '<i class="state-dot"></i>';
+    label.append(TRUCK_STATES[truck.estado] + (truck.estado === "en_ruta" && truck.velocidad ? ` · ${format(truck.velocidad)} km/h` : ""));
+    note.textContent = truckAge(truck.edad_minutos);
+  } else {
+    label.textContent = day ? `${(day.primer || "—").slice(0, 5)} – ${(day.ultimo || "—").slice(0, 5)}` : "Sin reportes";
+    note.textContent = day ? `${format(day.reportes)} reportes` : "";
+  }
+  state.append(label, note);
+  const summary = document.createElement("span");
+  summary.className = "fleet-today";
+  if (day) {
+    for (const [value, unit] of [[format(day.km, 1), "km"], [format(day.viajes), day.viajes === 1 ? "viaje" : "viajes"],
+      [formatMinutes(day.minutos_detenido), "detenido"]]) {
       const item = document.createElement("span");
       const strong = document.createElement("b");
       strong.textContent = value;
       item.append(strong, " " + unit);
-      today.append(item);
+      summary.append(item);
     }
   } else {
-    today.textContent = "Sin actividad hoy";
-    today.classList.add("is-empty");
+    summary.textContent = today ? "Sin actividad hoy" : "Sin actividad ese día";
+    summary.classList.add("is-empty");
   }
-  row.append(name, state, today, sparkline(truck.serie || []));
+  row.append(name, state, summary, sparkline(truck.serie || []));
   return row;
+}
+
+function renderBoardDay() {
+  const today = boardIsToday();
+  const day = boardDay();
+  $("board-date").value = day;
+  $("board-date").max = localToday();
+  $("board-next").disabled = today;
+  $("fleet-head-state").textContent = today ? "Último dato" : "Primer y último reporte";
+  $("fleet-head-day").textContent = today ? "Hoy" : "Ese día";
+  // Los estados en vivo solo tienen sentido hoy; en un día anterior se filtra por actividad.
+  for (const button of document.querySelectorAll('[data-fleet-filter]:not([data-fleet-filter="todos"])')) button.hidden = !today;
+  if (!today && truckView.filter !== "todos") truckView.filter = "todos";
+  const totals = $("fleet-day-totals");
+  const fleet = truckView.fleet;
+  const state = truckView.dayState;
+  let note = "";
+  if (today) {
+    const summary = fleet && fleet.resumen;
+    totals.textContent = summary ? `${format(summary.km_hoy, 0)} km · ${format(summary.viajes_hoy)} viajes hoy` : "";
+    note = "Hoy, en curso: las cifras se actualizan cada minuto.";
+  } else if (truckView.dayLoading) {
+    totals.textContent = "";
+    note = "Consultando el día…";
+  } else {
+    totals.textContent = state ? `${format(state.camiones)} camiones con reportes · ${format(state.km_observados, 0)} km · ${format(state.reportes)} reportes` : "";
+    const [label] = state ? (HISTORY_STATES[state.estado] || [state.estado]) : ["Sin resumen calculado para este día"];
+    note = label + (state && state.estado === "esperando_datos" ? ": cifras provisorias hasta que la API confirme los reportes hasta las 00:00." : "") +
+      (state && state.recalculos ? ` · recalculado ${format(state.recalculos)} ${state.recalculos === 1 ? "vez" : "veces"} por reportes atrasados` : "");
+  }
+  $("board-day-note").textContent = `${predictionDayLabel(day, "long")} · ${note}`;
+}
+
+async function setBoardDay(day) {
+  const today = localToday();
+  if (!day || day >= today) {
+    truckView.boardDay = null;
+    renderBoardDay();
+    renderFleet();
+    return;
+  }
+  truckView.boardDay = day;
+  truckView.dayLoading = true;
+  truckView.dayRows = null;
+  truckView.dayState = null;
+  renderBoardDay();
+  renderFleet();
+  try {
+    const data = await api(`/api/reportes/dia?fecha=${day}`);
+    if (truckView.boardDay !== day) return;
+    truckView.dayRows = new Map((data.camiones || []).map((row) => [row.asset_id, row]));
+    truckView.dayState = data.estado;
+  } catch (error) {
+    if (truckView.boardDay !== day) return;
+    $("fleet-board").replaceChildren(fleetMessage("No se pudo consultar el día: " + error.message));
+  } finally {
+    if (truckView.boardDay === day) {
+      truckView.dayLoading = false;
+      renderBoardDay();
+      renderFleet();
+    }
+  }
 }
 
 function renderFleet() {
@@ -2640,11 +2612,12 @@ function renderFleet() {
   for (const key of ["todos", "en_ruta", "detenido", "sin_senal"]) {
     $("fleet-count-" + key).textContent = format(key === "todos" ? summary.total : summary[key] + (key === "sin_senal" ? summary.sin_datos : 0));
   }
-  $("fleet-km-today").textContent = format(summary.km_hoy, 0);
-  $("fleet-status").textContent = `Actualizado ${new Intl.DateTimeFormat("es-CL", {timeStyle: "short", timeZone: HISTORY_ZONE}).format(new Date(data.generado_en))}`;
-  $("fleet-status").className = "status";
   for (const button of document.querySelectorAll("[data-fleet-filter]")) {
     button.setAttribute("aria-pressed", String(button.dataset.fleetFilter === truckView.filter));
+  }
+  if (!boardIsToday() && truckView.dayLoading) {
+    $("fleet-board").replaceChildren(fleetMessage("Cargando el día…"));
+    return;
   }
   const query = truckView.query.trim().toLocaleLowerCase("es-CL");
   let trucks = data.camiones.filter((truck) => truckView.filter === "todos" || truck.estado === truckView.filter
@@ -2654,14 +2627,18 @@ function renderFleet() {
       value && value.toLocaleLowerCase("es-CL").includes(query)));
   }
   const byName = (a, b) => a.nombre.localeCompare(b.nombre, "es-CL", {numeric: true});
+  const km = (truck) => (truckDay(truck) || {}).km || 0;
   const sorters = {
     nombre: byName,
-    km: (a, b) => ((b.hoy && b.hoy.km) || 0) - ((a.hoy && a.hoy.km) || 0) || byName(a, b),
+    km: (a, b) => km(b) - km(a) || byName(a, b),
     dato: (a, b) => (a.edad_minutos ?? Infinity) - (b.edad_minutos ?? Infinity) || byName(a, b)
   };
   trucks.sort(sorters[truckView.sort] || byName);
+  // En un día anterior, primero los que tuvieron actividad.
+  if (!boardIsToday()) trucks.sort((a, b) => Number(Boolean(truckDay(b))) - Number(Boolean(truckDay(a))));
   $("fleet-board").replaceChildren(...(trucks.length ? trucks.map(fleetRow)
     : [fleetMessage(query ? "Ningún camión coincide con la búsqueda." : "No hay camiones en este estado.")]));
+  renderBoardDay();
 }
 
 async function loadTruckDay(id, day, quiet = false) {
@@ -2673,6 +2650,11 @@ async function loadTruckDay(id, day, quiet = false) {
   $("truck-next").disabled = day >= localToday();
   if (!quiet) {
     stopTruckPlay();
+    // La lista de reportes GPS es del día anterior: se cierra y se vuelve a pedir al abrirla.
+    historyState.detail = null;
+    $("history-detail").open = false;
+    $("history-detail-rows").replaceChildren();
+    $("history-detail-more").hidden = true;
     $("truck-day-note").textContent = "Cargando el día…";
     $("truck-image").disabled = true;
   }
@@ -3494,6 +3476,18 @@ $("truck-today").addEventListener("click", () => openTruck(truckView.id, localTo
 $("truck-yesterday").addEventListener("click", () => openTruck(truckView.id, shiftDay(localToday(), -1)));
 $("truck-image").addEventListener("click", downloadTruckImage);
 $("truck-play").addEventListener("click", toggleTruckPlay);
+$("history-detail").addEventListener("toggle", () => {
+  const detail = truckView.detail;
+  if ($("history-detail").open && detail && !historyState.detail) loadTruckDetail(detail.asset_id, detail.nombre, detail.fecha);
+});
+$("board-date").addEventListener("change", () => setBoardDay($("board-date").value));
+$("board-prev").addEventListener("click", () => setBoardDay(shiftDay(boardDay(), -1)));
+$("board-next").addEventListener("click", () => setBoardDay(shiftDay(boardDay(), 1)));
+$("board-today").addEventListener("click", () => setBoardDay(null));
+$("board-yesterday").addEventListener("click", () => setBoardDay(shiftDay(localToday(), -1)));
+$("month-panel").addEventListener("toggle", () => {
+  if ($("month-panel").open && historyState.month !== boardDay().slice(0, 7)) loadHistoryMonth(boardDay().slice(0, 7));
+});
 $("truck-show-all").addEventListener("click", showWholeDay);
 window.addEventListener("hashchange", () => { if (!truckHash()) stopTruckPlay(); });
 setInterval(() => {

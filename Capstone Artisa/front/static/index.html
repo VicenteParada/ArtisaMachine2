@@ -6,11 +6,11 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/style.css?v=20261014-angelo">
+  <link rel="stylesheet" href="/style.css?v=20261014-envivo">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
   <script src="/map-data.js" defer></script>
-  <script src="/app.js?v=20261014-angelo" defer></script>
+  <script src="/app.js?v=20261014-envivo" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -57,10 +57,9 @@
     <a class="brand" href="/" aria-label="Artisa, inicio">    <img src="/artisa-logo.png?v=2" alt="Artisa Transportes"></a>
     <div class="nav-label">ESPACIO DE TRABAJO</div>
     <nav aria-label="Navegación principal">
-      <a data-dataset-link="trucks" href="#camiones"><span>⛟</span> Camiones</a>
+      <a data-dataset-link="trucks" href="#camiones"><span>⛟</span> Camiones en vivo</a>
       <a data-dataset-link="heatmap" href="#mapa-calor"><span>◉</span> Mapa de rutas</a>
       <a data-dataset-link="prediction" href="#prediccion"><span>◈</span> Predicción</a>
-      <a data-dataset-link="real" href="#datos-reales"><span>⌖</span> Reportes</a>
       <a data-dataset-link="dashboard" href="#dashboard"><span>▥</span> Dashboard</a>
       <a id="overview-link" href="#flujo"><span>▦</span> Arquitectura</a>
     </nav>
@@ -100,32 +99,63 @@
       <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada minuto</span></div>
     </section>
     <nav class="dataset-tabs" aria-label="Espacios de análisis">
-      <a class="dataset-tab" data-dataset-tab="trucks" href="#camiones"><span class="dataset-icon">⛟</span><span><strong>Camiones</strong><small>Dónde están y qué hicieron</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="trucks" href="#camiones"><span class="dataset-icon">⛟</span><span><strong>Camiones en vivo</strong><small>Dónde están y qué hicieron</small></span></a>
       <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de rutas</strong><small>Rutas más y menos usadas</small></span></a>
       <a class="dataset-tab" data-dataset-tab="prediction" href="#prediccion"><span class="dataset-icon">◈</span><span><strong>Predicción</strong><small>Próximos 15 días</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="real" href="#datos-reales"><span class="dataset-icon">⌖</span><span><strong>Reportes</strong><small>Historial por día y mes</small></span></a>
       <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores de la flota</small></span></a>
     </nav>
     <div id="camiones" class="dataset-space" data-dataset-view="trucks" hidden>
       <section class="panel trucks-panel" aria-labelledby="fleet-title">
         <div id="fleet-view">
-          <div class="section-top"><div><h2 id="fleet-title">Camiones</h2><p class="fleet-lede">Dónde está cada camión según su último reporte GPS. Elige uno para ver todo lo que hizo en el día.</p></div><span id="fleet-status" class="status neutral">Cargando…</span></div>
-          <div class="fleet-filters" role="group" aria-label="Filtrar por estado">
+          <div class="section-top">
+            <div><h2 id="fleet-title">Camiones en vivo</h2><p class="fleet-lede">Dónde está cada camión y qué hizo cada día. Elige uno para ver su recorrido, sus paradas y sus reportes.</p></div>
+            <span id="telemetry-status" class="status neutral">Conectando…</span>
+          </div>
+          <div id="telemetry-connection" class="telemetry-connection warning" role="status" aria-live="polite" hidden></div>
+          <p id="telemetry-pending" class="fleet-api-pending" role="status" hidden>La API de la empresa aún no está conectada: se muestran los datos históricos disponibles.</p>
+          <div class="board-day">
+            <div class="board-day-controls">
+              <button type="button" class="button secondary" id="board-prev" aria-label="Día anterior">◀</button>
+              <input type="date" id="board-date" aria-label="Día a revisar">
+              <button type="button" class="button secondary" id="board-next" aria-label="Día siguiente">▶</button>
+              <button type="button" class="button secondary" id="board-today">Hoy</button>
+              <button type="button" class="button secondary" id="board-yesterday">Ayer</button>
+            </div>
+            <p id="board-day-note" class="board-day-note" aria-live="polite"></p>
+          </div>
+          <div class="fleet-filters" id="fleet-filters" role="group" aria-label="Filtrar por estado">
             <button type="button" class="fleet-filter" data-fleet-filter="todos" aria-pressed="true"><strong id="fleet-count-todos">—</strong><span>Todos</span></button>
             <button type="button" class="fleet-filter" data-fleet-filter="en_ruta" aria-pressed="false"><i class="state-dot en_ruta"></i><strong id="fleet-count-en_ruta">—</strong><span>En ruta</span></button>
             <button type="button" class="fleet-filter" data-fleet-filter="detenido" aria-pressed="false"><i class="state-dot detenido"></i><strong id="fleet-count-detenido">—</strong><span>Detenidos</span></button>
             <button type="button" class="fleet-filter" data-fleet-filter="sin_senal" aria-pressed="false"><i class="state-dot sin_senal"></i><strong id="fleet-count-sin_senal">—</strong><span>Sin señal reciente</span></button>
-            <div class="fleet-today-total"><strong id="fleet-km-today">—</strong><span>km de la flota hoy</span></div>
+            <div class="fleet-day-totals" id="fleet-day-totals"></div>
           </div>
           <div class="fleet-tools">
             <input type="search" id="fleet-search" placeholder="Buscar por camión, patente o conductor" aria-label="Buscar camión">
-            <label class="fleet-sort">Ordenar <select id="fleet-sort"><option value="nombre">por nombre</option><option value="km">por km de hoy</option><option value="dato">por último dato</option></select></label>
+            <label class="fleet-sort">Ordenar <select id="fleet-sort"><option value="nombre">por nombre</option><option value="km">por km del día</option><option value="dato">por último dato</option></select></label>
           </div>
-          <div class="fleet-board-head" aria-hidden="true"><span>Camión</span><span>Último dato</span><span>Hoy</span><span>Km últimos 14 días</span></div>
+          <div class="fleet-board-head" aria-hidden="true"><span>Camión</span><span id="fleet-head-state">Último dato</span><span id="fleet-head-day">Hoy</span><span>Km últimos 14 días</span></div>
           <div id="fleet-board" class="fleet-board" aria-live="polite"><p class="fleet-empty">Cargando la flota…</p></div>
+
+          <details class="fleet-more" id="live-reports">
+            <summary><span>Últimos reportes recibidos</span><small id="telemetry-range">Se actualiza cada minuto</small></summary>
+            <div id="telemetry-content">
+              <p class="fleet-more-note"><strong id="telemetry-count">—</strong> reportes guardados · <strong id="vehicle-count">—</strong> <span id="vehicle-count-note">camiones con reportes en las últimas 24 h</span> · <span id="telemetry-quality"></span></p>
+              <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha (hora Chile)</th><th>Evento</th><th>Coordenadas</th><th class="col-ignition">Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
+            </div>
+          </details>
+          <details class="fleet-more" id="month-panel">
+            <summary><span>Resumen del mes y descarga CSV</span><small>Un día por fila; el CSV trae el detalle de cada camión</small></summary>
+            <div class="history-month-actions">
+              <input type="month" id="history-month" aria-label="Mes a consultar">
+              <button type="button" class="button secondary" id="history-month-download">↓ Descargar CSV del mes</button>
+            </div>
+            <p id="history-month-download-status" class="history-download-status" aria-live="polite"></p>
+            <div class="table-scroll telemetry-table"><table><thead><tr><th>Día</th><th>Estado</th><th>Camiones</th><th>Reportes</th><th>Km observados</th></tr></thead><tbody id="history-month-rows"></tbody></table></div>
+          </details>
         </div>
         <div id="truck-view" hidden>
-          <button type="button" id="truck-back" class="text-button truck-back">← Todos los camiones</button>
+          <button type="button" id="truck-back" class="text-button truck-back">← Camiones en vivo</button>
           <div class="truck-head">
             <img class="truck-head-glyph" src="/artisa-truck-box-white-green.png?v=20261014" alt="" aria-hidden="true">
             <div class="truck-head-name"><h2 id="truck-name">—</h2><p id="truck-meta">—</p></div>
@@ -178,59 +208,11 @@
             <div class="truck-history-head"><h3>Últimos 30 días</h3><span>Km por día · toca un día para verlo</span></div>
             <div id="truck-history" class="truck-history-bars"></div>
           </div>
-        </div>
-      </section>
-    </div>
-    <div id="datos-reales" class="dataset-space" data-dataset-view="real">
-      <section id="telemetria" class="panel telemetry-panel">
-        <div class="section-top"><div><span class="eyebrow">02 / REPORTES</span><h2>Telemetría de la empresa</h2></div><span id="telemetry-status" class="status neutral">Pendiente de API empresa</span></div>
-        <div id="telemetry-pending" role="status">
-          <h3>Telemetría pendiente de integración</h3>
-          <p class="telemetry-intro">Esta sección quedará disponible cuando se conecte la API de telemetría de la empresa.</p>
-        </div>
-        <div id="telemetry-content" hidden>
-        <div id="telemetry-connection" class="telemetry-connection warning" role="status" aria-live="polite" hidden></div>
-        <div class="real-metrics" aria-label="Resumen de telemetría real">
-          <article><span>Reportes guardados</span><strong id="telemetry-count">—</strong><small>Tabla: últimos 30 reportes de camiones · se actualiza cada minuto</small></article>
-          <article><span>Camiones activos</span><strong id="vehicle-count">—</strong><small id="vehicle-count-note">Camiones con reportes en las últimas 24 h</small></article>
-        </div>
-        <div class="telemetry-range"><span id="telemetry-range">Esperando rango temporal…</span><span id="telemetry-quality">Esperando control de calidad…</span></div>
-        <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha (hora Chile)</th><th>Evento</th><th>Coordenadas</th><th class="col-ignition">Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
-        </div>
-      </section>
-      <section id="historial" class="panel telemetry-panel history-panel">
-        <div class="section-top"><div><span class="eyebrow">REPORTES DIARIOS</span><h2>Historial por día</h2></div><span id="history-status" class="status neutral">Cargando…</span></div>
-        <p class="telemetry-intro">Cada día va de 00:00 a 00:00, hora de Chile. Al pasar la medianoche el día se cierra y queda disponible para consulta. Si después llegan reportes atrasados de ese día (por ejemplo, tras un corte de red), el día se recalcula solo. Un viaje es el recorrido entre dos paradas (detenido al menos 10 min en el mismo lugar); el tiempo detenido, por ejemplo al cargar, no separa viajes y se muestra aparte. Los kilómetros solo suman tramos entre reportes seguidos; no se inventa recorrido.</p>
-        <div class="history-controls">
-          <button type="button" class="button secondary" id="history-prev" aria-label="Día anterior al seleccionado">◀</button>
-          <input type="date" id="history-date" aria-label="Día a consultar">
-          <button type="button" class="button secondary" id="history-next" aria-label="Día siguiente al seleccionado">▶</button>
-          <button type="button" class="button secondary" id="history-yesterday">Ayer</button>
-          <button type="button" class="button secondary" id="history-today">Hoy</button>
-          <span id="history-note" class="history-note"></span>
-        </div>
-        <div class="real-metrics history-metrics" aria-label="Resumen del día">
-          <article><span>Camiones</span><strong id="history-trucks">—</strong><small>Con al menos un reporte en el día</small></article>
-          <article><span>Reportes</span><strong id="history-reports">—</strong><small id="history-discarded">Reportes GPS válidos</small></article>
-          <article><span>Km observados</span><strong id="history-km">—</strong><small>Suma de tramos unidos</small></article>
-          <article><span>Último cálculo</span><strong id="history-calculated">—</strong><small id="history-calculated-note">Hora de Chile</small></article>
-        </div>
-        <div class="table-scroll telemetry-table"><table><thead><tr><th>Camión</th><th>Reportes</th><th>Primer reporte</th><th>Último reporte</th><th>Km observados</th><th>Viajes</th><th>Tiempo detenido</th><th><span class="sr-only">Recorrido</span></th></tr></thead><tbody id="history-rows"><tr><td colspan="8" class="empty">Selecciona un día.</td></tr></tbody></table></div>
-        <div id="history-detail" class="history-detail" hidden>
-          <div class="section-top"><h3 id="history-detail-title">Reportes del camión</h3><button type="button" class="text-button" id="history-detail-close">Cerrar</button></div>
-          <div class="table-scroll telemetry-table"><table><thead><tr><th>Hora (Chile)</th><th>Evento</th><th>Coordenadas</th><th class="col-ignition">Encendido</th></tr></thead><tbody id="history-detail-rows"></tbody></table></div>
-          <button type="button" class="button secondary" id="history-detail-more" hidden>Cargar más reportes</button>
-        </div>
-        <div class="history-month">
-          <div class="section-top history-month-heading">
-            <div><h3>Resumen del mes</h3><small>Descarga el detalle diario de todos los camiones del mes seleccionado.</small></div>
-            <div class="history-month-actions">
-              <input type="month" id="history-month" aria-label="Mes a consultar">
-              <button type="button" class="button secondary" id="history-month-download">↓ Descargar CSV</button>
-            </div>
-          </div>
-          <p id="history-month-download-status" class="history-download-status" aria-live="polite"></p>
-          <div class="table-scroll telemetry-table"><table><thead><tr><th>Día</th><th>Estado</th><th>Camiones</th><th>Reportes</th><th>Km observados</th></tr></thead><tbody id="history-month-rows"></tbody></table></div>
+          <details class="fleet-more" id="history-detail">
+            <summary><span>Reportes GPS del día</span><small id="history-detail-title">La lista completa, en orden</small></summary>
+            <div class="table-scroll telemetry-table"><table><thead><tr><th>Hora (Chile)</th><th>Evento</th><th>Coordenadas</th><th class="col-ignition">Encendido</th></tr></thead><tbody id="history-detail-rows"></tbody></table></div>
+            <button type="button" class="button secondary" id="history-detail-more" hidden>Cargar más reportes</button>
+          </details>
         </div>
       </section>
     </div>

@@ -18,14 +18,12 @@
   .arrow-b{ grid-column: 2; grid-row: 2; transform: rotate(135deg); }
 }
 
-.telemetry-panel{margin:0 0 22px}.telemetry-intro{max-width:820px;margin:14px 0 20px;color:var(--muted);font-size:11px;line-height:1.7}.real-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.real-metrics article{min-width:0;border:1px solid var(--line);border-radius:7px;background:#f7faf5;padding:16px}.real-metrics article>span{display:block;color:var(--muted);font-size:10px}.real-metrics strong{display:block;margin:8px 0 5px;font-size:25px;font-weight:600;letter-spacing:-.8px}.real-metrics small{display:block;color:var(--muted);font-size:8px;line-height:1.5}.telemetry-range{display:flex;justify-content:space-between;gap:16px;margin-top:17px;padding:12px 2px;border-bottom:1px solid var(--line);color:var(--muted);font-size:9px;line-height:1.5}.telemetry-table{max-height:410px;margin-top:0}.telemetry-table td:nth-child(4){font-variant-numeric:tabular-nums}.telemetry-table td:first-child{white-space:normal;min-width:150px}
+.telemetry-intro{max-width:820px;margin:14px 0 20px;color:var(--muted);font-size:11px;line-height:1.7}.real-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.real-metrics article{min-width:0;border:1px solid var(--line);border-radius:7px;background:#f7faf5;padding:16px}.real-metrics article>span{display:block;color:var(--muted);font-size:10px}.real-metrics strong{display:block;margin:8px 0 5px;font-size:25px;font-weight:600;letter-spacing:-.8px}.real-metrics small{display:block;color:var(--muted);font-size:8px;line-height:1.5}.telemetry-table{max-height:410px;margin-top:0}.telemetry-table td:nth-child(4){font-variant-numeric:tabular-nums}.telemetry-table td:first-child{white-space:normal;min-width:150px}
 @media(max-width:940px){.real-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:690px){.telemetry-range{flex-direction:column;gap:4px}.telemetry-table{max-height:360px}}
+@media(max-width:690px){.telemetry-table{max-height:360px}}
 @media(max-width:380px){.real-metrics{grid-template-columns:minmax(0,1fr)}}
-.telemetry-panel .real-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
-@media(max-width:380px){.telemetry-panel .real-metrics{grid-template-columns:minmax(0,1fr)}}
 
-.dataset-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:22px 0 0;padding:0 14px;border-bottom:1px solid var(--line)}.dataset-tab{display:flex;align-items:center;gap:13px;position:relative;top:1px;padding:15px 18px;border:1px solid var(--line);border-bottom-color:var(--line);border-radius:9px 9px 0 0;background:#e9eeea;color:var(--muted)}.dataset-tab:hover{background:#f1f4ef;color:var(--ink)}.dataset-tab.is-active{background:#fff;color:var(--ink);border-bottom-color:#fff}.dataset-tab.is-active:after{content:"";position:absolute;inset:auto 14px -1px;height:3px;background:var(--green);border-radius:3px}.dataset-tab>span:last-child{display:grid;gap:4px}.dataset-tab strong{font-size:12px}.dataset-tab small{font-size:9px;color:var(--muted)}.dataset-icon{display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border-radius:6px;background:#dce6df;color:var(--green);font-size:20px}.dataset-tab.is-active .dataset-icon{background:var(--lime);color:#254e40}.dataset-space{padding-top:14px}.dataset-space .telemetry-panel{margin-bottom:0}
+.dataset-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:22px 0 0;padding:0 14px;border-bottom:1px solid var(--line)}.dataset-tab{display:flex;align-items:center;gap:13px;position:relative;top:1px;padding:15px 18px;border:1px solid var(--line);border-bottom-color:var(--line);border-radius:9px 9px 0 0;background:#e9eeea;color:var(--muted)}.dataset-tab:hover{background:#f1f4ef;color:var(--ink)}.dataset-tab.is-active{background:#fff;color:var(--ink);border-bottom-color:#fff}.dataset-tab.is-active:after{content:"";position:absolute;inset:auto 14px -1px;height:3px;background:var(--green);border-radius:3px}.dataset-tab>span:last-child{display:grid;gap:4px}.dataset-tab strong{font-size:12px}.dataset-tab small{font-size:9px;color:var(--muted)}.dataset-icon{display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border-radius:6px;background:#dce6df;color:var(--green);font-size:20px}.dataset-tab.is-active .dataset-icon{background:var(--lime);color:#254e40}.dataset-space{padding-top:14px}.dataset-space .telemetry-panel{margin-bottom:0}
 @media(max-width:690px){.dataset-tabs{padding:0;gap:5px}.dataset-tab{padding:11px 10px;gap:8px}.dataset-tab small{display:none}.dataset-icon{width:28px;height:28px;flex-basis:28px}.dataset-space{padding-top:10px}}
 
 .heatmap-layout{display:grid;grid-template-columns:minmax(0,1fr) 285px;gap:15px;margin-top:16px}.map-card{min-width:0;border:1px solid var(--line);border-radius:8px;padding:15px;background:#f8faf7}.map-title{display:flex;justify-content:space-between;gap:12px;align-items:start;margin-bottom:10px}.map-title>div{display:grid;gap:4px}.map-title strong{font-size:12px}.map-title small,.map-title>span{color:var(--muted);font-size:9px}.heatmap-map{display:block;width:100%;height:auto;min-height:300px;border-radius:7px;background:#e7eee8}.heat-legend{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:8px;margin-top:11px}.heat-legend i{width:18px;height:7px;border-radius:4px}.heat-legend i:nth-of-type(1){background:#dc2626}.heat-legend i:nth-of-type(2){background:#f97316}.heat-legend i:nth-of-type(3){background:#14532d}.heat-legend b{margin-left:auto;color:var(--ink);font-weight:500}.route-insights{display:grid;gap:12px}.route-highlight{border:1px solid var(--line);border-radius:7px;padding:16px;background:#fbfcfa}.route-highlight>span{font-size:8px;letter-spacing:1px;font-weight:700;color:var(--muted)}.route-highlight strong{display:block;margin:10px 0 7px;font-size:12px;line-height:1.55;overflow-wrap:anywhere}.route-highlight small{color:var(--muted);font-size:10px}.route-highlight.most{border-left:4px solid #14532d}.route-highlight.least{border-left:4px solid #dc2626}.heatmap-method{margin-top:18px}.heatmap-metrics strong{font-size:24px}
@@ -86,7 +84,7 @@
 .dashboard-highlights{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr);gap:14px}.dashboard-highlights article{border:1px solid #cbd9cf;border-left:5px solid var(--green);border-radius:8px;padding:17px;background:#edf5ee}.dashboard-highlights span{display:block;color:var(--muted);font-size:8px;font-weight:750;letter-spacing:1px}.dashboard-highlights strong{display:block;margin:8px 0 5px;font-size:18px}.dashboard-highlights small{color:var(--muted);font-size:9px}
 .dashboard-method{display:flex;justify-content:space-between;gap:24px;margin-top:16px;border-top:1px solid var(--line);padding-top:14px;color:var(--muted);font-size:9px;line-height:1.55}.dashboard-method strong{flex:0 0 auto;color:var(--ink)}
 @media(max-width:1150px){.dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-donut-wrap{grid-template-columns:125px minmax(0,1fr);gap:16px}.dashboard-donut{width:125px}.dashboard-donut>div{inset:23px}}
-@media(max-width:940px){.dataset-tabs{grid-template-columns:repeat(5,minmax(0,1fr))}.dashboard-grid{grid-template-columns:minmax(0,1fr)}.dashboard-wide,.dashboard-highlights{grid-column:auto}}
+@media(max-width:940px){.dataset-tabs{grid-template-columns:repeat(4,minmax(0,1fr))}.dashboard-grid{grid-template-columns:minmax(0,1fr)}.dashboard-wide,.dashboard-highlights{grid-column:auto}}
 @media(max-width:690px){.dashboard-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.dashboard-kpis article{padding:14px}.dashboard-kpis strong{font-size:23px}.dashboard-card{padding:15px}.dashboard-bars.routes{grid-template-columns:minmax(0,1fr)}.dashboard-highlights{grid-template-columns:minmax(0,1fr)}.dashboard-method{flex-direction:column;gap:5px}.dashboard-donut-wrap{grid-template-columns:115px minmax(0,1fr)}.dashboard-donut{width:115px}.dashboard-donut>div{inset:21px}}
 @media(max-width:380px){.dashboard-kpis{grid-template-columns:minmax(0,1fr)}.dashboard-donut-wrap{grid-template-columns:minmax(0,1fr);justify-items:center}.dashboard-donut-legend{width:100%}}
 /* Portada fotográfica de Transportes Artisa */
@@ -412,9 +410,8 @@
 .map-card.showing-history .map-title-actions,.map-card.showing-history #heatmap-zones{display:none!important}
 @media(max-width:690px){.map-view-stage .explorer-frame-wrap iframe{height:600px}}
 .telemetry-connection{margin:0 0 14px;padding:12px 14px;border-radius:7px;font-size:11px;line-height:1.6;border:1px solid #ebcfbc;background:#fff4ec;color:#7a3f22}.telemetry-connection.info{border-color:#bed2f1;background:#eef4ff;color:#23538f}.telemetry-table td small.age-recent{color:var(--green);font-weight:600}.telemetry-table td small.age-old{color:#a6532d}
-.history-panel{margin-top:22px}.history-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 16px}.history-controls .button{padding:9px 12px}.history-controls input{padding:8px 10px;border:1px solid var(--line);border-radius:5px;font-size:12px;color:var(--ink);background:#fbfcfa}.history-note{color:var(--muted);font-size:10px}.history-panel .history-metrics{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:6px}.history-row{cursor:pointer}.history-row:hover td,.history-row.is-selected td{background:#f1f7ec}.history-detail{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}.history-detail .button{margin-top:10px}.history-month{margin-top:22px;padding-top:12px;border-top:1px solid var(--line)}.history-month-heading>div:first-child{display:grid;gap:5px}.history-month-heading h3{margin:0}.history-month-heading small{color:var(--muted);font-size:9px}.history-month-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.history-month input{padding:7px 9px;border:1px solid var(--line);border-radius:5px;font-size:11px}.history-month-actions .button{padding:8px 11px}.history-download-status{min-height:16px;margin:8px 0 0;color:var(--muted);font-size:9px;text-align:right}.history-download-status.is-error{color:#a6532d}.history-day-link{background:none;border:0;padding:0;color:var(--green);font-weight:600;cursor:pointer}
-@media(max-width:690px){.history-month-heading{align-items:stretch;flex-direction:column}.history-month-actions{justify-content:flex-start}.history-download-status{text-align:left}}
-@media(max-width:690px){.history-panel .history-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.history-month-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.history-month-actions input{padding:7px 9px;border:1px solid var(--line);border-radius:5px;font-size:11px}.history-month-actions .button{padding:8px 11px}.history-download-status{min-height:16px;margin:8px 0 0;color:var(--muted);font-size:9px;text-align:right}.history-download-status.is-error{color:#a6532d}.history-day-link{background:none;border:0;padding:0;color:var(--green);font-weight:600;cursor:pointer}
+@media(max-width:690px){.history-month-actions{justify-content:flex-start}.history-download-status{text-align:left}}
 .no-ignition .col-ignition{display:none}
 .leaflet-tooltip.route-endpoint{font-size:11px;font-weight:700;color:#0b1f1a;background:#fff;border:2px solid #0b1f1a;border-radius:6px;padding:3px 7px;box-shadow:0 2px 6px rgba(0,0,0,.25)}
 
@@ -528,8 +525,7 @@
 .fleet-filter[aria-pressed="true"]{border-color:var(--ink);background:var(--ink);color:#fff}
 .fleet-filter[aria-pressed="true"] span{color:#d5e1dc}
 .fleet-filter:focus-visible,.fleet-row:focus-visible,.history-bar:focus-visible,.truck-events .event.move:focus-visible{outline:2px solid var(--green);outline-offset:2px}
-.fleet-today-total{display:flex;align-items:baseline;gap:7px;margin-left:auto;padding:10px 4px;color:var(--muted);font-size:12px}
-.fleet-today-total strong{color:var(--ink);font-size:20px;font-variant-numeric:tabular-nums}
+.fleet-day-totals{margin-left:auto;padding:10px 4px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .fleet-tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
 .fleet-tools input{flex:1 1 280px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);font-size:13px}
 .fleet-sort{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
@@ -555,7 +551,7 @@
 .fleet-spark rect.empty{fill:#e3e9e6}
 .fleet-empty{margin:0;padding:30px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center;font-size:12px}
 @media(max-width:940px){.fleet-board-head{display:none}.fleet-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.fleet-spark{width:100%}}
-@media(max-width:560px){.fleet-row{grid-template-columns:minmax(0,1fr)}.fleet-today-total{margin-left:0}}
+@media(max-width:560px){.fleet-row{grid-template-columns:minmax(0,1fr)}.fleet-day-totals{margin-left:0}}
 
 .truck-back{margin:0 0 14px;padding:0;border:0;background:none;color:var(--green);font-size:12px;font-weight:600;cursor:pointer}
 .truck-head{display:flex;flex-wrap:wrap;align-items:center;gap:16px}
@@ -647,8 +643,6 @@
 .history-bar.is-selected i{background:#172d32}
 .history-bar.is-selected span{color:var(--ink);font-weight:700}
 @media(max-width:560px){.truck-history-bars{gap:2px}.history-bar span{font-size:7px}}
-.history-route-button{padding:5px 9px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--green);font-size:11px;font-weight:600;white-space:nowrap;cursor:pointer}
-.history-route-button:hover{border-color:var(--green)}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 .truck-pin.group{display:inline-flex;gap:0;min-width:0;height:auto;padding:0;overflow:hidden;background:#fff;border-width:2px}
 .truck-pin.group b{display:grid;place-items:center;min-width:22px;height:22px;padding:0 6px;font-size:11px}
@@ -656,3 +650,27 @@
 .truck-pin.group b.stop{background:#e07a1f}
 .truck-pin.group b.end{background:#172d32}
 .truck-pin.group b+b{border-left:2px solid #fff}
+
+/* Camiones en vivo: día del tablero y paneles plegables */
+.board-day{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:16px 0 4px}
+.board-day-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.board-day-controls .button{padding:9px 12px}
+.board-day-controls input{padding:8px 10px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);font-size:12px}
+.board-day-note{margin:0;color:var(--muted);font-size:12px}
+.board-day-note::first-letter{text-transform:uppercase}
+.fleet-api-pending{margin:12px 0 0;color:var(--muted);font-size:12px}
+.fleet-row.state-dia::before{background:#9fc3b0}
+.fleet-more{margin-top:14px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.fleet-more>summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:14px 16px;cursor:pointer;list-style:none}
+.fleet-more>summary::-webkit-details-marker{display:none}
+.fleet-more>summary::before{content:"▸";color:var(--green);transition:transform .15s}
+.fleet-more[open]>summary::before{transform:rotate(90deg)}
+.fleet-more>summary span{font-size:14px;font-weight:600}
+.fleet-more>summary small{color:var(--muted);font-size:11px}
+.fleet-more>*:not(summary){margin-left:16px;margin-right:16px}
+.fleet-more>*:last-child{margin-bottom:16px}
+.fleet-more-note{margin-top:0;color:var(--muted);font-size:11px}
+.fleet-more-note strong{color:var(--ink)}
+.fleet-more .history-month-actions{justify-content:flex-start;margin-bottom:4px}
+.fleet-more .history-download-status{text-align:left}
+#history-detail .button{margin-top:10px}
