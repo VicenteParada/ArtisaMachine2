@@ -686,3 +686,14 @@
 #live-reports .telemetry-table,#month-panel .telemetry-table{max-height:calc(100vh - 330px);min-height:320px}
 @media(max-width:690px){.fleet-tab{padding:9px 8px}.fleet-tab small{display:none}}
 #history-detail .button{margin-top:10px}
+.report-row{cursor:pointer}
+.report-row:hover td,.report-row:focus-visible td{background:#f1f7ec}
+.report-row:focus-visible{outline:2px solid var(--green);outline-offset:-2px}
+.report-pin{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;gap:6px}
+.report-pin b{display:block;width:16px;height:16px;border:3px solid #fff;border-radius:50%;background:#c0392b;box-shadow:0 0 0 6px rgba(192,57,43,.25),0 2px 6px rgba(23,45,50,.35);animation:report-pulse 1.6s ease-out infinite}
+.report-pin em{position:absolute;left:16px;padding:2px 7px;border-radius:9px;background:#c0392b;color:#fff;font-size:11px;font-style:normal;font-weight:700;white-space:nowrap;box-shadow:0 2px 6px rgba(23,45,50,.3)}
+@keyframes report-pulse{0%{box-shadow:0 0 0 0 rgba(192,57,43,.45),0 2px 6px rgba(23,45,50,.35)}100%{box-shadow:0 0 0 14px rgba(192,57,43,0),0 2px 6px rgba(23,45,50,.35)}}
+@media(prefers-reduced-motion:reduce){.report-pin b{animation:none}}
+.ribbon-pin{position:absolute;top:-5px;bottom:-5px;width:3px;margin-left:-1px;border-radius:2px;background:#c0392b;box-shadow:0 0 0 2px #fff}
+.truck-events .event.is-report{background:#fdf0ee;box-shadow:inset 3px 0 0 #c0392b}
+.truck-events .event.is-report strong::after{content:" · aquí estaba en el reporte";color:#c0392b;font-weight:600}

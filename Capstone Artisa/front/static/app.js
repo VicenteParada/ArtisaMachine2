@@ -1491,6 +1491,15 @@ function renderTelemetry(summary, dataset, state) {
   body.replaceChildren();
   for (const report of reports) {
     const tr = document.createElement("tr");
+    // Cada reporte lleva a la ficha del camión ese día, marcando dónde estaba en ese momento.
+    if (report.asset_id && report.report_date) {
+      tr.className = "report-row";
+      tr.tabIndex = 0;
+      tr.title = "Ver el recorrido de este camión y dónde estaba en este reporte";
+      const open = () => openTruckAtReport(report);
+      tr.addEventListener("click", open);
+      tr.addEventListener("keydown", (event) => { if (event.key === "Enter") open(); });
+    }
     const vehicle = document.createElement("td");
     vehicle.textContent = report.asset_name || "Vehículo sin nombre";
     const assetId = document.createElement("small");
@@ -2411,11 +2420,23 @@ const TRIP_COLORS = ["#1f6b4f", "#2563eb", "#9333ea", "#0e7490", "#db2777", "#4d
 const tripColor = (number) => TRIP_COLORS[(number - 1) % TRIP_COLORS.length];
 const truckView = {fleet: null, filter: "todos", query: "", sort: "nombre", id: null, day: null, detail: null,
   map: null, layer: null, trips: new Map(), base: [], focus: null, play: null, request: 0,
-  boardDay: null, dayRows: null, dayState: null, dayLoading: false};
+  boardDay: null, dayRows: null, dayState: null, dayLoading: false, tab: "reportes", pin: null};
 
 function truckHash() {
   const match = window.location.hash.match(/^#camiones(?:\/([A-Za-z0-9_-]{1,16}))?(?:\/(\d{4}-\d{2}-\d{2}))?$/);
   return match ? {id: match[1] || null, day: match[2] || null} : null;
+}
+
+function openTruckAtReport(report) {
+  const moment = new Date(report.report_date);
+  truckView.pin = {
+    id: report.asset_id, day: isoDayIn(moment),
+    time: new Intl.DateTimeFormat("en-GB", {hour: "2-digit", minute: "2-digit", hour12: false, timeZone: HISTORY_ZONE}).format(moment),
+    label: formatLocal(report.report_date), event: report.event_name || "Reporte",
+    point: report.latitude === null || report.longitude === null ? null : [Number(report.latitude), Number(report.longitude)]
+  };
+  truckView.detail = null;  // aunque sea el mismo camión y día, se vuelve a dibujar con la marca
+  openTruck(report.asset_id, truckView.pin.day);
 }
 
 function openTruck(id, day) {
@@ -2706,7 +2727,9 @@ function renderTruckDay(keepView = false) {
   const data = truckView.detail;
   renderTruckHead();
   const summary = data.resumen;
-  $("truck-day-note").textContent = `${predictionDayLabel(data.fecha, "long")} · ${dayStatusNote(data)}`;
+  const pin = activePin(data);
+  $("truck-day-note").textContent = `${predictionDayLabel(data.fecha, "long")} · ${dayStatusNote(data)}` +
+    (pin ? ` · El punto rojo marca dónde estaba a las ${pin.time} (${pin.event}).` : "");
   $("truck-km").textContent = summary ? format(summary.km, 1) : "—";
   const average = (data.historial || []).filter((item) => item.fecha !== data.fecha && item.km > 0);
   const mean = average.length ? average.reduce((sum, item) => sum + item.km, 0) / average.length : null;
@@ -2828,6 +2851,14 @@ function renderTruckRibbon(data) {
     }
     ribbon.append(block);
   }
+  const pin = activePin(data);
+  if (pin) {
+    const mark = document.createElement("span");
+    mark.className = "ribbon-pin";
+    mark.style.left = ((Number(pin.time.slice(0, 2)) * 60 + Number(pin.time.slice(3, 5))) / 14.4) + "%";
+    mark.title = `Reporte de las ${pin.time}`;
+    ribbon.append(mark);
+  }
   if (data.fecha === localToday()) {
     const now = document.createElement("span");
     now.className = "ribbon-now";
@@ -2884,6 +2915,18 @@ function renderTruckEvents(data) {
     body.append(title, detail);
     li.append(time, mark, body);
     list.append(li);
+  }
+  // Llegando desde un reporte: se marca qué estaba haciendo el camión a esa hora.
+  const pin = activePin(data);
+  if (pin) {
+    const at = `${data.fecha} ${pin.time}:00`;
+    const items = truckTimeline(data);
+    const index = items.findIndex((item) => item.from <= at && at <= item.to);
+    const node = index >= 0 ? list.children[index] : null;
+    if (node) {
+      node.classList.add("is-report");
+      window.setTimeout(() => { list.scrollTop = node.offsetTop - list.offsetTop - list.clientHeight / 3; }, 50);
+    }
   }
   if (!list.children.length) {
     const li = document.createElement("li");
@@ -3068,8 +3111,20 @@ function drawTruckMap(data, keepView = false) {
   }
   layer.addTo(map);
   truckView.layer = layer;
+  // Si se llegó desde un reporte, se marca dónde estaba el camión en ese momento.
+  const pin = activePin(data);
+  if (pin && pin.point) {
+    L.marker(pin.point, {icon: L.divIcon({className: "truck-pin-icon", iconSize: [0, 0], iconAnchor: [0, 0],
+      html: `<span class="report-pin"><b></b><em>${escapeText(pin.time)}</em></span>`}), zIndexOffset: 1000, pane: "truckMarks"})
+      .bindTooltip(`Reporte del ${escapeText(pin.label)} · ${escapeText(pin.event)}`).addTo(layer);
+  }
   if (!keepView && layer.getLayers().length) map.fitBounds(layer.getBounds(), {padding: [30, 30], maxZoom: 14, animate: false});
   applyTripLanes();
+}
+
+function activePin(data) {
+  const pin = truckView.pin;
+  return pin && data && pin.id === data.asset_id && pin.day === data.fecha ? pin : null;
 }
 
 function escapeText(value) {
@@ -3470,7 +3525,7 @@ for (const button of document.querySelectorAll("[data-fleet-filter]")) {
 }
 $("fleet-search").addEventListener("input", () => { truckView.query = $("fleet-search").value; renderFleet(); });
 $("fleet-sort").addEventListener("change", () => { truckView.sort = $("fleet-sort").value; renderFleet(); });
-$("truck-back").addEventListener("click", () => { window.location.hash = "#camiones"; });
+$("truck-back").addEventListener("click", () => { truckView.pin = null; window.location.hash = "#camiones"; });
 $("truck-date").addEventListener("change", () => { if ($("truck-date").value) openTruck(truckView.id, $("truck-date").value); });
 $("truck-prev").addEventListener("click", () => openTruck(truckView.id, shiftDay(truckView.day || localToday(), -1)));
 $("truck-next").addEventListener("click", () => {
@@ -3492,6 +3547,7 @@ $("board-today").addEventListener("click", () => setBoardDay(null));
 $("board-yesterday").addEventListener("click", () => setBoardDay(shiftDay(localToday(), -1)));
 // Tres tareas en el mismo espacio: la lista de camiones, los reportes en vivo y el mes.
 function setFleetTab(tab) {
+  if (tab === "flota") truckView.pin = null;
   truckView.tab = tab;
   for (const button of document.querySelectorAll("[data-fleet-tab]")) {
     button.setAttribute("aria-selected", String(button.dataset.fleetTab === tab));
