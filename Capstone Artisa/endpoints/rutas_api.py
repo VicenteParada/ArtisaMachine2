@@ -157,6 +157,51 @@ def latest_positions(cursor, route_by_asset):
     return vehicles
 
 
+def live_positions(cursor):
+    """Último reporte recibido por cada camión desde la API de la empresa.
+
+    Esta consulta no carga geometrías ni recalcula las rutas clasificadas; permite mover los
+    marcadores cada minuto sin esperar la respuesta completa de /api/mapa.
+    """
+    try:
+        cursor.execute(
+            """SELECT gps.asset_id, gps.asset_name, gps.report_date, gps.latitude, gps.longitude,
+                      gps.speed, gps.heading, gps.ignition, gps.event_name,
+                      gps.driver_name, gps.driver_last_name
+               FROM telemetria_api AS gps
+               INNER JOIN (
+                   SELECT vehicle.asset_id,
+                          (SELECT source.report_id
+                           FROM telemetria_api AS source
+                           WHERE source.asset_id = vehicle.asset_id
+                           ORDER BY source.report_date DESC
+                           LIMIT 1) AS report_id
+                   FROM vehiculos AS vehicle
+                   INNER JOIN tipos_vehiculo AS vehicle_type
+                     ON vehicle_type.id_tipo = vehicle.id_tipo
+                   WHERE vehicle_type.nombre = 'camion'
+               ) AS latest ON latest.report_id = gps.report_id
+               ORDER BY gps.asset_id"""
+        )
+    except pymysql.err.ProgrammingError:
+        return []
+    return [{
+        "vehicle_id": row["asset_id"],
+        "vehicle_name": row["asset_name"] or row["asset_id"],
+        "patente": row["asset_id"],
+        "driver_name": row.get("driver_name"),
+        "driver_last_name": row.get("driver_last_name"),
+        "latitude": row["latitude"],
+        "longitude": row["longitude"],
+        "timestamp": _iso(row["report_date"]),
+        "speed_kmh": row["speed"],
+        "heading": row["heading"],
+        "ignition": row["ignition"],
+        "event": row["event_name"],
+        "fuente": "api",
+    } for row in cursor.fetchall()]
+
+
 def _route(row):
     from_level = {"HIGH": ("Más usada", "#14532d"), "MEDIUM": ("Uso medio", "#f97316"),
                   "LOW": ("Poco usada", "#dc2626")}
