@@ -76,7 +76,11 @@ class FakeCursor:
         return False
 
     def execute(self, query, params=None):
-        if "FROM vehiculos" in query:
+        if "MAX(a.recibido_en)" in query:
+            assert "t.nombre = 'camion'" in query  # solo los reportes de camiones reabren un día
+            inicio, fin = params
+            self.result = [{"recibido": self.db["recibidos"].get(dias.dia_local(inicio))}]
+        elif "FROM vehiculos" in query:
             self.result = []  # sin catálogo: la limpieza de no camiones no hace nada
         elif "MIN(report_date)" in query:
             self.result = [{"primero": self.db["primero"]}]
@@ -88,9 +92,6 @@ class FakeCursor:
                            or v.get("version_calculo", diario_worker.VERSION_CALCULO) < params[1])]
         elif "FROM reporte_diario_estado" in query:
             self.result = [dict(v, fecha=k) for k, v in self.db["estados"].items()]
-        elif "MAX(recibido_en)" in query:
-            inicio, fin = params
-            self.result = [{"recibido": self.db["recibidos"].get(dias.dia_local(inicio))}]
         else:
             raise AssertionError(query)
 

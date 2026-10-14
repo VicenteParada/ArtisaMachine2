@@ -184,10 +184,18 @@ def leer_filas_dia(cursor, dia):
 
 
 def ultimo_recibido(cursor, dia):
-    """Último momento en que llegó (desde la API) un reporte de ese día."""
+    """Último momento en que llegó (desde la API) un reporte de un camión ese día.
+
+    Solo cuentan los camiones del catálogo: los reportes atrasados de otros vehículos
+    (camionetas, por ejemplo) no cambian el día y no deben forzar un recálculo.
+    """
     inicio, fin = dias.limites_utc(dia)
     cursor.execute(
-        "SELECT MAX(recibido_en) AS recibido FROM telemetria_api WHERE report_date >= %s AND report_date < %s",
+        """SELECT MAX(a.recibido_en) AS recibido
+           FROM telemetria_api AS a
+           INNER JOIN vehiculos AS v ON v.asset_id = a.asset_id
+           INNER JOIN tipos_vehiculo AS t ON t.id_tipo = v.id_tipo AND t.nombre = 'camion'
+           WHERE a.report_date >= %s AND a.report_date < %s""",
         (inicio, fin),
     )
     fila = cursor.fetchone() or {}
