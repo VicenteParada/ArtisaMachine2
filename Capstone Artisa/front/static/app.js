@@ -16,6 +16,7 @@ const formatDataDay = (value) => value ? new Intl.DateTimeFormat("es-CL", {
   dateStyle: "long", timeZone: "UTC"
 }).format(new Date(value + "T12:00:00Z")) : "Sin fecha";
 let refreshing = false;
+let liveVehiclesRefreshing = false;
 
 function showApp() {
   landing.hidden = true;
@@ -59,6 +60,7 @@ function clearSessionWork() {
   for (const controller of pendingRequests) controller.abort();
   pendingRequests.clear();
   refreshing = false;
+  liveVehiclesRefreshing = false;
   $("refresh").disabled = false;
   journeyRequest++;
 }
@@ -763,7 +765,7 @@ function truckPopup(vehicle) {
     ? routeProperties(matched).usage_label + " · " + vehicle.route_id
     : "sin clasificar");
   const date = document.createElement("small");
-  date.textContent = "Última posición: " + formatUtc(vehicle.timestamp);
+  date.textContent = "Última posición: " + formatLocal(vehicle.timestamp) + " (hora de Chile)";
   const plate = document.createElement("small");
   plate.textContent = "Patente: " + (vehiclePlate(vehicle) || "No informada");
   wrapper.append(title, identifier, state, details, plate, driver, route, date);
@@ -820,7 +822,7 @@ function selectVehicle(vehicle, focus = true) {
     "VEHÍCULO SELECCIONADO · " + status.label.toUpperCase(),
     vehicle.vehicle_name || vehicle.vehicle_id,
     `${speed} · ${vehicle.event || "Sin evento"}`,
-    `${Number(vehicle.latitude).toFixed(6)}, ${Number(vehicle.longitude).toFixed(6)} · ${formatUtc(vehicle.timestamp)}`
+    `${Number(vehicle.latitude).toFixed(6)}, ${Number(vehicle.longitude).toFixed(6)} · ${formatLocal(vehicle.timestamp)} (hora de Chile)`
   );
   if (focus) {
     // Al elegir un vehículo se muestra directamente su recorrido del día; el mapa se encuadra
@@ -1011,7 +1013,7 @@ function renderFleetMap(data) {
   const minutes = Math.max(1, Math.round(Number(data.metadata.refresh_seconds || 60) / 60));
   const cadence = minutes === 1 ? "cada minuto" : "cada " + minutes + " min";
   $("map-last-update").textContent = "Rutas clasificadas con datos hasta el " +
-    formatDataDay(data.snapshotDate) + " · posiciones actualizadas " + cadence;
+    formatDataDay(data.snapshotDate) + " · nuevas posiciones consultadas " + cadence;
   const coverage = data.metadata.metricas?.cobertura;
   const processingHistory = Number(coverage?.dias_pendientes || 0) > 0;
   $("heatmap-source-status").textContent = processingHistory
@@ -1595,6 +1597,11 @@ async function refresh() {
     } else problems.push("reportes");
     if (mapResult.status === "fulfilled" && window.ArtisaMapData) {
       const mapData = window.ArtisaMapData.adaptMapPayload(mapResult.value);
+      if (currentMapData) {
+        const visible = new Map(currentMapData.vehicles.map((vehicle) => [vehicle.vehicle_id, vehicle]));
+        mapData.vehicles = mapData.vehicles.map((vehicle) =>
+          mergeVehiclePosition(vehicle, visible.get(vehicle.vehicle_id)));
+      }
       renderHeatmap(mapData);
       if (dashboardResult.status === "fulfilled") renderDashboard(mapData, dashboardResult.value);
       else problems.push("dashboard");
@@ -1618,6 +1625,37 @@ async function refresh() {
     }
   } finally {
     if (version === sessionVersion) { refreshing = false; $("refresh").disabled = false; }
+  }
+}
+
+function mergeVehiclePosition(vehicle, incoming) {
+  if (!incoming || Date.parse(incoming.timestamp) <= Date.parse(vehicle.timestamp)) return vehicle;
+  return {
+    ...vehicle,
+    ...incoming,
+    route_id: vehicle.route_id,
+    driver_name: incoming.driver_name || vehicle.driver_name,
+    driver_last_name: incoming.driver_name ? incoming.driver_last_name : vehicle.driver_last_name
+  };
+}
+
+async function refreshMapVehicles() {
+  if (!token() || document.hidden || liveVehiclesRefreshing || !currentMapData ||
+      machinePending(currentMapData)) return;
+  const version = sessionVersion;
+  liveVehiclesRefreshing = true;
+  try {
+    const payload = await api("/api/vehiculos/posiciones", {timeoutMs: 20000});
+    if (version !== sessionVersion || !token() || !currentMapData) return;
+    const incoming = new Map((payload.vehicles || []).map((vehicle) => [vehicle.vehicle_id, vehicle]));
+    const merged = currentMapData.vehicles.map((vehicle) =>
+      mergeVehiclePosition(vehicle, incoming.get(vehicle.vehicle_id)));
+    currentMapData = {...currentMapData, vehicles: merged};
+    renderFleetMap(currentMapData);
+  } catch {
+    // El refresco completo conserva la última posición visible y seguirá reintentando.
+  } finally {
+    if (version === sessionVersion) liveVehiclesRefreshing = false;
   }
 }
 
@@ -1935,8 +1973,15 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) restoreSession();
 });
 restoreSession();
-setInterval(refresh, 60000);
+setInterval(refresh, 300000);
+setInterval(refreshMapVehicles, 60000);
 setInterval(refreshTelemetry, TELEMETRY_REFRESH_MS);
 // Al recuperar la red o volver a la pestaña, actualizar de inmediato sin esperar el minuto.
-window.addEventListener("online", () => { refreshTelemetry(); refresh(); });
-document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshTelemetry(); });
+window.addEventListener("online", () => { refreshTelemetry(); refreshMapVehicles(); refresh(); });
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    refreshTelemetry();
+    refreshMapVehicles();
+    refresh();
+  }
+});

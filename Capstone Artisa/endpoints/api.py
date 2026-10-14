@@ -444,7 +444,8 @@ def history_request(path, query):
 # --- Caché de /api/mapa y /api/dashboard -----------------------------------------
 # El mapa recorre la última posición de cada camión: con MariaDB ocupada (cierre diario)
 # puede tardar. Se calcula como máximo una vez por minuto, una sola consulta a la vez, y si
-# un cálculo falla se entrega el último resultado bueno.
+# un cálculo falla se entrega el último resultado bueno. Las posiciones en vivo usan un
+# endpoint liviano independiente de esta caché.
 CACHE_SECONDS = 60
 _cache = {}
 _cache_lock = threading.Lock()
@@ -493,6 +494,7 @@ class Handler(JsonHandler):
                                "mensaje": "Endpoints Artisa",
                                "rutas": ["/health", "/api/estado", "/api/faenas",
                                          "/api/gps?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
+                                         "/api/vehiculos/posiciones",
                                          "/api/telemetria?limite=30", "/api/telemetria/resumen",
                                          "/api/reportes/dia?fecha=YYYY-MM-DD", "/api/reportes/mes?mes=YYYY-MM",
                                          "/api/reportes/mes-completo?mes=YYYY-MM",
@@ -506,6 +508,16 @@ class Handler(JsonHandler):
                 self.respond(503, {"status": "error", "error": "No se pudo calcular el mapa; se reintentará."})
                 return
             self.respond(200, result)
+            return
+        if path == "/api/vehiculos/posiciones":
+            try:
+                with connect_db(read_timeout=20) as connection, connection.cursor() as cursor:
+                    vehicles = rutas_api.live_positions(cursor)
+            except pymysql.MySQLError as error:
+                self.database_error(error)
+                return
+            self.respond(200, {"status": "ok", "refresh_seconds": rutas_api.REFRESH_SECONDS,
+                               "vehicles": vehicles})
             return
         journey = JOURNEY_RE.fullmatch(path)
         if journey:
