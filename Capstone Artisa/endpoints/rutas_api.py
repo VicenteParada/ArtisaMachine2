@@ -12,7 +12,7 @@ import pymysql
 
 from common import dias
 
-REFRESH_SECONDS = 300
+REFRESH_SECONDS = 60
 JOURNEY_LIMIT = 20000
 MAX_GAP_MIN = 5
 VEL_MAX_KMH = 150
@@ -139,11 +139,12 @@ def latest_positions(cursor, route_by_asset):
                 best_by_asset[asset_id] = dict(
                     row, fuente="api" if table == "telemetria_api" else "historico"
                 )
+    fallback_drivers = last_drivers(cursor, best_by_asset)
     vehicles = []
     for asset_id in trucks:
         best = best_by_asset.get(asset_id)
         if best:
-            driver = best
+            driver = best if best.get("driver_name") else fallback_drivers.get(asset_id, best)
             vehicles.append({
                 "vehicle_id": asset_id, "vehicle_name": best["asset_name"] or asset_id,
                 "patente": asset_id,

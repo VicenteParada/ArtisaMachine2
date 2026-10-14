@@ -466,8 +466,8 @@ function vehicleStatus(vehicle) {
   return {label: "Con señal reciente", className: "moving"};
 }
 
-const TRUCK_MARKUP = '<img class="truck-glyph" src="/artisa-truck-3d.png?v=20261012" alt="" aria-hidden="true">';
-const TRUCK_LIST_MARKUP = '<img class="truck-glyph" src="/artisa-truck-side-3d.png?v=20261012" alt="" aria-hidden="true">';
+const TRUCK_MARKUP = '<img class="truck-glyph" src="/artisa-truck-box-white-green.png?v=20261014" alt="" aria-hidden="true">';
+const TRUCK_LIST_MARKUP = TRUCK_MARKUP;
 
 function renderLiveFleet(vehicles) {
   const list = $("vehicle-live-list");
@@ -718,17 +718,23 @@ function truckIcon(vehicle) {
   const status = vehicleStatus(vehicle);
   const hasHeading = vehicle.heading !== null && vehicle.heading !== undefined &&
     vehicle.heading !== "" && Number.isFinite(Number(vehicle.heading));
-  const arrow = hasHeading
-    ? "<span class='truck-heading' style='transform:rotate(" + Number(vehicle.heading) + "deg)'>▲</span>"
+  const heading = hasHeading ? ((Number(vehicle.heading) % 360) + 360) % 360 : null;
+  // La imagen base mira hacia la izquierda: se invierte cuando el rumbo tiene componente este.
+  const facing = hasHeading && heading <= 180 ? -1 : 1;
+  const direction = hasHeading
+    ? "<span class='truck-direction' aria-hidden='true'></span>"
+    : "";
+  const orientation = hasHeading
+    ? " style='--truck-heading:" + heading + "deg;--truck-facing:" + facing + "'"
     : "";
   const html = "<span class='truck-marker " + status.className +
-    "'>" + arrow + TRUCK_MARKUP + "</span>";
+    "'" + orientation + ">" + direction + TRUCK_MARKUP + "</span>";
   return L.divIcon({
     className: "truck-div-icon",
     html,
-    iconSize: [54, 46],
-    iconAnchor: [27, 23],
-    popupAnchor: [0, -23]
+    iconSize: [56, 38],
+    iconAnchor: [28, 19],
+    popupAnchor: [0, -21]
   });
 }
 
@@ -1002,9 +1008,10 @@ function renderFleetMap(data) {
   applyMapLayerVisibility();
   if (reopenPopup) openTruckPopup(reopenPopup);
 
-  const minutes = Math.max(1, Math.round(Number(data.metadata.refresh_seconds || 300) / 60));
-  $("map-last-update").textContent = "Clasificación al " + formatDataDay(data.snapshotDate) +
-    " · se actualiza cada " + minutes + " min";
+  const minutes = Math.max(1, Math.round(Number(data.metadata.refresh_seconds || 60) / 60));
+  const cadence = minutes === 1 ? "cada minuto" : "cada " + minutes + " min";
+  $("map-last-update").textContent = "Rutas clasificadas con datos hasta el " +
+    formatDataDay(data.snapshotDate) + " · posiciones actualizadas " + cadence;
   const coverage = data.metadata.metricas?.cobertura;
   const processingHistory = Number(coverage?.dias_pendientes || 0) > 0;
   $("heatmap-source-status").textContent = processingHistory
@@ -1928,7 +1935,7 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) restoreSession();
 });
 restoreSession();
-setInterval(refresh, 300000);
+setInterval(refresh, 60000);
 setInterval(refreshTelemetry, TELEMETRY_REFRESH_MS);
 // Al recuperar la red o volver a la pestaña, actualizar de inmediato sin esperar el minuto.
 window.addEventListener("online", () => { refreshTelemetry(); refresh(); });

@@ -23,6 +23,7 @@ FILES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/artisa-logo.png": ("artisa-logo.png", "image/png"),
          "/artisa-truck-3d.png": ("artisa-truck-3d.png", "image/png"),
          "/artisa-truck-side-3d.png": ("artisa-truck-side-3d.png", "image/png"),
+         "/artisa-truck-box-white-green.png": ("artisa-truck-box-white-green.png", "image/png"),
          "/artisa-fleet-cover.jpg": ("artisa-fleet-cover.jpg", "image/jpeg")}
 
 

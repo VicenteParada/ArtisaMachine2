@@ -80,6 +80,22 @@ class MapContractTests(unittest.TestCase):
         self.assertEqual(dash["rutas"], {"HIGH": 1, "MEDIUM": 0, "LOW": 1})
         self.assertEqual(dash["operacion"]["viajes"], 18)
 
+    def test_latest_position_uses_recent_driver_when_last_report_has_none(self):
+        recent_driver = {"asset_id": "TFWK19", "driver_name": "RICHARD", "driver_last_name": "FUENTES",
+                         "report_date": datetime(2026, 10, 14, 11, 40)}
+        cursor = FakeCursor([
+            ("SELECT v.asset_id FROM vehiculos", [{"asset_id": "TFWK19"}]),
+            ("FROM telemetria_api AS gps", [{"asset_id": "TFWK19", "asset_name": "Lampa-998",
+                                             "report_date": datetime(2026, 10, 14, 11, 41),
+                                             "latitude": -29.4, "longitude": -71.1, "speed": 87.0,
+                                             "heading": 180, "ignition": 1, "event_name": "Reporte por tiempo",
+                                             "driver_name": None, "driver_last_name": None}]),
+            ("FROM raw_gps AS gps", []),
+            ("ROW_NUMBER() OVER", [recent_driver]),
+        ])
+        vehicle = rutas_api.latest_positions(cursor, {})[0]
+        self.assertEqual((vehicle["driver_name"], vehicle["driver_last_name"]), ("RICHARD", "FUENTES"))
+
 
 class JourneyTests(unittest.TestCase):
     def test_journey_splits_gps_jumps_and_uses_chile_time(self):
