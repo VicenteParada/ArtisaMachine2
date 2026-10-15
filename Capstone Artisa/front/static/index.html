@@ -6,13 +6,13 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/mapa-base.css?v=20261015-prediccion">
-  <link rel="stylesheet" href="/style.css?v=20261015-prediccion">
+  <link rel="stylesheet" href="/mapa-base.css?v=20261015-dashboard">
+  <link rel="stylesheet" href="/style.css?v=20261015-dashboard">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
-  <script src="/mapa-base.js?v=20261015-prediccion" defer></script>
-  <script src="/map-data.js?v=20261015-prediccion" defer></script>
-  <script src="/app.js?v=20261015-prediccion" defer></script>
+  <script src="/mapa-base.js?v=20261015-dashboard" defer></script>
+  <script src="/map-data.js?v=20261015-dashboard" defer></script>
+  <script src="/app.js?v=20261015-dashboard" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -227,43 +227,54 @@
       </section>
     </div>
     <div id="dashboard" class="dataset-space" data-dataset-view="dashboard" hidden>
-      <section class="panel dashboard-panel">
+      <section class="panel dashboard-panel fd" aria-labelledby="dashboard-title">
         <div class="section-top">
-          <div><span class="eyebrow">03 / PANEL OPERATIVO</span><h2>Dashboard de rutas y flota</h2></div>
+          <div><span class="eyebrow">PANEL DE FLOTA</span><h2 id="dashboard-title">Dashboard de la flota</h2></div>
           <span id="dashboard-snapshot" class="status neutral">Preparando indicadores…</span>
         </div>
-        <p class="telemetry-intro">Resumen de las rutas clasificadas y del estado de la flota. Se actualiza junto con el mapa de rutas.</p>
-        <div class="dashboard-kpis" aria-label="Indicadores principales del dashboard">
-          <article><span>Reportes disponibles</span><strong id="dashboard-reports">—</strong><small>Telemetría conservada en MariaDB</small></article>
-          <article><span>Recorridos analizados</span><strong id="dashboard-trips">—</strong><small>Viajes dentro de la ventana procesada</small></article>
-          <article><span>Rutas identificadas</span><strong id="dashboard-routes">—</strong><small>Agrupaciones geoespaciales completas</small></article>
+        <p class="telemetry-intro">Reportes, kilómetros y viajes de cada camión mes a mes, desde el primer día con datos. Sale del cierre diario (00:00 a 00:00, hora de Chile); el mes en curso suma hasta hoy.</p>
+        <div class="dashboard-kpis fd-kpis" aria-label="Totales desde el primer día con datos">
+          <article><span>Reportes GPS</span><strong id="dash-k-reportes">—</strong><small id="dash-k-reportes-d">—</small></article>
+          <article><span>Km observados</span><strong id="dash-k-km">—</strong><small id="dash-k-km-d">—</small></article>
+          <article><span>Viajes</span><strong id="dash-k-viajes">—</strong><small id="dash-k-viajes-d">—</small></article>
+          <article><span>Camiones con datos este mes</span><strong id="dash-k-activos">—</strong><small id="dash-k-activos-d">—</small></article>
         </div>
-        <div class="dashboard-grid">
-          <article class="dashboard-card dashboard-wide">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">ACTIVIDAD GEOGRÁFICA</span><h3>Uso de rutas por zona</h3></div><span class="chart-unit">Recorridos</span></div>
-            <p>Recorridos de cada ruta, contados en la zona donde queda su punto central.</p>
-            <div id="dashboard-route-zones" class="dashboard-bars" aria-label="Gráfico de uso de rutas por zona"><span class="chart-empty">Cargando zonas…</span></div>
+        <div class="fd-metric" role="group" aria-label="Qué medir">
+          <span>Medir</span>
+          <button type="button" class="is-active" data-dash-metric="reportes" aria-pressed="true">Reportes</button>
+          <button type="button" data-dash-metric="km" aria-pressed="false">Km</button>
+          <button type="button" data-dash-metric="viajes" aria-pressed="false">Viajes</button>
+        </div>
+        <article class="dashboard-card fd-months">
+          <div class="dashboard-card-heading"><div><span class="eyebrow">MES A MES</span><h3 id="dash-months-title">Reportes de la flota por mes</h3></div><span class="chart-unit" id="dash-months-unit">Toca un mes</span></div>
+          <div id="dash-months" class="fd-month-chart" aria-label="Total de la flota por mes"><span class="chart-empty">Cargando meses…</span></div>
+        </article>
+        <div class="fd-layout">
+          <article class="dashboard-card fd-table-card">
+            <div class="dashboard-card-heading">
+              <div><span class="eyebrow">POR PATENTE</span><h3 id="dash-table-title">Reportes mensuales por camión</h3></div>
+              <button type="button" id="dash-csv" class="fd-csv">↓ Descargar CSV</button>
+            </div>
+            <div class="fd-tools">
+              <label class="fd-search"><span>⌕</span><input id="dash-search" type="search" placeholder="Buscar patente o camión…" aria-label="Buscar patente o camión"></label>
+              <label class="fd-sort">Ordenar <select id="dash-sort" aria-label="Ordenar camiones"></select></label>
+            </div>
+            <div class="fd-table-wrap"><table id="dash-table" class="fd-table" aria-describedby="dash-table-foot"></table></div>
+            <small class="fd-foot" id="dash-table-foot">Toca un camión para ver su calendario día por día.</small>
           </article>
-          <article class="dashboard-card dashboard-donut-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">CLASIFICACIÓN</span><h3>Nivel de uso de rutas</h3></div></div>
-            <p>Verde para las más usadas, naranja para uso medio y rojo para poco uso.</p>
-            <div id="dashboard-route-levels" class="dashboard-donut-wrap" aria-label="Distribución de rutas por nivel de uso"></div>
-          </article>
-          <article class="dashboard-card dashboard-donut-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">FLOTA ACTUAL</span><h3>Disponibilidad de los vehículos</h3></div></div>
-            <p>Estado de señal y encendido según la última posición disponible.</p>
-            <div id="dashboard-fleet-status" class="dashboard-donut-wrap" aria-label="Distribución del estado de la flota"></div>
-          </article>
-          <article class="dashboard-card dashboard-wide">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">RANKING OPERATIVO</span><h3>Rutas con mayor actividad</h3></div><span class="chart-unit">Top 8</span></div>
-            <p>Recorridos agrupados por ruta completa; el color conserva su clasificación global.</p>
-            <div id="dashboard-top-routes" class="dashboard-bars routes" aria-label="Ranking de rutas con mayor actividad"><span class="chart-empty">Calculando ranking…</span></div>
-          </article>
-          <aside class="dashboard-highlights" aria-label="Hallazgos destacados">
-            <article><span>ZONA CON MAYOR USO</span><strong id="dashboard-most-route-zone">—</strong><small id="dashboard-most-route-zone-detail">Calculando recorridos…</small></article>
+          <aside class="fd-side">
+            <article class="dashboard-card fd-silent">
+              <div class="dashboard-card-heading"><div><span class="eyebrow">ATENCIÓN</span><h3>Camiones sin reportar</h3></div><b id="dash-silent-count" class="fd-count">—</b></div>
+              <p id="dash-silent-note">Sin reportes ni ayer ni hoy.</p>
+              <ul id="dash-silent" class="fd-silent-list"></ul>
+            </article>
+            <article class="dashboard-card fd-quality">
+              <div class="dashboard-card-heading"><div><span class="eyebrow">CALIDAD DE DATOS</span><h3>Días procesados</h3></div></div>
+              <div class="fd-meter" aria-hidden="true"><i id="dash-q-bar"></i></div>
+              <ul id="dash-quality" class="fd-quality-list"></ul>
+            </article>
           </aside>
         </div>
-        <div class="dashboard-method"><strong>Cómo se definen las zonas</strong><span id="dashboard-method">Se calculan con las rutas clasificadas.</span></div>
       </section>
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>

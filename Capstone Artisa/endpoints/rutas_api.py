@@ -1,4 +1,4 @@
-"""Respuestas de /api/mapa y /api/dashboard, y el recorrido GPS de un camión en un día.
+"""Respuesta de /api/mapa, y el recorrido GPS de un camión en un día.
 
 Leen la versión activa de la clasificación de rutas (machine_learning/rutas_job.py).
 Si todavía no hay una, devuelven None y la API mantiene la respuesta "pendiente".
@@ -237,20 +237,6 @@ def classified_map(cursor):
                                f"conocido no se clasifican."),
             "metricas": metrics,
         },
-    }
-
-
-def classified_dashboard(cursor):
-    version = active_version(cursor)
-    if not version:
-        return None
-    metrics = version["metricas"]
-    niveles = metrics.get("por_nivel") or {}
-    return {
-        "status": "ok", "version": version["id"],
-        "calidad": {"validos": available_reports(cursor)},
-        "operacion": {"viajes": metrics.get("viajes_clasificados", 0), "camiones": metrics.get("camiones", 0)},
-        "rutas": {level: int(niveles.get(level, 0)) for level in ("HIGH", "MEDIUM", "LOW")},
     }
 
 

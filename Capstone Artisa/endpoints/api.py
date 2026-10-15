@@ -14,7 +14,7 @@ import pymysql
 from common import dias
 from common.db import connect_db
 from common.http import JsonHandler, serve
-from endpoints import camiones_api, prediccion_api, rutas_api
+from endpoints import camiones_api, dashboard_api, prediccion_api, rutas_api
 
 
 STARTED_AT = time.monotonic()
@@ -37,11 +37,8 @@ PENDING_RESPONSES = {
             "data_retention": "Sin resultados Machine disponibles.",
         },
     },
-    "/api/dashboard": {
-        "status": "pending", "calidad": {"validos": None},
-        "operacion": {"viajes": None},
-        "rutas": {"HIGH": None, "MEDIUM": None, "LOW": None},
-    },
+    "/api/dashboard": {"status": "pending", "meses": [], "flota": [], "camiones": [], "sin_reportar": [],
+                       "totales": None},
     "/api/prediccion": {
         "status": "pending", "dias": [],
         "message": "La predicción se está calculando (o faltan días cerrados: necesita al menos 21). "
@@ -54,7 +51,7 @@ PENDING_RESPONSES = {
                    "Se actualiza sola en unos minutos.",
     },
 }
-BUILDERS = {"/api/mapa": rutas_api.classified_map, "/api/dashboard": rutas_api.classified_dashboard,
+BUILDERS = {"/api/mapa": rutas_api.classified_map, "/api/dashboard": dashboard_api.fleet_dashboard,
             "/api/prediccion": prediccion_api.prediction,
             "/api/prediccion-rutas": lambda cursor: prediccion_api.prediction(cursor, "rutas"),
             "/api/camiones": camiones_api.fleet}
@@ -515,7 +512,7 @@ class Handler(JsonHandler):
                                          "/api/reportes/dia?fecha=YYYY-MM-DD", "/api/reportes/mes?mes=YYYY-MM",
                                          "/api/reportes/mes-completo?mes=YYYY-MM",
                                          "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
-                                         "/api/camiones/X?fecha=YYYY-MM-DD",
+                                         "/api/camiones/X?fecha=YYYY-MM-DD", "/api/dashboard/camion?patente=X",
                                          *PENDING_RESPONSES]})
             return
         if path in BUILDERS:
@@ -535,6 +532,19 @@ class Handler(JsonHandler):
                 return
             self.respond(200, {"status": "ok", "refresh_seconds": rutas_api.REFRESH_SECONDS,
                                "vehicles": vehicles})
+            return
+        if path == "/api/dashboard/camion":
+            patente = _param(parsed.query, "patente") or ""
+            if not ASSET_RE.fullmatch(patente):
+                self.respond(400, {"error": "Usa ?patente=XXXX"})
+                return
+            try:
+                with connect_db(read_timeout=30) as connection, connection.cursor() as cursor:
+                    result = dashboard_api.truck_days(cursor, patente)
+            except pymysql.MySQLError as error:
+                self.database_error(error)
+                return
+            self.respond(200, result)
             return
         truck = TRUCK_RE.fullmatch(path)
         if truck:

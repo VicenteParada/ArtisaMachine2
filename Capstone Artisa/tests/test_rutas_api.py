@@ -43,7 +43,6 @@ class MapContractTests(unittest.TestCase):
     def test_pending_without_active_version(self):
         cursor = FakeCursor([("FROM rutas_version", [])])
         self.assertIsNone(rutas_api.classified_map(cursor))
-        self.assertIsNone(rutas_api.classified_dashboard(cursor))
 
     def test_classified_map_matches_frontend_contract(self):
         cursor = FakeCursor([
@@ -73,12 +72,6 @@ class MapContractTests(unittest.TestCase):
                          ("RJXS30", "JULIO", "PÉREZ"))
         self.assertEqual(payload["ranking"]["most_used"]["route_id"], "R-ABC123")
         self.assertIn("6.7", payload["metadata"]["classification"])
-
-    def test_dashboard_levels(self):
-        cursor = FakeCursor([("FROM rutas_version", lambda p: [dict(VERSION)]), ("validos", [{"n": 7}])])
-        dash = rutas_api.classified_dashboard(cursor)
-        self.assertEqual(dash["rutas"], {"HIGH": 1, "MEDIUM": 0, "LOW": 1})
-        self.assertEqual(dash["operacion"]["viajes"], 18)
 
     def test_latest_position_uses_recent_driver_when_last_report_has_none(self):
         recent_driver = {"asset_id": "TFWK19", "driver_name": "RICHARD", "driver_last_name": "FUENTES",
