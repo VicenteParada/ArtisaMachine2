@@ -1,8 +1,15 @@
 """Predicción de actividad por zona para los próximos días.
 
 Versión conectada a MariaDB del cuaderno guias_ml/prediccion_actividad.ipynb (LightGBM):
-predice cuántos reportes de camiones en movimiento habrá en cada celda del mapa, día por
-día, desde el día siguiente al último cierre hasta hoy + PRED_DIAS (por defecto 14).
+predice cuántos reportes de camiones en movimiento habrá en cada celda del mapa en los
+próximos PRED_DIAS días (por defecto 15): de mañana a hoy + 15, hora de Chile.
+
+Reentrenamiento diario: cada vez que se cierra un día (00:00 a 00:00) se vuelve a entrenar
+desde cero con los últimos PRED_VENTANA_DIAS días cerrados, y cada medianoche se recalcula
+para que el pronóstico siempre empiece mañana. El pronóstico se encadena desde el último
+día cerrado (el modelo necesita los días intermedios como historia), pero solo se publican
+los días futuros. Al reentrenar se mide además el error real: lo que la versión anterior
+predijo para los días que ahora están cerrados contra lo que de verdad pasó.
 
 Cambios respecto del cuaderno (detectados al auditarlo):
 - Los datos salen de MariaDB (histórico + API en vivo), solo camiones del catálogo y por
@@ -49,7 +56,7 @@ import numpy as np
 from common import dias
 
 VENTANA_DIAS = int(os.environ.get("PRED_VENTANA_DIAS", "112"))  # 16 semanas de historia
-DIAS_ADELANTE = int(os.environ.get("PRED_DIAS", "14"))          # hoy + 14: 15 días en total
+DIAS_ADELANTE = int(os.environ.get("PRED_DIAS", "15"))          # de mañana a hoy + 15
 MIN_DIAS = 21                       # como el cuaderno: al menos 3 semanas para entrenar
 VEL_MOVIMIENTO = 2                  # km/h: igual que el cuaderno (speed > 2)
 ESCALA = 100                        # celda de 0,01°: celda = floor(lat * 100)
@@ -396,7 +403,7 @@ def correlacion(pred, real):
     return round(float(np.corrcoef(pred, real)[0, 1]), 3)
 
 
-def entrenar(matriz, lista_dias):
+def entrenar(matriz, lista_dias, horizonte=DIAS_ADELANTE + 1):
     """Días ordenados en el tiempo: 60 % entrenamiento, 20 % validación (early stopping y
     elección del objetivo) y 20 % prueba. En la prueba compiten LightGBM y los dos promedios;
     gana el de menor error absoluto medio. Devuelve (predictor, métricas)."""
@@ -452,7 +459,7 @@ def entrenar(matriz, lista_dias):
         metricas["mae_modelo"] = errores["lightgbm"]
     # Confianza por día: error real al predecir 1, 2, … días hacia adelante en la prueba.
     de_prueba = {"metodo": metodo, "modelo": modelo if metodo == "lightgbm" else None}
-    metricas["error_por_dia"] = error_por_horizonte(de_prueba, matriz, lista_dias, test, DIAS_ADELANTE + 1)
+    metricas["error_por_dia"] = error_por_horizonte(de_prueba, matriz, lista_dias, test, horizonte)
     if metodo != "lightgbm":
         metricas["motivo"] = ("LightGBM no superó a los promedios en los días de prueba"
                               if "lightgbm" in errores else metricas.get("nota", ""))
@@ -480,8 +487,8 @@ def error_por_horizonte(predictor, matriz, lista_dias, dias_prueba, horizonte, m
     return [round(float(np.mean(e)), 3) if e else None for e in errores]
 
 
-def dias_confiables(error_por_dia, maximo):
-    """Cuántos días publicar: los de menos fallos (ver TOLERANCIA_ERROR)."""
+def dias_confiables(error_por_dia, maximo, minimo=MIN_DIAS_PUBLICADOS):
+    """Cuántos días pronosticar: los de menos fallos (ver TOLERANCIA_ERROR), al menos minimo."""
     errores = [e for e in (error_por_dia or [])[:maximo]]
     if not errores or errores[0] in (None, 0):
         return maximo
@@ -490,7 +497,19 @@ def dias_confiables(error_por_dia, maximo):
         if error is None or error > errores[0] * TOLERANCIA_ERROR:
             break
         dias_ok = k
-    return min(maximo, max(MIN_DIAS_PUBLICADOS, dias_ok))
+    return min(maximo, max(minimo, dias_ok))
+
+
+def fechas_pronostico(base_hasta, hoy):
+    """(fechas a encadenar, cuántas de ellas no se publican). El pronóstico empieza el día
+    siguiente al último cierre, porque cada día es la historia del siguiente, pero solo se
+    publica de mañana a hoy + DIAS_ADELANTE: hoy y los días aún sin cerrar ya no son futuro."""
+    fechas = []
+    fecha = base_hasta + timedelta(days=1)
+    while fecha <= hoy + timedelta(days=DIAS_ADELANTE):
+        fechas.append(fecha)
+        fecha += timedelta(days=1)
+    return fechas, sum(1 for f in fechas if f <= hoy)
 
 
 def pronosticar(predictor, matriz, lista_dias, fechas_futuras):
@@ -508,6 +527,36 @@ def pronosticar(predictor, matriz, lista_dias, fechas_futuras):
         resultado[fecha] = pred
         extendida = np.column_stack([extendida, pred.astype(np.float32)])
     return resultado
+
+
+def error_real(cursor, anterior, tipo, celdas, matriz, lista_dias):
+    """Error real de la versión anterior en el último día que pronosticó y que ahora está
+    cerrado: {fecha, mae, esperado, real}. Un tramo o zona sin valor publicado cuenta como 0
+    (se publica solo lo que supera min_valor), igual que en los días de prueba.
+    None si no hay un día así (por ejemplo, si no se cerró ningún día nuevo)."""
+    if not anterior:
+        return None
+    nuevos = [d for d in lista_dias if d > anterior["base_hasta"]]
+    if not nuevos:
+        return None
+    cfg = TIPOS[tipo]
+    claves = ",".join(cfg["claves"])
+    cursor.execute(f"SELECT fecha, {claves}, valor FROM {cfg['salida']} "
+                   "WHERE version_id=%s AND fecha >= %s AND fecha <= %s",
+                   (anterior["id"], nuevos[0], nuevos[-1]))
+    predicho = defaultdict(dict)
+    for fila in cursor.fetchall():
+        predicho[fila["fecha"]][tuple(fila[c] for c in cfg["claves"])] = float(fila["valor"])
+    dia = next((d for d in reversed(nuevos) if predicho.get(d)), None)
+    if dia is None:
+        return None
+    real = matriz[:, lista_dias.index(dia)]
+    pred = predicho[dia]
+    errores = [abs(pred.get(tuple(c), 0.0) - float(v)) for c, v in zip(celdas, real)]
+    posicion = {tuple(c) for c in celdas}
+    errores += [v for c, v in pred.items() if c not in posicion]  # predicho donde no hubo nada
+    return {"fecha": str(dia), "mae": round(float(np.mean(errores)), 3),
+            "esperado": round(sum(pred.values())), "real": round(float(real.sum()))}
 
 
 # --- Publicación -------------------------------------------------------------------------
@@ -628,11 +677,7 @@ def ejecutar(connection, utc_now, tipos=None, latido=sin_latido):
         print(f"Predicción: faltan días cerrados ({len(lista_dias)} de {MIN_DIAS})", flush=True)
         return None
     hoy = dias.hoy(utc_now)
-    futuras = []
-    fecha = base_hasta + timedelta(days=1)
-    while fecha <= hoy + timedelta(days=DIAS_ADELANTE):
-        futuras.append(fecha)
-        fecha += timedelta(days=1)
+    futuras, pasados = fechas_pronostico(base_hasta, hoy)
     resultados = {}
     for tipo in tipos:
         inicio_tipo = time.monotonic()
@@ -642,10 +687,21 @@ def ejecutar(connection, utc_now, tipos=None, latido=sin_latido):
         connection.commit()
         if not celdas:
             continue
-        predictor, metricas = entrenar(matriz, lista_dias)
-        publicar = futuras[:dias_confiables(metricas.get("error_por_dia"), len(futuras))]
-        metricas["dias_descartados"] = len(futuras) - len(publicar)
-        pronostico = pronosticar(predictor, matriz, lista_dias, publicar)
+        predictor, metricas = entrenar(matriz, lista_dias, len(futuras))
+        calcular = futuras[:dias_confiables(metricas.get("error_por_dia"), len(futuras),
+                                            minimo=pasados + MIN_DIAS_PUBLICADOS)]
+        metricas["dias_descartados"] = len(futuras) - len(calcular)
+        pronostico = pronosticar(predictor, matriz, lista_dias, calcular)
+        pronostico = {f: v for f, v in pronostico.items() if f > hoy}
+        publicar = sorted(pronostico)
+        anterior = anteriores.get(tipo)
+        with connection.cursor() as cursor:
+            real = error_real(cursor, anterior, tipo, celdas, matriz, lista_dias)
+        connection.commit()
+        if real is None and anterior:  # sin un día nuevo cerrado se conserva la última medición
+            real = anterior["metricas"].get("error_real")
+        if real:
+            metricas["error_real"] = real
         metricas.update(
             huella_camiones=huella(lista_camiones), camiones=len(lista_camiones), dias_historia=len(lista_dias),
             horizonte_hasta=str(futuras[-1]), historia_desde=lista_dias[0], historia_hasta=lista_dias[-1],

@@ -44,7 +44,8 @@ PENDING_RESPONSES = {
     },
     "/api/prediccion": {
         "status": "pending", "dias": [],
-        "message": "La predicción se calcula con al menos 21 días cerrados.",
+        "message": "La predicción se está calculando (o faltan días cerrados: necesita al menos 21). "
+                   "Se actualiza sola en unos minutos.",
     },
     "/api/camiones": {"status": "pending", "camiones": [], "resumen": None},
     "/api/prediccion-rutas": {

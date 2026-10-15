@@ -157,13 +157,19 @@ class PredictionApiTests(unittest.TestCase):
                   {"fecha": date(2026, 10, 13), "celda_lat": -2245, "celda_lon": -6893, "valor": 3.5},
                   {"fecha": date(2026, 10, 14), "celda_lat": -2246, "celda_lon": -6893, "valor": 10.0}]
         cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_celda", celdas)])
-        data = prediccion_api.prediction(cursor)
+        data = prediccion_api.prediction(cursor, hoy=date(2026, 10, 12))
         self.assertEqual([d["fecha"] for d in data["dias"]], ["2026-10-13", "2026-10-14"])
         self.assertEqual(data["dias"][0]["celdas"][0], [-22.455, -68.925, 12.0])
         self.assertEqual(data["dias"][0]["total"], 16)
         self.assertEqual(data["dias"][0]["elementos"], 2)
         self.assertEqual(data["metricas"]["metodo"], "lightgbm")
         self.assertNotIn("huella_camiones", data["metricas"])
+        # Al día siguiente el 13 ya pasó: no se muestra aunque Machine no haya recalculado.
+        cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_celda", celdas)])
+        data = prediccion_api.prediction(cursor, hoy=date(2026, 10, 13))
+        self.assertEqual(([d["fecha"] for d in data["dias"]], data["desde"]), (["2026-10-14"], "2026-10-14"))
+        cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_celda", celdas)])
+        self.assertIsNone(prediccion_api.prediction(cursor, hoy=date(2026, 10, 14)))  # todo pasado: pendiente
 
 
 class RoutePredictionApiTests(unittest.TestCase):
@@ -176,7 +182,7 @@ class RoutePredictionApiTests(unittest.TestCase):
         formas = [{"route_id": "R-ABC123", "label": "Calama ↔ Faena", "geometria": json.dumps(linea)}]
         cursor = FakeCursor([("FROM prediccion_version", [version]), ("FROM prediccion_ruta_forma", formas),
                              ("FROM prediccion_ruta ", valores)])
-        data = prediccion_api.prediction(cursor, "rutas")
+        data = prediccion_api.prediction(cursor, "rutas", hoy=date(2026, 10, 12))
         self.assertEqual(data["tipo"], "rutas")
         self.assertEqual(data["dias"][0]["celdas"], [["R-ABC123", 4.0]])
         self.assertEqual(data["rutas"]["R-ABC123"], {"label": "Calama ↔ Faena", "lineas": linea})

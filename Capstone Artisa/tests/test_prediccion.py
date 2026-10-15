@@ -155,6 +155,39 @@ class PrediccionTests(unittest.TestCase):
         self.assertEqual(prediccion.dias_confiables([1.0, 2.0, 3.0], 15), 7)   # mínimo 7 días
         self.assertEqual(prediccion.dias_confiables(None, 9), 9)
 
+    def test_forecast_starts_tomorrow_even_if_yesterday_is_not_closed(self):
+        hoy = date(2026, 10, 15)
+        fechas, pasados = prediccion.fechas_pronostico(date(2026, 10, 13), hoy)  # el 14 aún sin cerrar
+        self.assertEqual((fechas[0], fechas[-1], pasados), (date(2026, 10, 14), date(2026, 10, 30), 2))
+        publicados = [f for f in fechas if f > hoy]
+        self.assertEqual((publicados[0], len(publicados)), (date(2026, 10, 16), prediccion.DIAS_ADELANTE))
+        # Con el día de ayer cerrado solo hoy se encadena sin publicarse.
+        self.assertEqual(prediccion.fechas_pronostico(date(2026, 10, 14), hoy)[1], 1)
+        # El mínimo de días publicados se cuenta después de los que no se publican.
+        self.assertEqual(prediccion.dias_confiables([1.0, 2.0, 3.0], 17, minimo=2 + 7), 9)
+
+    def test_real_error_compares_previous_forecast_with_closed_day(self):
+        lista = [date(2026, 10, 13), date(2026, 10, 14)]
+        celdas = [(-2246, -6893), (-2245, -6893)]
+        matriz = np.array([[5, 8], [1, 0]], dtype=np.float32)          # lo que pasó el 14: 8 y 0
+        anterior = {"id": 7, "base_hasta": date(2026, 10, 13)}
+        predicho = [{"fecha": date(2026, 10, 14), "celda_lat": -2246, "celda_lon": -6893, "valor": 6.0},
+                    {"fecha": date(2026, 10, 14), "celda_lat": -2200, "celda_lon": -6800, "valor": 2.0}]
+
+        class Cursor:
+            def execute(self, sql, params):
+                self.params = params
+            def fetchall(self):
+                return predicho
+        cursor = Cursor()
+        real = prediccion.error_real(cursor, anterior, "calor", celdas, matriz, lista)
+        # Errores: |6-8|=2, |0-0|=0 y 2 donde se esperaba actividad y no hubo ninguna.
+        self.assertEqual(real, {"fecha": "2026-10-14", "mae": round(4 / 3, 3), "esperado": 8, "real": 8})
+        self.assertEqual(cursor.params, (7, date(2026, 10, 14), date(2026, 10, 14)))
+        # Sin días nuevos cerrados no hay medición nueva.
+        self.assertIsNone(prediccion.error_real(cursor, {"id": 7, "base_hasta": date(2026, 10, 14)},
+                                                "calor", celdas, matriz, lista))
+
     def test_horizon_counts_discarded_days(self):
         # Se publicó hasta el 20, pero se intentó hasta el 27: no hay que recalcular cada 15 min.
         version = {"hasta": date(2026, 10, 20), "metricas": {"horizonte_hasta": "2026-10-27"}}

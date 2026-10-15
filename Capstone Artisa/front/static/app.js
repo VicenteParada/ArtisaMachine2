@@ -1872,7 +1872,7 @@ function ensurePredictionMap() {
 
 function drawPrediction() {
   const data = predictionState.data;
-  if (!data || !data.dias.length) return;
+  if (!data?.dias?.length) return;
   const days = predictionSelected();
   const config = predictionConfig();
   const routes = predictionState.tipo === "rutas";
@@ -2130,7 +2130,7 @@ function renderPrediction(data) {
   $("prediction-legend-routes").hidden = predictionState.tipo !== "rutas";
   $("prediction-chart-unit").textContent = config.chartUnit;
   $("prediction-total-label").textContent = config.totalLabel;
-  if (!data || data.status !== "ok" || !data.dias.length) {
+  if (!data || data.status !== "ok" || !data.dias?.length) {
     status.textContent = "Pendiente";
     status.className = "status neutral";
     $("prediction-intro").textContent = (data && data.message) ||
@@ -2165,8 +2165,15 @@ function renderPrediction(data) {
   $("prediction-error").textContent = error === undefined ? "—" : format(error, 2);
   const others = Object.entries(errors).filter(([method]) => method !== m.metodo)
     .map(([method, value]) => `${PREDICTION_METHODS[method] || method}: ${format(value, 2)}`);
-  $("prediction-error-detail").textContent = others.length
-    ? others.join(" · ") + " · menor es mejor" : `En ${config.errorUnit} · menor es mejor`;
+  // Error real: lo que la versión anterior predijo para el último día cerrado contra lo que pasó.
+  const real = m.error_real;
+  const realText = real
+    ? `Real el ${predictionDayLabel(real.fecha, "short")}: ${format(real.mae, 2)}` +
+      (predictionState.tipo === "calor" ? ` (se esperaban ${format(real.esperado)}, hubo ${format(real.real)})` : "")
+    : "";
+  $("prediction-error-detail").textContent = [realText,
+    others.length ? others.join(" · ") + " · menor es mejor" : `En ${config.errorUnit} · menor es mejor`]
+    .filter(Boolean).join(" · ");
   $("prediction-base").textContent = new Intl.DateTimeFormat("es-CL", {
     day: "numeric", month: "short", timeZone: "UTC"}).format(predictionDate(data.base_hasta));
   $("prediction-base-detail").textContent = m.dias_historia

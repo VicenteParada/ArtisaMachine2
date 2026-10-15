@@ -1,6 +1,8 @@
 """Respuesta de /api/prediccion: la versión activa de machine_learning/prediccion.py.
 
-Sin versión activa devuelve None y la API responde "pendiente".
+Sin versión activa devuelve None y la API responde "pendiente". Solo se entregan días
+futuros (desde mañana, hora de Chile): si Machine aún no recalculó tras la medianoche (por
+ejemplo, el equipo estuvo apagado), los días que ya pasaron no se muestran.
 """
 
 from collections import defaultdict
@@ -8,11 +10,13 @@ import json
 
 import pymysql
 
+from common import dias
+
 ESCALA = 100  # celdas de 0,01° (igual que machine_learning/prediccion.py)
 METRICAS_PUBLICAS = ("metodo", "motivo", "errores", "correlaciones", "mae_publicado", "mae_modelo",
                      "mae_referencia", "objetivo", "dias_historia", "historia_desde", "historia_hasta",
                      "dias_prueba", "celdas", "camiones", "error_por_dia", "dias_descartados",
-                     "rutas_publicadas")
+                     "rutas_publicadas", "error_real")
 
 
 def _centro(c):
@@ -29,7 +33,7 @@ def _rutas(cursor, version_id):
             for fila in cursor.fetchall()}
 
 
-def prediction(cursor, tipo="calor"):
+def prediction(cursor, tipo="calor", hoy=None):
     """tipo "calor": celdas [lat, lon, reportes]; tipo "rutas": rutas completas [route_id, camiones]
     y "rutas" con el nombre y la línea de cada una."""
     try:
@@ -60,11 +64,15 @@ def prediction(cursor, tipo="calor"):
         for fila in cursor.fetchall():
             por_dia[fila["fecha"]].append([_centro(fila["celda_lat"]), _centro(fila["celda_lon"]),
                                            round(float(fila["valor"]), 1)])
+    hoy = hoy or dias.hoy()
+    por_dia = {fecha: elementos for fecha, elementos in por_dia.items() if fecha > hoy}
+    if not por_dia:
+        return None  # todo lo publicado ya pasó: Machine recalcula en su próxima revisión
     respuesta = {
         "status": "ok", "version": version["id"],
         "generado_en": version["creado_en"].isoformat() + "Z",
         "base_hasta": version["base_hasta"].isoformat(),
-        "desde": version["desde"].isoformat(), "hasta": version["hasta"].isoformat(),
+        "desde": min(por_dia).isoformat(), "hasta": max(por_dia).isoformat(),
         "metricas": {k: metricas[k] for k in METRICAS_PUBLICAS if k in metricas},
         "tipo": tipo,
         "dias": [{"fecha": fecha.isoformat(), "total": round(sum(c[-1] for c in elementos)),
