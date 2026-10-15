@@ -661,7 +661,7 @@
 .fleet-more>*:last-child{margin-bottom:16px}
 .fleet-more-note{margin-top:0;color:var(--muted);font-size:11px}
 .fleet-more-note strong{color:var(--ink)}
-.fleet-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin:18px 0 4px;padding:4px;border-radius:10px;background:#e9eeea}
+.fleet-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin:18px 0 4px;padding:4px;border-radius:10px;background:#e9eeea}
 .fleet-tab{display:grid;gap:2px;padding:10px 14px;border:0;border-radius:7px;background:transparent;color:var(--muted);text-align:left;cursor:pointer;font:inherit}
 .fleet-tab strong{color:var(--ink);font-size:13px}
 .fleet-tab small{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -671,9 +671,7 @@
 .fleet-tab:focus-visible{outline:2px solid var(--green);outline-offset:2px}
 .fleet-panel{padding-top:6px}
 .fleet-panel-head{margin:12px 0;color:var(--muted);font-size:12px}
-.fleet-panel .history-month-actions{justify-content:flex-start;margin-bottom:4px}
-.fleet-panel .history-download-status{text-align:left}
-#live-reports .telemetry-table,#month-panel .telemetry-table{max-height:calc(100vh - 330px);min-height:320px}
+#live-reports .telemetry-table{max-height:calc(100vh - 330px);min-height:320px}
 @media(max-width:690px){.fleet-tab{padding:9px 8px}.fleet-tab small{display:none}}
 #history-detail .button{margin-top:10px}
 .report-row{cursor:pointer}
@@ -946,6 +944,32 @@ a.fd-day:hover{outline:2px solid var(--ink);outline-offset:1px}
 .fd-tab:hover{background:#f6f9f6}
 .fd-tab.is-active{background:#fff;box-shadow:0 4px 14px rgba(23,45,50,.08);outline:1.5px solid var(--green)}
 .fd-tab.is-active strong{color:var(--green)}
+.fd-report-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:18px 0}
+.fd-report-tab{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:12px;padding:15px 17px;border:1px solid var(--line);border-radius:10px;background:#f7f9f7;color:var(--ink);text-align:left;cursor:pointer;font:inherit;transition:border-color .15s,background .15s,box-shadow .15s}
+.fd-report-tab:hover{border-color:#b5c9bf;background:#fbfdfb}
+.fd-report-tab.is-active{border-color:var(--green);background:#fff;box-shadow:inset 0 -3px 0 var(--green),0 5px 18px rgba(23,45,50,.06)}
+.fd-report-tab>span:last-child{display:grid;gap:3px;min-width:0}
+.fd-report-tab strong{font-size:13px}.fd-report-tab small{color:var(--muted);font-size:10px;line-height:1.35}
+.fd-report-number{display:grid;place-items:center;width:34px;height:34px;border-radius:8px;background:#e4ece7;color:var(--green);font-size:10px;font-weight:800;letter-spacing:.08em}
+.fd-report-tab.is-active .fd-report-number{background:var(--green);color:#fff}
+.fd-report-tab:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.fd-report-panel{animation:fd-report-in .18s ease-out}
+@keyframes fd-report-in{from{opacity:.45;transform:translateY(4px)}to{opacity:1;transform:none}}
+.fd-daily-report{padding:20px}
+.fd-daily-heading{align-items:center}
+.fd-daily-report>p{max-width:780px;min-height:0!important;margin:8px 0 16px!important}
+.history-month-field{display:grid;gap:4px;color:var(--muted);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.history-month-field input{min-width:165px;background:#fff;color:var(--ink)}
+.fd-daily-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 12px}
+.fd-daily-kpis>div{padding:12px 14px;border:1px solid #e2e9e5;border-radius:8px;background:#f7faf7}
+.fd-daily-kpis span{display:block;color:var(--muted);font-size:9px}.fd-daily-kpis strong{display:block;margin-top:5px;color:var(--ink);font-size:20px;font-variant-numeric:tabular-nums}
+.fd-daily-report .history-download-status{min-height:14px;margin:0 0 5px;text-align:left}
+.fd-daily-table{max-height:540px;border:1px solid var(--line);border-radius:8px}
+.fd-daily-table table{font-variant-numeric:tabular-nums}.fd-daily-table th{position:sticky;top:0;z-index:1;background:#f3f7f4}
+.fd-daily-table th,.fd-daily-table td{padding:11px 12px}.fd-daily-table th:not(:first-child),.fd-daily-table td:not(:first-child){text-align:right}
+.fd-daily-table tbody tr:hover td{background:#f6faf7}.fd-daily-table tbody tr.is-today td{background:#eef7e9}
+.fd-daily-table tbody tr.is-today td:first-child{box-shadow:inset 3px 0 0 var(--lime)}
+.fd-daily-table .history-day-link{font:inherit;text-transform:capitalize;text-align:left}.fd-daily-table .history-day-link:focus-visible{outline:2px solid var(--green);outline-offset:3px}
 .fd .dashboard-kpis.fd-kpis-3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .fd-kpis strong{font-size:30px}
 .fd-kpis span.fd-levelbar{display:flex;height:8px;gap:2px;margin-top:6px;border-radius:8px;overflow:hidden;background:#e6ece8}
@@ -1033,4 +1057,4 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .fd-daily-card.is-zero{background:#fff6f1;border-color:#f0ddd2}.fd-daily-card.is-weekend{opacity:.7}.fd-daily-card.is-today{border-color:var(--green);box-shadow:inset 0 0 0 1px var(--green)}
 .fd-history-title{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin:10px 0 8px}.fd-history-title strong{font-size:10px}
 @media(max-width:940px){.fd-pair{grid-template-columns:minmax(0,1fr)}.fd-rank-list{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:690px){.fd .dashboard-kpis.fd-kpis-3{grid-template-columns:minmax(0,1fr)}.fd-donut-wrap{grid-template-columns:130px minmax(0,1fr);gap:16px}.fd-donut{width:130px}.fd-donut>div{inset:22px}.fd-tab small{display:none}.fd-month-chart.is-daily{overflow-x:auto;grid-auto-columns:14px}.dashboard-method{flex-direction:column;gap:5px}}
+@media(max-width:690px){.fd .dashboard-kpis.fd-kpis-3{grid-template-columns:minmax(0,1fr)}.fd-donut-wrap{grid-template-columns:130px minmax(0,1fr);gap:16px}.fd-donut{width:130px}.fd-donut>div{inset:22px}.fd-tab small{display:none}.fd-report-tabs{grid-template-columns:minmax(0,1fr)}.fd-report-tab{padding:12px}.fd-daily-heading{display:grid}.history-month-actions{justify-content:flex-start}.fd-daily-kpis{grid-template-columns:minmax(0,1fr)}.fd-month-chart.is-daily{overflow-x:auto;grid-auto-columns:14px}.dashboard-method{flex-direction:column;gap:5px}}

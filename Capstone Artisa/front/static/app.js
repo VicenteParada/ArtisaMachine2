@@ -1011,6 +1011,7 @@ const DASH_METRICS = {
 };
 var dashState = {tab: "global", data: null, metric: "reportes", period: null, sort: "total", query: "",
   open: null, days: {}, months: {}};
+var dashReportView = "daily";
 
 const dashMonthLabel = (month, style = "short") => new Intl.DateTimeFormat("es-CL", style === "short"
   ? {month: "short", timeZone: "UTC"} : {month: "long", year: "numeric", timeZone: "UTC"})
@@ -1045,7 +1046,26 @@ function setDashTab(tab) {
   }
   $("dash-global").hidden = tab !== "global";
   $("dash-detail").hidden = tab !== "detalle";
+  if (tab === "detalle") setDashReportView(dashReportView);
   renderDashSnapshot();
+}
+
+function setDashReportView(view) {
+  dashReportView = view;
+  for (const button of document.querySelectorAll("[data-dash-report-view]")) {
+    const active = button.dataset.dashReportView === view;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  }
+  $("dash-report-daily").hidden = view !== "daily";
+  $("dash-report-trucks").hidden = view !== "trucks";
+  if (view === "daily") {
+    const month = $("history-month").value ||
+      (dashState.period && dashState.period !== "todos" ? dashState.period : localToday().slice(0, 7));
+    if (historyState.month !== month) loadHistoryMonth(month);
+  } else if (dashState.data) {
+    renderDashView();
+  }
 }
 
 function renderDashSnapshot() {
@@ -1237,7 +1257,7 @@ function openRouteOnMap(routeId) {
   }, 250);
 }
 
-// --- Datos detallados ---
+// --- Informes históricos ---
 function renderDashboard(data) {
   if (!data || data.status !== "ok") {
     dashState.data = null;
@@ -1791,6 +1811,9 @@ function downloadDashCsv() {
 for (const button of document.querySelectorAll("[data-dash-tab]")) {
   button.addEventListener("click", () => setDashTab(button.dataset.dashTab));
 }
+for (const button of document.querySelectorAll("[data-dash-report-view]")) {
+  button.addEventListener("click", () => setDashReportView(button.dataset.dashReportView));
+}
 for (const button of document.querySelectorAll("[data-dash-metric]")) {
   button.addEventListener("click", () => { dashState.metric = button.dataset.dashMetric; renderDashView(); });
 }
@@ -2190,22 +2213,39 @@ async function loadHistoryMonth(month) {
   $("history-month").value = month;
   $("history-month").max = localToday().slice(0, 7);
   const body = $("history-month-rows");
+  for (const id of ["history-kpi-days", "history-kpi-reports", "history-kpi-km"]) $(id).textContent = "—";
+  body.replaceChildren();
+  emptyRow(body, 5, "Cargando el resumen del mes…");
   try {
     const data = await api(`/api/reportes/mes?mes=${month}`);
     if (historyState.month !== month) return;
     body.replaceChildren();
-    for (const day of data.dias || []) {
+    const days = data.dias || [];
+    let reports = 0;
+    let km = 0;
+    for (const day of days) {
+      reports += Number(day.reportes || 0);
+      km += Number(day.km_observados || 0);
       const tr = document.createElement("tr");
+      tr.classList.toggle("is-today", day.fecha === localToday());
       const link = document.createElement("button");
       link.type = "button"; link.className = "history-day-link";
-      link.textContent = day.fecha;
-      link.addEventListener("click", () => { setFleetTab("flota"); setBoardDay(day.fecha); });
+      link.textContent = dashDayLabel(day.fecha);
+      link.title = `Abrir los camiones del ${day.fecha}`;
+      link.addEventListener("click", () => {
+        setFleetTab("flota");
+        setBoardDay(day.fecha);
+        window.location.hash = "#camiones";
+      });
       const first = document.createElement("td"); first.append(link);
       const [label] = HISTORY_STATES[day.estado] || [day.estado];
       tr.append(first, cell(label), cell(format(day.camiones)), cell(format(day.reportes)), cell(format(day.km_observados, 1)));
       body.append(tr);
     }
-    if (!(data.dias || []).length) emptyRow(body, 5, "No hay días procesados en este mes.");
+    $("history-kpi-days").textContent = format(days.length);
+    $("history-kpi-reports").textContent = format(reports);
+    $("history-kpi-km").textContent = format(km, 1);
+    if (!days.length) emptyRow(body, 5, "No hay días procesados en este mes.");
   } catch (error) {
     if (historyState.month !== month) return;
     body.replaceChildren();
@@ -2273,7 +2313,7 @@ async function downloadHistoryMonth() {
     status.textContent = "No se pudo generar el CSV: " + error.message;
   } finally {
     button.disabled = false;
-    button.textContent = "↓ Descargar CSV";
+    button.textContent = "↓ Descargar informe completo";
   }
 }
 
@@ -4119,7 +4159,7 @@ $("board-prev").addEventListener("click", () => setBoardDay(shiftDay(boardDay(),
 $("board-next").addEventListener("click", () => setBoardDay(shiftDay(boardDay(), 1)));
 $("board-today").addEventListener("click", () => setBoardDay(null));
 $("board-yesterday").addEventListener("click", () => setBoardDay(shiftDay(localToday(), -1)));
-// Tres tareas en el mismo espacio: la lista de camiones, los reportes en vivo y el mes.
+// Camiones en vivo conserva solo las tareas operativas: la flota y los reportes recientes.
 function setFleetTab(tab) {
   if (tab === "flota") truckView.pin = null;
   truckView.tab = tab;
@@ -4128,8 +4168,6 @@ function setFleetTab(tab) {
   }
   $("fleet-panel-flota").hidden = tab !== "flota";
   $("live-reports").hidden = tab !== "reportes";
-  $("month-panel").hidden = tab !== "mes";
-  if (tab === "mes" && historyState.month !== boardDay().slice(0, 7)) loadHistoryMonth(boardDay().slice(0, 7));
 }
 for (const button of document.querySelectorAll("[data-fleet-tab]")) {
   button.addEventListener("click", () => setFleetTab(button.dataset.fleetTab));

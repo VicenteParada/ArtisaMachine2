@@ -7,12 +7,12 @@
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="/mapa-base.css?v=20261015-dashboard2">
-  <link rel="stylesheet" href="/style.css?v=20261015-truckplay">
+  <link rel="stylesheet" href="/style.css?v=20261015-reporthub">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
   <script src="/mapa-base.js?v=20261015-dashboard2" defer></script>
   <script src="/map-data.js?v=20261015-dashboard2" defer></script>
-  <script src="/app.js?v=20261015-truckplay" defer></script>
+  <script src="/app.js?v=20261015-reporthub" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -105,7 +105,7 @@
       <a class="dataset-tab" data-dataset-tab="trucks" href="#camiones"><span class="dataset-icon">⛟</span><span><strong>Camiones en vivo</strong><small>Dónde están y qué hicieron</small></span></a>
       <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de rutas</strong><small>Rutas más y menos usadas</small></span></a>
       <a class="dataset-tab" data-dataset-tab="prediction" href="#prediccion"><span class="dataset-icon">◈</span><span><strong>Predicción</strong><small>Próximos 15 días</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores de la flota</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores e informes</small></span></a>
     </nav>
     <div id="camiones" class="dataset-space" data-dataset-view="trucks" hidden>
       <section class="panel trucks-panel" aria-labelledby="fleet-title">
@@ -119,7 +119,6 @@
           <div class="fleet-tabs" role="tablist" aria-label="Qué quieres ver">
             <button type="button" role="tab" class="fleet-tab" data-fleet-tab="flota" aria-selected="true" aria-controls="fleet-panel-flota"><strong>Camiones</strong><small id="fleet-tab-flota-note">Estado y actividad por día</small></button>
             <button type="button" role="tab" class="fleet-tab" data-fleet-tab="reportes" aria-selected="false" aria-controls="live-reports"><strong>Reportes en vivo</strong><small id="fleet-tab-reportes-note">Lo último que llegó de la API</small></button>
-            <button type="button" role="tab" class="fleet-tab" data-fleet-tab="mes" aria-selected="false" aria-controls="month-panel"><strong>Resumen del mes</strong><small>Un día por fila y descarga CSV</small></button>
           </div>
           <div id="fleet-panel-flota" class="fleet-panel" role="tabpanel">
           <div class="board-day">
@@ -153,15 +152,6 @@
               <p class="fleet-more-note"><strong id="telemetry-count">—</strong> reportes guardados · <strong id="vehicle-count">—</strong> <span id="vehicle-count-note">camiones con reportes en las últimas 24 h</span> · <span id="telemetry-quality"></span></p>
               <div class="table-scroll telemetry-table"><table><thead><tr><th>Vehículo</th><th>Fecha (hora Chile)</th><th>Evento</th><th>Coordenadas</th><th class="col-ignition">Encendido</th></tr></thead><tbody id="telemetry-rows"><tr><td colspan="5" class="empty">Cargando telemetría…</td></tr></tbody></table></div>
             </div>
-          </div>
-          <div class="fleet-panel" id="month-panel" role="tabpanel" hidden>
-            <p class="fleet-panel-head">Elige un mes: toca un día para ver qué hizo cada camión, o descarga el CSV con el detalle de cada camión y día.</p>
-            <div class="history-month-actions">
-              <input type="month" id="history-month" aria-label="Mes a consultar">
-              <button type="button" class="button secondary" id="history-month-download">↓ Descargar CSV del mes</button>
-            </div>
-            <p id="history-month-download-status" class="history-download-status" aria-live="polite"></p>
-            <div class="table-scroll telemetry-table"><table><thead><tr><th>Día</th><th>Estado</th><th>Camiones</th><th>Reportes</th><th>Km observados</th></tr></thead><tbody id="history-month-rows"></tbody></table></div>
           </div>
         </div>
         <div id="truck-view" hidden>
@@ -234,7 +224,7 @@
         </div>
         <div class="fd-tabs" role="tablist" aria-label="Vista del dashboard">
           <button type="button" class="fd-tab is-active" role="tab" aria-selected="true" data-dash-tab="global"><strong>Datos globales</strong><small>Rutas clasificadas, zonas y estado de la flota</small></button>
-          <button type="button" class="fd-tab" role="tab" aria-selected="false" data-dash-tab="detalle"><strong>Datos detallados</strong><small>Reportes y km por patente, del mes o de todos los meses</small></button>
+          <button type="button" class="fd-tab" role="tab" aria-selected="false" data-dash-tab="detalle"><strong>Informes históricos</strong><small>Resumen por día y comparación por camión</small></button>
         </div>
 
         <div id="dash-global" role="tabpanel" aria-label="Datos globales">
@@ -270,8 +260,39 @@
           <div class="dashboard-method"><strong>Cómo se definen las zonas</strong><span id="dg-method">Se calculan con las rutas clasificadas.</span></div>
         </div>
 
-        <div id="dash-detail" role="tabpanel" aria-label="Datos detallados" hidden>
-          <p class="telemetry-intro">Reportes GPS y kilómetros de cada camión, desde el primer día con datos. Sale del cierre diario (00:00 a 00:00, hora de Chile); el mes en curso suma hasta hoy.</p>
+        <div id="dash-detail" role="tabpanel" aria-label="Informes históricos" hidden>
+          <p class="telemetry-intro">Toda la información histórica de la flota está reunida aquí. Revísala por día o compara el rendimiento de cada camión.</p>
+          <div class="fd-report-tabs" role="tablist" aria-label="Cómo revisar los informes históricos">
+            <button type="button" class="fd-report-tab is-active" role="tab" aria-selected="true" aria-controls="dash-report-daily" data-dash-report-view="daily">
+              <span class="fd-report-number">01</span><span><strong>Resumen por día</strong><small>Actividad completa de la flota en cada fecha</small></span>
+            </button>
+            <button type="button" class="fd-report-tab" role="tab" aria-selected="false" aria-controls="dash-report-trucks" data-dash-report-view="trucks">
+              <span class="fd-report-number">02</span><span><strong>Comparación por camión</strong><small>Reportes y kilómetros de cada patente</small></span>
+            </button>
+          </div>
+
+          <div id="dash-report-daily" class="fd-report-panel" role="tabpanel" aria-label="Resumen por día">
+            <article class="dashboard-card fd-daily-report">
+              <div class="dashboard-card-heading fd-daily-heading">
+                <div><span class="eyebrow">INFORME MENSUAL</span><h3>Actividad de la flota por día</h3></div>
+                <div class="history-month-actions">
+                  <label class="history-month-field"><span>Mes</span><input type="month" id="history-month" aria-label="Mes a consultar"></label>
+                  <button type="button" class="fd-csv" id="history-month-download">↓ Descargar informe completo</button>
+                </div>
+              </div>
+              <p>Cada fila resume un día. Toca la fecha para abrir la lista de camiones de esa jornada. La descarga incluye el detalle de cada camión, sus viajes, paradas y tiempos detenidos.</p>
+              <div class="fd-daily-kpis" aria-label="Totales del mes">
+                <div><span>Días procesados</span><strong id="history-kpi-days">—</strong></div>
+                <div><span>Reportes GPS</span><strong id="history-kpi-reports">—</strong></div>
+                <div><span>Km observados</span><strong id="history-kpi-km">—</strong></div>
+              </div>
+              <p id="history-month-download-status" class="history-download-status" aria-live="polite"></p>
+              <div class="table-scroll telemetry-table fd-daily-table"><table><thead><tr><th>Día</th><th>Estado</th><th>Camiones</th><th>Reportes</th><th>Km observados</th></tr></thead><tbody id="history-month-rows"></tbody></table></div>
+            </article>
+            <div class="dashboard-method"><strong>Qué contiene esta descarga</strong><span>Una fila por camión y día, con reportes, kilómetros, viajes, paradas y tiempo detenido.</span></div>
+          </div>
+
+          <div id="dash-report-trucks" class="fd-report-panel" role="tabpanel" aria-label="Comparación por camión" hidden>
           <div class="fd-filters">
             <div class="fd-periods" id="dash-periods" role="group" aria-label="Período"></div>
             <div class="fd-metric" role="group" aria-label="Qué medir">
@@ -294,7 +315,7 @@
             <article class="dashboard-card fd-table-card">
               <div class="dashboard-card-heading">
                 <div><span class="eyebrow">POR PATENTE</span><h3 id="dash-table-title">Reportes por camión</h3></div>
-                <button type="button" id="dash-csv" class="fd-csv">↓ Descargar CSV</button>
+                <button type="button" id="dash-csv" class="fd-csv">↓ Descargar comparación</button>
               </div>
               <div class="fd-tools">
                 <label class="fd-search"><span>⌕</span><input id="dash-search" type="search" placeholder="Buscar patente o camión…" aria-label="Buscar patente o camión"></label>
@@ -315,6 +336,7 @@
                 <ul id="dash-quality" class="fd-quality-list"></ul>
               </article>
             </aside>
+          </div>
           </div>
         </div>
       </section>
