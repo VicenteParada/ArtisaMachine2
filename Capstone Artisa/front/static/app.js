@@ -1001,25 +1001,23 @@ function renderDashboardBars(containerId, items, defaultColor) {
   }
 }
 
-// --- Dashboard de la flota: mes a mes por patente (cierre diario) ---------------------
+// --- Dashboard: dos pestañas --------------------------------------------------------------
+// Datos globales: rutas clasificadas y estado de la flota (de /api/mapa).
+// Datos detallados: reportes y km por patente del cierre diario (/api/dashboard), de un mes
+// (día a día, con /api/reportes/mes-completo) o de todos los meses.
 const DASH_METRICS = {
-  reportes: {label: "Reportes", title: "Reportes", unit: "reportes", decimals: 0},
-  km: {label: "Km", title: "Kilómetros observados", unit: "km", decimals: 0},
-  viajes: {label: "Viajes", title: "Viajes", unit: "viajes", decimals: 0}
+  reportes: {title: "Reportes", unit: "reportes", decimals: 0},
+  km: {title: "Kilómetros observados", unit: "km", decimals: 0}
 };
-var dashState = {data: null, metric: "reportes", sort: "total", query: "", open: null, days: {}};
+var dashState = {tab: "global", data: null, metric: "reportes", period: null, sort: "total", query: "",
+  open: null, days: {}, months: {}};
 
 const dashMonthLabel = (month, style = "short") => new Intl.DateTimeFormat("es-CL", style === "short"
   ? {month: "short", timeZone: "UTC"} : {month: "long", year: "numeric", timeZone: "UTC"})
   .format(new Date(month + "-15T12:00:00Z")).replace(".", "");
 const dashDayLabel = (iso) => new Intl.DateTimeFormat("es-CL", {
   weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC"}).format(new Date(iso + "T12:00:00Z"));
-
-function dashSilence(days) {
-  if (days === null || days === undefined) return "Nunca reportó";
-  if (days <= 0) return "Hoy";
-  return days === 1 ? "Ayer" : `Hace ${format(days)} días`;
-}
+const dashHeat = (value, max) => value ? (0.12 + 0.88 * Math.sqrt(value / max)).toFixed(3) : "0";
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -1028,210 +1026,538 @@ function el(tag, className, text) {
   return node;
 }
 
+function dashSilence(days) {
+  if (days === null || days === undefined) return "Nunca reportó";
+  if (days <= 0) return "Hoy";
+  return days === 1 ? "Ayer" : `Hace ${format(days)} días`;
+}
+
+function setDashTab(tab) {
+  dashState.tab = tab;
+  for (const button of document.querySelectorAll("[data-dash-tab]")) {
+    const active = button.dataset.dashTab === tab;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-selected", String(active));
+  }
+  $("dash-global").hidden = tab !== "global";
+  $("dash-detail").hidden = tab !== "detalle";
+  renderDashSnapshot();
+}
+
+function renderDashSnapshot() {
+  const status = $("dashboard-snapshot");
+  if (dashState.tab === "detalle") {
+    const data = dashState.data;
+    status.textContent = data ? `Desde ${dashDayLabel(data.desde)} · ${format(data.meses.length)} meses` : "Pendiente";
+    status.className = "status " + (data ? "info" : "neutral");
+  } else {
+    status.textContent = dashState.globalLabel || "Preparando indicadores…";
+    status.className = "status " + (dashState.globalLabel ? "info" : "neutral");
+  }
+}
+
+// --- Datos globales ---
+function routeCenter(route) {
+  const coordinates = route && route.geometry && route.geometry.type === "LineString" ? route.geometry.coordinates : [];
+  let latitude = 0, longitude = 0, count = 0;
+  for (const coordinate of coordinates) {
+    const lon = Number(coordinate && coordinate[0]);
+    const lat = Number(coordinate && coordinate[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    latitude += lat; longitude += lon; count += 1;
+  }
+  return count ? {latitude: latitude / count, longitude: longitude / count} : null;
+}
+
+// Zonas relativas: cada ruta cae en norte, sur, este, oeste o centro según su punto central
+// respecto del centro del conjunto de rutas (no son regiones administrativas).
+function routeZones(routes) {
+  const centers = routes.map((route) => [route, routeCenter(route)]).filter(([, point]) => point);
+  const zones = new Map(["Zona Norte", "Zona Centro", "Zona Sur", "Zona Oeste", "Zona Este"]
+    .map((zone) => [zone, {label: zone, value: 0, routes: 0, vehicles: 0}]));
+  if (!centers.length) return [];
+  const lats = centers.map(([, p]) => p.latitude), lons = centers.map(([, p]) => p.longitude);
+  const latMid = (Math.min(...lats) + Math.max(...lats)) / 2, lonMid = (Math.min(...lons) + Math.max(...lons)) / 2;
+  const latR = Math.max((Math.max(...lats) - Math.min(...lats)) / 2, 0.0001);
+  const lonR = Math.max((Math.max(...lons) - Math.min(...lons)) / 2, 0.0001);
+  for (const [route, point] of centers) {
+    const north = (point.latitude - latMid) / latR, east = (point.longitude - lonMid) / lonR;
+    const name = Math.abs(north) <= 0.26 && Math.abs(east) <= 0.26 ? "Zona Centro"
+      : Math.abs(north) >= Math.abs(east) ? (north >= 0 ? "Zona Norte" : "Zona Sur") : (east < 0 ? "Zona Oeste" : "Zona Este");
+    const zone = zones.get(name);
+    const properties = routeProperties(route);
+    zone.value += Number(properties.usage_count || 0);
+    zone.routes += 1;
+    zone.vehicles += Number(properties.unique_vehicle_count || 0);
+  }
+  return [...zones.values()].sort((a, b) => b.value - a.value);
+}
+
+function renderDonut(containerId, items, centerLabel) {
+  const container = $(containerId);
+  const total = items.reduce((sum, item) => sum + item.value, 0);
+  let angle = 0;
+  const segments = items.map((item) => {
+    const next = total ? angle + item.value / total * 360 : angle;
+    const part = `${item.color} ${angle}deg ${next}deg`;
+    angle = next;
+    return part;
+  });
+  const chart = el("div", "fd-donut");
+  chart.style.background = total ? `conic-gradient(${segments.join(",")})` : "#e6ece8";
+  const center = el("div");
+  center.append(el("strong", "", format(total)), el("span", "", centerLabel));
+  chart.append(center);
+  const legend = el("ul", "fd-donut-legend");
+  for (const item of items) {
+    const row = el("li");
+    const swatch = el("i");
+    swatch.style.backgroundColor = item.color;
+    const share = total ? Math.round(item.value / total * 100) : 0;
+    const name = el("span", "", item.label);
+    const value = el("strong", "", format(item.value));
+    const pct = el("small", "", share + " %");
+    const bar = el("b");
+    bar.style.width = share + "%";
+    bar.style.backgroundColor = item.color;
+    row.append(swatch, name, value, pct, bar);
+    legend.append(row);
+  }
+  container.replaceChildren(chart, legend);
+}
+
+function renderDashboardGlobal(data) {
+  const ids = ["dg-reports", "dg-trips", "dg-routes", "dg-signal"];
+  if (machinePending(data)) {
+    dashState.globalLabel = "Pendiente de Machine";
+    for (const id of ids) $(id).textContent = "—";
+    for (const id of ["dg-zones", "dg-levels", "dg-fleet", "dg-ranking"]) {
+      $(id).replaceChildren(el(id === "dg-ranking" ? "li" : "span", "chart-empty", "Pendiente de procesamiento Machine."));
+    }
+    $("dg-top-zone").textContent = "—";
+    renderDashSnapshot();
+    return;
+  }
+  const summary = data.summary || {};
+  const levels = {HIGH: 0, MEDIUM: 0, LOW: 0};
+  for (const route of data.routes) {
+    const level = routeProperties(route).usage_level;
+    if (level in levels) levels[level] += 1;
+  }
+  const routeCount = data.routes.length;
+  $("dg-reports").textContent = format(summary.available_report_count || 0);
+  $("dg-trips").textContent = format(summary.trip_count || data.trips.length || 0);
+  const window_ = data.metadata.window || {};
+  $("dg-trips-d").textContent = window_.desde
+    ? `Entre el ${formatDataDay(window_.desde)} y el ${formatDataDay(window_.hasta)}` : "Dentro de la ventana de la clasificación";
+  $("dg-routes").textContent = format(routeCount);
+  for (const [level, id] of [["HIGH", "dg-bar-high"], ["MEDIUM", "dg-bar-medium"], ["LOW", "dg-bar-low"]]) {
+    $(id).style.flexGrow = String(levels[level] || 0);
+    $(id).title = `${ROUTE_LABELS[level] || level}: ${format(levels[level])}`;
+  }
+  const fleet = {moving: 0, off: 0};
+  for (const vehicle of data.vehicles) fleet[vehicleStatus(vehicle).className] += 1;
+  $("dg-signal").textContent = `${format(fleet.moving)} de ${format(data.vehicles.length)}`;
+  $("dg-signal-d").textContent = `${format(fleet.off)} sin señal reciente o apagados`;
+  const coverage = data.metadata.metricas?.cobertura;
+  dashState.globalLabel = Number(coverage?.dias_pendientes || 0) > 0
+    ? `Histórico en procesamiento · ${coverage.dias_cerrados}/${coverage.dias_ventana} días`
+    : "Corte " + formatDataDay(data.snapshotDate);
+
+  // Zonas
+  const zones = routeZones(data.routes);
+  const totalZones = zones.reduce((sum, zone) => sum + zone.value, 0);
+  const maxZone = Math.max(1, ...zones.map((zone) => zone.value));
+  $("dg-top-zone").textContent = zones[0] && zones[0].value ? "Mayor uso: " + zones[0].label : "—";
+  $("dg-zones").replaceChildren(...zones.map((zone, k) => {
+    const row = el("div", "fd-zone" + (k === 0 ? " is-top" : ""));
+    const share = totalZones ? zone.value / totalZones * 100 : 0;
+    const head = el("div", "fd-zone-head");
+    head.append(el("span", "", zone.label), el("strong", "", format(zone.value)), el("small", "", format(share, 1) + " %"));
+    const track = el("div", "fd-zone-track");
+    const fill = el("i");
+    fill.style.width = (zone.value ? Math.max(2, zone.value / maxZone * 100) : 0) + "%";
+    track.append(fill);
+    row.append(head, track, el("small", "fd-zone-detail",
+      `${format(zone.routes)} rutas · ${format(zone.vehicles)} participaciones de camiones`));
+    return row;
+  }));
+  $("dg-method").textContent = "Cada ruta se cuenta en una zona (norte, centro, sur, oeste o este) según dónde queda su " +
+    "punto central respecto del centro de todas las rutas. Son zonas relativas, no regiones. Se actualiza junto con el mapa.";
+
+  renderDonut("dg-levels", [
+    {label: "Más usadas", value: levels.HIGH, color: "#14532d"},
+    {label: "Uso medio", value: levels.MEDIUM, color: "#f97316"},
+    {label: "Poco usadas", value: levels.LOW, color: "#dc2626"}
+  ], "rutas");
+  renderDonut("dg-fleet", [
+    {label: "Con señal", value: fleet.moving, color: "#3f9a5b"},
+    {label: "Sin señal o apagados", value: fleet.off, color: "#708083"}
+  ], "camiones");
+
+  // Ranking
+  const top = [...data.routes]
+    .sort((a, b) => Number(routeProperties(b).usage_count || 0) - Number(routeProperties(a).usage_count || 0))
+    .slice(0, 8);
+  const maxTop = Math.max(1, ...top.map((route) => Number(routeProperties(route).usage_count || 0)));
+  $("dg-ranking").replaceChildren(...top.map((route, k) => {
+    const properties = routeProperties(route);
+    const item = el("li");
+    const button = el("button", "fd-rank");
+    button.type = "button";
+    button.title = "Ver esta ruta en el mapa de rutas";
+    const head = el("span", "fd-rank-head");
+    head.append(el("b", "fd-rank-n", String(k + 1)), el("span", "fd-rank-name", properties.label || properties.route_id),
+      el("strong", "", format(properties.usage_count || 0)));
+    const track = el("span", "fd-zone-track");
+    const fill = el("i");
+    fill.style.width = Math.max(2, Number(properties.usage_count || 0) / maxTop * 100) + "%";
+    fill.style.background = properties.color;
+    track.append(fill);
+    button.append(head, track, el("small", "",
+      `${properties.route_id} · ${format(properties.unique_vehicle_count || 0)} camiones · ${properties.usage_label || properties.usage_level}`));
+    button.addEventListener("click", () => openRouteOnMap(properties.route_id));
+    item.append(button);
+    return item;
+  }));
+  renderDashSnapshot();
+}
+
+function openRouteOnMap(routeId) {
+  location.hash = "#mapa-calor";
+  window.setTimeout(() => {
+    if (activeMapMode !== "classified") setMapMode("classified", true);
+    if (fleetMap) fleetMap.invalidateSize();
+    const route = currentMapData && currentMapData.routes.find((item) => routeProperties(item).route_id === routeId);
+    if (route) selectRoute(route);
+  }, 250);
+}
+
+// --- Datos detallados ---
 function renderDashboard(data) {
   if (!data || data.status !== "ok") {
     dashState.data = null;
-    $("dashboard-snapshot").textContent = "Pendiente";
-    $("dashboard-snapshot").className = "status neutral";
-    for (const id of ["dash-k-reportes", "dash-k-km", "dash-k-viajes", "dash-k-activos"]) $(id).textContent = "—";
-    for (const id of ["dash-k-reportes-d", "dash-k-km-d", "dash-k-viajes-d", "dash-k-activos-d"]) {
-      $(id).textContent = "Se calcula con el cierre diario";
-    }
+    for (const id of ["dash-k-reportes", "dash-k-km", "dash-k-activos"]) $(id).textContent = "—";
+    for (const id of ["dash-k-reportes-d", "dash-k-km-d", "dash-k-activos-d"]) $(id).textContent = "Se calcula con el cierre diario";
     $("dash-months").replaceChildren(el("span", "chart-empty", "Aún no hay días procesados."));
-    $("dash-table").replaceChildren();
-    $("dash-silent").replaceChildren();
-    $("dash-quality").replaceChildren();
+    for (const id of ["dash-table", "dash-silent", "dash-quality", "dash-periods"]) $(id).replaceChildren();
+    renderDashSnapshot();
     return;
   }
   dashState.data = data;
-  const totals = data.totales;
-  const current = data.flota[data.flota.length - 1];
-  const since = dashDayLabel(data.desde);
-  $("dashboard-snapshot").textContent = `Desde ${since} · ${format(data.meses.length)} meses`;
-  $("dashboard-snapshot").className = "status info";
-  $("dash-k-reportes").textContent = format(totals.reportes);
-  $("dash-k-reportes-d").textContent = `GPS válidos desde ${since} · ${format(current.reportes)} este mes`;
-  $("dash-k-km").textContent = format(totals.km);
-  $("dash-k-km-d").textContent = `${format(current.km)} km este mes`;
-  $("dash-k-viajes").textContent = format(totals.viajes);
-  $("dash-k-viajes-d").textContent = `${format(current.viajes)} este mes`;
-  $("dash-k-activos").textContent = `${format(current.camiones_activos)} de ${format(totals.camiones)}`;
-  $("dash-k-activos-d").textContent = `${format(data.sin_reportar.length)} sin reportes ni ayer ni hoy`;
+  if (!dashState.period || (dashState.period !== "todos" && !data.meses.includes(dashState.period))) {
+    dashState.period = data.mes_en_curso;
+  }
+  dashState.months = {};  // el mes en curso cambió: se vuelve a pedir al mostrarlo
   renderDashSilent(data);
   renderDashQuality(data);
-  renderDashMetric();
+  renderDashSnapshot();
+  renderDashView();
 }
 
-function dashValues(truck) {
-  return truck[dashState.metric];
+function setDashPeriod(period) {
+  dashState.period = period;
+  dashState.open = null;
+  renderDashView();
 }
 
-function renderDashMetric() {
+function renderDashPeriods(data) {
+  const box = $("dash-periods");
+  const options = [["todos", "Todos los meses"], ...data.meses.map((month) => [month, dashMonthLabel(month)])];
+  box.replaceChildren(...options.map(([value, label]) => {
+    const button = el("button", "fd-period" + (value === "todos" ? " is-all" : ""), label);
+    button.type = "button";
+    const active = dashState.period === value;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+    if (value !== "todos") {
+      button.title = dashMonthLabel(value, "long") + (value === data.mes_en_curso ? " · mes en curso" : "");
+      if (value === data.mes_en_curso) button.append(el("i", "fd-live"));
+    }
+    button.addEventListener("click", () => setDashPeriod(value));
+    return button;
+  }));
+}
+
+function renderDashView() {
   const data = dashState.data;
   if (!data) return;
-  const metric = DASH_METRICS[dashState.metric];
   for (const button of document.querySelectorAll("[data-dash-metric]")) {
     const active = button.dataset.dashMetric === dashState.metric;
     button.classList.toggle("is-active", active);
     button.setAttribute("aria-pressed", String(active));
   }
+  renderDashPeriods(data);
+  renderDashSortOptions();
+  if (dashState.period === "todos") {
+    renderDashAll(data);
+    return;
+  }
+  const month = dashState.months[dashState.period];
+  if (!month || month.loading) {
+    if (!month) loadDashMonth(dashState.period);
+    $("dash-months").replaceChildren(el("span", "chart-empty", "Cargando el mes…"));
+    $("dash-table").replaceChildren();
+    return;
+  }
+  if (month.error) {
+    $("dash-months").replaceChildren(el("span", "chart-empty", "No se pudo cargar el mes: " + month.error));
+    $("dash-table").replaceChildren();
+    return;
+  }
+  renderDashMonth(data, month);
+}
+
+async function loadDashMonth(month) {
+  dashState.months[month] = {loading: true};
+  try {
+    const result = await api(`/api/reportes/mes-completo?mes=${encodeURIComponent(month)}`, {timeoutMs: 60000});
+    dashState.months[month] = monthModel(month, result.filas || []);
+  } catch (error) {
+    dashState.months[month] = {error: error.message};
+  }
+  if (dashState.period === month) renderDashView();
+}
+
+// {dias: [iso…], camiones: {patente: {reportes: [...], km: [...]}}} del mes, hasta hoy.
+function monthModel(month, rows) {
+  const data = dashState.data;
+  const [year, number] = month.split("-").map(Number);
+  const last = new Date(Date.UTC(year, number, 0)).getUTCDate();
+  const days = [];
+  for (let d = 1; d <= last; d++) {
+    const iso = `${month}-${String(d).padStart(2, "0")}`;
+    if (iso > data.hoy) break;
+    if (iso >= data.desde) days.push(iso);
+  }
+  const index = new Map(days.map((iso, k) => [iso, k]));
+  const trucks = {};
+  for (const truck of data.camiones) {
+    trucks[truck.patente] = {reportes: new Array(days.length).fill(0), km: new Array(days.length).fill(0)};
+  }
+  for (const row of rows) {
+    const truck = trucks[row.asset_id];
+    const k = index.get(String(row.fecha).slice(0, 10));
+    if (!truck || k === undefined) continue;
+    truck.reportes[k] = Number(row.reportes || 0);
+    truck.km[k] = Math.round(Number(row.km_observados || 0) * 10) / 10;
+  }
+  return {mes: month, dias: days, camiones: trucks};
+}
+
+function periodValues(truck, month) {
+  // Valores del camión en el período: por mes (todos) o por día (un mes).
+  return month ? month.camiones[truck.patente][dashState.metric] : truck[dashState.metric];
+}
+
+const sum = (values) => values.reduce((total, value) => total + value, 0);  // suma de una lista
+
+function renderDashKpis(totalReports, totalKm, active, totalTrucks, label) {
+  $("dash-k-reportes").textContent = format(totalReports);
+  $("dash-k-reportes-d").textContent = "GPS válidos · " + label;
+  $("dash-k-km").textContent = format(totalKm);
+  $("dash-k-km-d").textContent = "Km observados · " + label;
+  $("dash-k-activos").textContent = `${format(active)} de ${format(totalTrucks)}`;
+  $("dash-k-activos-d").textContent = "Con al menos un reporte · " + label;
+}
+
+function renderDashAll(data) {
+  const metric = DASH_METRICS[dashState.metric];
+  renderDashKpis(data.totales.reportes, data.totales.km,
+    data.camiones.filter((truck) => truck.total > 0).length, data.totales.camiones, "desde " + dashDayLabel(data.desde));
+  $("dash-chart-eyebrow").textContent = "MES A MES";
   $("dash-months-title").textContent = `${metric.title} de la flota por mes`;
-  $("dash-table-title").textContent = `${metric.title} mensuales por camión`;
-  renderDashMonths(data);
-  renderDashSortOptions(data);
-  renderDashTable();
+  $("dash-months-unit").textContent = "Toca un mes para verlo día a día";
+  renderDashBars(data.flota.map((month) => ({
+    key: month.mes, label: dashMonthLabel(month.mes), value: month[dashState.metric],
+    detail: month.mes === data.mes_en_curso ? "en curso" : `${format(month.camiones_activos)} cam.`,
+    current: month.mes === data.mes_en_curso,
+    title: `${dashMonthLabel(month.mes, "long")}: ${format(month[dashState.metric])} ${metric.unit} · ` +
+      `${format(month.camiones_activos)} camiones con datos`,
+    onClick: () => setDashPeriod(month.mes)
+  })), false);
+  $("dash-table-title").textContent = `${metric.title} por camión y mes`;
+  renderDashTable(data.meses.map((month) => ({
+    label: dashMonthLabel(month), title: dashMonthLabel(month, "long"), current: month === data.mes_en_curso,
+    onClick: () => setDashPeriod(month)
+  })), null);
 }
 
-function sortedMonthIndex() {
-  return dashState.sort.startsWith("mes:") ? Number(dashState.sort.slice(4)) : null;
+function renderDashMonth(data, month) {
+  const metric = DASH_METRICS[dashState.metric];
+  const label = dashMonthLabel(month.mes, "long");
+  const fleet = month.dias.map((_, k) => sum(data.camiones.map((truck) => month.camiones[truck.patente][dashState.metric][k])));
+  const reports = sum(data.camiones.map((truck) => sum(month.camiones[truck.patente].reportes)));
+  const km = sum(data.camiones.map((truck) => sum(month.camiones[truck.patente].km)));
+  const active = data.camiones.filter((truck) => sum(month.camiones[truck.patente].reportes) > 0).length;
+  renderDashKpis(reports, km, active, data.camiones.length, label + (month.mes === data.mes_en_curso ? " (hasta hoy)" : ""));
+  $("dash-chart-eyebrow").textContent = "DÍA A DÍA";
+  $("dash-months-title").textContent = `${metric.title} de la flota en ${label}`;
+  $("dash-months-unit").textContent = month.mes === data.mes_en_curso ? "Mes en curso" : `${format(month.dias.length)} días`;
+  renderDashBars(month.dias.map((iso, k) => {
+    const weekday = new Date(iso + "T12:00:00Z").getUTCDay();
+    return {
+      key: iso, label: String(Number(iso.slice(8))), value: fleet[k], weekend: weekday === 0 || weekday === 6,
+      current: iso === data.hoy, detail: "",
+      title: `${dashDayLabel(iso)}: ${format(fleet[k])} ${metric.unit}` + (iso === data.hoy ? " · hoy, en curso" : "")
+    };
+  }), true);
+  $("dash-table-title").textContent = `${metric.title} por camión en ${label}`;
+  renderDashTable(null, month);
 }
 
-function renderDashMonths(data) {
-  const metric = dashState.metric;
-  const values = data.flota.map((month) => month[metric]);
-  const max = Math.max(1, ...values);
-  const chosen = sortedMonthIndex();
+function renderDashBars(items, daily) {
   const chart = $("dash-months");
-  chart.replaceChildren();
-  data.flota.forEach((month, k) => {
-    const bar = el("button", "fd-month");
-    bar.type = "button";
-    const running = month.mes === data.mes_en_curso;
-    bar.classList.toggle("is-current", running);
-    bar.classList.toggle("is-chosen", chosen === k);
-    bar.setAttribute("aria-pressed", String(chosen === k));
-    bar.title = `${dashMonthLabel(month.mes, "long")}: ${format(month[metric])} ${DASH_METRICS[metric].unit}` +
-      ` · ${format(month.camiones_activos)} camiones con datos` + (running ? " · mes en curso" : "");
-    const value = el("b", "", format(month[metric]));
+  chart.classList.toggle("is-daily", daily);
+  const max = Math.max(1, ...items.map((item) => item.value));
+  chart.replaceChildren(...items.map((item) => {
+    const bar = el(item.onClick ? "button" : "div", "fd-month");
+    if (item.onClick) { bar.type = "button"; bar.addEventListener("click", item.onClick); }
+    bar.classList.toggle("is-current", Boolean(item.current));
+    bar.classList.toggle("is-weekend", Boolean(item.weekend));
+    bar.title = item.title;
     const track = el("span", "fd-month-track");
     const fill = el("i");
-    fill.style.height = (month[metric] ? Math.max(3, month[metric] / max * 100) : 0) + "%";
+    fill.style.height = (item.value ? Math.max(3, item.value / max * 100) : 0) + "%";
     track.append(fill);
-    const name = el("strong", "", dashMonthLabel(month.mes));
-    const detail = el("small", "", running ? "en curso" : `${format(month.camiones_activos)} cam.`);
-    bar.append(value, track, name, detail);
-    bar.addEventListener("click", () => setDashSort(chosen === k ? "total" : "mes:" + k));
-    chart.append(bar);
-  });
-  requestAnimationFrame(() => { chart.scrollLeft = chart.scrollWidth; });  // en celular, lo reciente a la vista
+    if (!daily) bar.append(el("b", "", format(item.value)));
+    bar.append(track, el("strong", "", item.label));
+    if (item.detail) bar.append(el("small", "", item.detail));
+    return bar;
+  }));
+  requestAnimationFrame(() => { chart.scrollLeft = chart.scrollWidth; });  // lo reciente a la vista
 }
 
-function renderDashSortOptions(data) {
-  const select = $("dash-sort");
-  const options = [["total", "Mayor total"], ["silencio", "Más días sin reportar"], ["patente", "Patente (A–Z)"],
-    ...data.meses.map((month, k) => ["mes:" + k, "Mayor en " + dashMonthLabel(month, "long")])];
-  select.replaceChildren(...options.map(([value, label]) => {
+function renderDashSortOptions() {
+  const options = [["total", "Mayor total"], ["menos", "Menor total"], ["silencio", "Más días sin reportar"],
+    ["patente", "Patente (A–Z)"]];
+  $("dash-sort").replaceChildren(...options.map(([value, label]) => {
     const option = el("option", "", label);
     option.value = value;
     return option;
   }));
-  select.value = dashState.sort;
+  $("dash-sort").value = dashState.sort;
 }
 
-function setDashSort(sort) {
-  dashState.sort = sort;
-  $("dash-sort").value = sort;
-  renderDashMonths(dashState.data);
-  renderDashTable();
-}
-
-function dashTrucks() {
+function dashTrucks(month) {
   const query = dashState.query.trim().toLowerCase();
   const trucks = dashState.data.camiones.filter((truck) => !query ||
     truck.patente.toLowerCase().includes(query) || (truck.nombre || "").toLowerCase().includes(query));
-  const month = sortedMonthIndex();
-  const total = (truck) => dashValues(truck).reduce((sum, value) => sum + value, 0);
-  const by = {
+  const total = (truck) => sum(periodValues(truck, month));
+  const compare = {
     total: (a, b) => total(b) - total(a),
+    menos: (a, b) => total(a) - total(b),
     patente: (a, b) => a.patente.localeCompare(b.patente),
     silencio: (a, b) => (b.dias_sin_reportes ?? 1e9) - (a.dias_sin_reportes ?? 1e9)
-  };
-  const compare = month !== null ? (a, b) => dashValues(b)[month] - dashValues(a)[month] : by[dashState.sort] || by.total;
+  }[dashState.sort] || ((a, b) => total(b) - total(a));
   return trucks.sort((a, b) => compare(a, b) || a.patente.localeCompare(b.patente));
 }
 
-function renderDashTable() {
+// columns: meses (todos) o null (un mes: total, días con datos, promedio y franja día a día).
+function renderDashTable(columns, month) {
   const data = dashState.data;
   const metric = DASH_METRICS[dashState.metric];
-  const table = $("dash-table");
-  const chosen = sortedMonthIndex();
-  const trucks = dashTrucks();
-  const max = Math.max(1, ...data.camiones.flatMap((truck) => dashValues(truck)));
+  const trucks = dashTrucks(month);
+  const all = data.camiones.map((truck) => periodValues(truck, month));
+  const max = Math.max(1, ...all.flat());
+  const totalMax = Math.max(1, ...all.map(sum));
   const head = el("thead");
   const headRow = el("tr");
   headRow.append(el("th", "fd-col-truck", "Camión"));
-  data.meses.forEach((month, k) => {
-    const th = el("th", "fd-col-month");
-    const button = el("button", "", dashMonthLabel(month));
-    button.type = "button";
-    button.title = `Ordenar por ${dashMonthLabel(month, "long")}`;
-    button.addEventListener("click", () => setDashSort(chosen === k ? "total" : "mes:" + k));
-    th.classList.toggle("is-chosen", chosen === k);
-    th.classList.toggle("is-current", month === data.mes_en_curso);
-    th.setAttribute("aria-sort", chosen === k ? "descending" : "none");
-    th.append(button);
-    headRow.append(th);
-  });
-  headRow.append(el("th", "fd-col-total", "Total"), el("th", "fd-col-last", "Última señal"));
+  if (columns) {
+    for (const column of columns) {
+      const th = el("th", "fd-col-month");
+      const button = el("button", "", column.label);
+      button.type = "button";
+      button.title = `Ver ${column.title} día a día`;
+      button.addEventListener("click", column.onClick);
+      th.classList.toggle("is-current", column.current);
+      th.append(button);
+      headRow.append(th);
+    }
+    headRow.append(el("th", "fd-col-total", "Total"));
+  } else {
+    headRow.append(el("th", "fd-col-total", "Total del mes"), el("th", "fd-col-num", "Días con datos"),
+      el("th", "fd-col-num", "Promedio diario"), el("th", "fd-col-strip", "Día a día"));
+  }
+  headRow.append(el("th", "fd-col-last", "Última señal"));
   head.append(headRow);
+  const span = columns ? columns.length + 3 : 6;
   const body = el("tbody");
-  const totalMax = Math.max(1, ...data.camiones.map((truck) => dashValues(truck).reduce((a, b) => a + b, 0)));
   for (const truck of trucks) {
-    const values = dashValues(truck);
-    const total = values.reduce((sum, value) => sum + value, 0);
+    const values = periodValues(truck, month);
+    const total = sum(values);
     const row = el("tr", "fd-row");
     row.tabIndex = 0;
-    row.dataset.patente = truck.patente;
     row.setAttribute("aria-expanded", String(dashState.open === truck.patente));
     const who = el("td", "fd-col-truck");
-    const plate = el("span", "fd-plate", truck.patente);
-    const name = el("span", "fd-name", truck.nombre || "Sin nombre");
-    who.append(plate, name);
+    who.append(el("span", "fd-plate", truck.patente), el("span", "fd-name", truck.nombre || "Sin nombre"));
     row.append(who);
-    values.forEach((value, k) => {
-      const cell = el("td", "fd-cell", value ? format(value, metric.decimals) : "·");
-      cell.style.setProperty("--heat", value ? (0.12 + 0.88 * Math.sqrt(value / max)).toFixed(3) : "0");
-      cell.classList.toggle("is-strong", value / max > 0.45);
-      cell.classList.toggle("is-chosen", chosen === k);
-      cell.classList.toggle("is-empty", !value);
-      cell.title = `${truck.patente} · ${dashMonthLabel(data.meses[k], "long")}: ${format(value, metric.decimals)} ${metric.unit}` +
-        (dashState.metric === "reportes" ? ` · ${format(truck.dias_activos[k])} días con datos` : "");
-      row.append(cell);
-    });
     const totalCell = el("td", "fd-col-total");
-    const totalText = el("strong", "", format(total, metric.decimals));
     const bar = el("i");
     bar.style.width = Math.max(total ? 4 : 0, total / totalMax * 100) + "%";
-    totalCell.append(totalText, bar);
+    totalCell.append(el("strong", "", format(total, metric.decimals)), bar);
+    if (columns) {
+      values.forEach((value, k) => {
+        const cell = el("td", "fd-cell", value ? format(value, metric.decimals) : "·");
+        cell.style.setProperty("--heat", dashHeat(value, max));
+        cell.classList.toggle("is-strong", value / max > 0.45);
+        cell.classList.toggle("is-empty", !value);
+        cell.title = `${truck.patente} · ${columns[k].title}: ${format(value, metric.decimals)} ${metric.unit}` +
+          ` · ${format(truck.dias_activos[k])} días con datos`;
+        row.append(cell);
+      });
+      row.append(totalCell);
+    } else {
+      const active = values.filter(Boolean).length;
+      const strip = el("td", "fd-col-strip");
+      const bars = el("span", "fd-strip");
+      values.forEach((value, k) => {
+        const day = el("i");
+        day.style.height = (value ? Math.max(12, value / max * 100) : 100) + "%";
+        day.classList.toggle("is-zero", !value);
+        day.style.setProperty("--heat", dashHeat(value, max));
+        day.title = `${dashDayLabel(month.dias[k])}: ${format(value, metric.decimals)} ${metric.unit}`;
+        bars.append(day);
+      });
+      strip.append(bars);
+      const activeCell = el("td", "fd-col-num", `${format(active)} de ${format(values.length)}`);
+      activeCell.classList.toggle("is-late", active < values.length / 2);
+      row.append(totalCell, activeCell,
+        el("td", "fd-col-num", active ? format(total / active, metric.decimals) : "—"), strip);
+    }
     const last = el("td", "fd-col-last", dashSilence(truck.dias_sin_reportes));
     last.classList.toggle("is-late", truck.dias_sin_reportes === null || truck.dias_sin_reportes >= data.sin_reportes_dias);
-    row.append(totalCell, last);
+    row.append(last);
     const toggle = () => toggleDashTruck(truck.patente);
     row.addEventListener("click", toggle);
     row.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(); }
     });
     body.append(row);
-    if (dashState.open === truck.patente) body.append(dashDetailRow(truck, data.meses.length + 3));
+    if (dashState.open === truck.patente) body.append(dashDetailRow(truck, span));
   }
   if (!trucks.length) {
     const row = el("tr");
     const cell = el("td", "fd-none", "Ningún camión coincide con la búsqueda.");
-    cell.colSpan = data.meses.length + 3;
+    cell.colSpan = span;
     row.append(cell);
     body.append(row);
   }
+  const table = $("dash-table");
   table.replaceChildren(head, body);
+  table.classList.toggle("is-month", !columns);
   // El detalle del camión ocupa solo el ancho visible, aunque la tabla se desplace de lado.
   table.style.setProperty("--fd-wrap", table.parentElement.clientWidth + "px");
   $("dash-table-foot").textContent = `${format(trucks.length)} de ${format(data.camiones.length)} camiones · ` +
-    `${metric.title.toLowerCase()} por mes; el color más intenso es el mes más alto de toda la tabla. ` +
-    "Toca un camión para ver su calendario día por día.";
+    (columns ? "el color más intenso es el mes más alto de la tabla; toca un mes para verlo día a día. "
+      : "en la franja, cada barra es un día; en salmón, los días sin reportes. ") +
+    "Toca un camión para ver su calendario completo.";
 }
 
 function toggleDashTruck(patente) {
   dashState.open = dashState.open === patente ? null : patente;
-  renderDashTable();
+  renderDashView();
   if (dashState.open && !dashState.days[patente]) loadDashTruck(patente);
 }
 
@@ -1242,7 +1568,7 @@ async function loadDashTruck(patente) {
   } catch (error) {
     dashState.days[patente] = {error: error.message};
   }
-  if (dashState.open === patente) renderDashTable();
+  if (dashState.open === patente) renderDashView();
 }
 
 function dashDetailRow(truck, columns) {
@@ -1260,17 +1586,16 @@ function dashDetailRow(truck, columns) {
 function dashCalendar(truck, days) {
   const data = dashState.data;
   const metric = DASH_METRICS[dashState.metric];
-  const column = {reportes: 1, km: 2, viajes: 3}[dashState.metric];
+  const column = {reportes: 1, km: 2}[dashState.metric];
   const byDay = new Map(days.map((day) => [day[0], day]));
   const start = new Date(data.desde + "T12:00:00Z");
   start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7)); // lunes
   const end = new Date(data.hoy + "T12:00:00Z");
   const max = Math.max(1, ...days.map((day) => day[column]));
-  const wrap = el("div", "fd-cal-wrap");
   const grid = el("div", "fd-cal");
   const months = el("div", "fd-cal-months");
-  let week = 0, lastMonth = "";
-  for (const day = new Date(start); day <= end; day.setUTCDate(day.getUTCDate() + 7), week++) {
+  let lastMonth = "";
+  for (const day = new Date(start); day <= end; day.setUTCDate(day.getUTCDate() + 7)) {
     const col = el("div", "fd-cal-week");
     for (let d = 0; d < 7; d++) {
       const date = new Date(day);
@@ -1284,6 +1609,7 @@ function dashCalendar(truck, days) {
         const value = entry ? entry[column] : 0;
         square.style.setProperty("--heat", value ? (0.15 + 0.85 * Math.sqrt(value / max)).toFixed(3) : "0");
         square.classList.toggle("is-zero", !value);
+        square.classList.toggle("is-period", dashState.period !== "todos" && iso.startsWith(dashState.period));
         square.href = `#camiones/${encodeURIComponent(truck.patente)}/${iso}`;
         square.title = `${dashDayLabel(iso)}: ${format(value, metric.decimals)} ${metric.unit}` + (value ? " · abrir el día" : "");
         square.setAttribute("aria-label", square.title);
@@ -1291,15 +1617,14 @@ function dashCalendar(truck, days) {
       col.append(square);
     }
     const monthKey = day.toISOString().slice(0, 7);
-    const label = el("span", "", monthKey !== lastMonth ? dashMonthLabel(monthKey) : "");
+    months.append(el("span", "", monthKey !== lastMonth ? dashMonthLabel(monthKey) : ""));
     lastMonth = monthKey;
-    months.append(label);
     grid.append(col);
   }
-  const values = dashValues(truck);
+  const values = truck[dashState.metric];
   const best = values.indexOf(Math.max(...values));
   const active = days.filter((day) => day[1] > 0);
-  const total = days.reduce((sum, day) => sum + day[column], 0);
+  const total = sum(days.map((day) => day[column]));
   const stats = el("dl", "fd-cal-stats");
   const stat = (label, value) => {
     const pair = el("div");
@@ -1317,7 +1642,8 @@ function dashCalendar(truck, days) {
     const swatch = el("i");
     swatch.style.setProperty("--heat", String(heat));
     return swatch;
-  }), el("span", "", "Más · cada cuadro es un día; tócalo para abrir su recorrido"));
+  }), el("span", "", "Más · cada cuadro es un día; tócalo para abrir su recorrido" +
+    (dashState.period !== "todos" ? "; con borde, el mes elegido" : "")));
   const side = el("div", "fd-cal-side");
   side.append(stats);
   if (truck.ultimo_dia) {
@@ -1325,20 +1651,23 @@ function dashCalendar(truck, days) {
     link.href = `#camiones/${encodeURIComponent(truck.patente)}/${truck.ultimo_dia}`;
     side.append(link);
   }
+  const wrap = el("div", "fd-cal-wrap");
   wrap.append(scroller, side);
   const box = el("div");
   box.append(wrap, legend);
-  requestAnimationFrame(() => { scroller.scrollLeft = scroller.scrollWidth; });  // lo más reciente a la vista
+  requestAnimationFrame(() => {
+    const target = scroller.querySelector(".fd-day.is-period");
+    scroller.scrollLeft = target ? target.parentElement.offsetLeft - 20 : scroller.scrollWidth;
+  });
   return box;
 }
 
 function renderDashSilent(data) {
-  const list = $("dash-silent");
   $("dash-silent-count").textContent = format(data.sin_reportar.length);
   $("dash-silent-note").textContent = data.sin_reportar.length
     ? "Sin reportes ni ayer ni hoy. Toca uno para ver su último día con datos."
     : "Todos los camiones del catálogo reportaron ayer u hoy.";
-  list.replaceChildren(...data.sin_reportar.map((truck) => {
+  $("dash-silent").replaceChildren(...data.sin_reportar.map((truck) => {
     const item = el("li");
     const link = el("a");
     link.href = truck.ultimo_dia ? `#camiones/${encodeURIComponent(truck.patente)}/${truck.ultimo_dia}`
@@ -1352,8 +1681,7 @@ function renderDashSilent(data) {
 
 function renderDashQuality(data) {
   const totals = data.totales;
-  const closed = totals.dias ? totals.dias_cerrados / totals.dias : 0;
-  $("dash-q-bar").style.width = (closed * 100).toFixed(1) + "%";
+  $("dash-q-bar").style.width = (totals.dias ? totals.dias_cerrados / totals.dias * 100 : 0).toFixed(1) + "%";
   const discardedShare = totals.reportes + totals.descartados
     ? totals.descartados / (totals.reportes + totals.descartados) * 100 : 0;
   const rows = [
@@ -1374,21 +1702,27 @@ function downloadDashCsv() {
   const data = dashState.data;
   if (!data) return;
   const metric = DASH_METRICS[dashState.metric];
-  const lines = [["Patente", "Camión", ...data.meses.map((month) => dashMonthLabel(month, "long")), "Total", "Último día con datos"]
-    .map(csvValue).join(";")];
-  for (const truck of dashTrucks()) {
-    const values = dashValues(truck);
-    lines.push([truck.patente, truck.nombre, ...values.map((value) => format(value, 1).replace(/\./g, "")),
-      format(values.reduce((a, b) => a + b, 0), 1).replace(/\./g, ""), truck.ultimo_dia || ""].map(csvValue).join(";"));
+  const number = (value) => format(value, 1).replace(/\./g, "");
+  const month = dashState.period === "todos" ? null : dashState.months[dashState.period];
+  if (dashState.period !== "todos" && (!month || month.error)) return;
+  const columns = month ? month.dias.map((iso) => iso) : data.meses.map((m) => dashMonthLabel(m, "long"));
+  const lines = [["Patente", "Camión", ...columns, "Total", "Último día con datos"].map(csvValue).join(";")];
+  for (const truck of dashTrucks(month)) {
+    const values = periodValues(truck, month);
+    lines.push([truck.patente, truck.nombre, ...values.map(number), number(sum(values)), truck.ultimo_dia || ""]
+      .map(csvValue).join(";"));
   }
-  saveCsv(lines, `artisa-${metric.unit}-por-patente-${data.desde}-a-${data.hoy}.csv`);
+  saveCsv(lines, `artisa-${metric.unit}-por-patente-${month ? month.mes : data.desde + "-a-" + data.hoy}.csv`);
 }
 
-for (const button of document.querySelectorAll("[data-dash-metric]")) {
-  button.addEventListener("click", () => { dashState.metric = button.dataset.dashMetric; renderDashMetric(); });
+for (const button of document.querySelectorAll("[data-dash-tab]")) {
+  button.addEventListener("click", () => setDashTab(button.dataset.dashTab));
 }
-$("dash-sort").addEventListener("change", (event) => setDashSort(event.target.value));
-$("dash-search").addEventListener("input", (event) => { dashState.query = event.target.value; renderDashTable(); });
+for (const button of document.querySelectorAll("[data-dash-metric]")) {
+  button.addEventListener("click", () => { dashState.metric = button.dataset.dashMetric; renderDashView(); });
+}
+$("dash-sort").addEventListener("change", (event) => { dashState.sort = event.target.value; renderDashView(); });
+$("dash-search").addEventListener("input", (event) => { dashState.query = event.target.value; renderDashView(); });
 $("dash-csv").addEventListener("click", downloadDashCsv);
 
 function formatAge(seconds) {
@@ -1642,6 +1976,7 @@ async function refresh() {
           mergeVehiclePosition(vehicle, visible.get(vehicle.vehicle_id)));
       }
       renderHeatmap(mapData);
+      renderDashboardGlobal(mapData);
     } else problems.push("mapa");
     if (dashboardResult.status === "fulfilled") renderDashboard(dashboardResult.value);
     else problems.push("dashboard");

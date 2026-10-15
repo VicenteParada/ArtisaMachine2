@@ -16,13 +16,13 @@ ESTADO = [
 CATALOGO = [{"asset_id": "AB1234"}, {"asset_id": "CD5678"}, {"asset_id": "EF9012"}]
 MENSUAL = [
     {"mes": "2026-04", "asset_id": "AB1234", "asset_name": "906", "reportes": 600, "km": 1200.04,
-     "viajes": 40, "dias_activos": 18, "ultimo": date(2026, 4, 30)},
+     "dias_activos": 18, "ultimo": date(2026, 4, 30)},
     {"mes": "2026-10", "asset_id": "AB1234", "asset_name": "906", "reportes": 500, "km": 900.0,
-     "viajes": 30, "dias_activos": 15, "ultimo": date(2026, 10, 15)},
+     "dias_activos": 15, "ultimo": date(2026, 10, 15)},
     {"mes": "2026-10", "asset_id": "CD5678", "asset_name": "912", "reportes": 400, "km": 300.0,
-     "viajes": 9, "dias_activos": 10, "ultimo": date(2026, 10, 10)},
+     "dias_activos": 10, "ultimo": date(2026, 10, 10)},
     {"mes": "2026-10", "asset_id": "ZZ0000", "asset_name": "camioneta", "reportes": 99, "km": 1.0,
-     "viajes": 1, "dias_activos": 1, "ultimo": date(2026, 10, 15)},
+     "dias_activos": 1, "ultimo": date(2026, 10, 15)},
 ]
 
 
@@ -64,9 +64,9 @@ class FleetDashboardTests(unittest.TestCase):
 
     def test_truck_days(self):
         cursor = FakeCursor([("FROM reporte_diario WHERE asset_id", [
-            {"fecha": date(2026, 4, 11), "reportes": 300, "km_observados": 120.04, "viajes": 3}])])
+            {"fecha": date(2026, 4, 11), "reportes": 300, "km_observados": 120.04}])])
         self.assertEqual(dashboard_api.truck_days(cursor, "AB1234"),
-                         {"patente": "AB1234", "dias": [["2026-04-11", 300, 120.0, 3]]})
+                         {"patente": "AB1234", "dias": [["2026-04-11", 300, 120.0]]})
 
 
 if __name__ == "__main__":

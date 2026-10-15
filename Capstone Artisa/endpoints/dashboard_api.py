@@ -2,7 +2,7 @@
 
 Todo sale del cierre diario (machine_learning/diario.py), no de los millones de reportes:
 reporte_diario guarda por camión y día los reportes GPS válidos (sin repetidos ni
-coordenadas inválidas), los km observados y los viajes; reporte_diario_estado guarda por
+coordenadas inválidas) y los km observados; reporte_diario_estado guarda por
 día si está cerrado y cuántos reportes se descartaron. Solo camiones del catálogo.
 
 El mes en curso incluye el día de hoy hasta el último cálculo (cada pocos minutos).
@@ -59,12 +59,12 @@ def fleet_dashboard(cursor, hoy=None):
     catalogo = _catalogo(cursor)
     cursor.execute(
         """SELECT DATE_FORMAT(fecha, '%Y-%m') AS mes, asset_id, MAX(asset_name) AS asset_name,
-                  SUM(reportes) AS reportes, SUM(km_observados) AS km, SUM(viajes) AS viajes,
+                  SUM(reportes) AS reportes, SUM(km_observados) AS km,
                   SUM(reportes > 0) AS dias_activos, MAX(CASE WHEN reportes > 0 THEN fecha END) AS ultimo
            FROM reporte_diario GROUP BY mes, asset_id"""
     )
     camiones = {asset_id: {"patente": asset_id, "nombre": None, "reportes": [0] * len(meses),
-                           "km": [0.0] * len(meses), "viajes": [0] * len(meses),
+                           "km": [0.0] * len(meses),
                            "dias_activos": [0] * len(meses), "ultimo_dia": None}
                 for asset_id in catalogo}
     for fila in cursor.fetchall():
@@ -74,7 +74,6 @@ def fleet_dashboard(cursor, hoy=None):
             continue
         camion["reportes"][k] = int(fila["reportes"] or 0)
         camion["km"][k] = round(float(fila["km"] or 0), 1)
-        camion["viajes"][k] = int(fila["viajes"] or 0)
         camion["dias_activos"][k] = int(fila["dias_activos"] or 0)
         if fila["asset_name"]:
             camion["nombre"] = fila["asset_name"]
@@ -98,7 +97,6 @@ def fleet_dashboard(cursor, hoy=None):
             "mes": mes,
             "reportes": sum(c["reportes"][k] for c in lista),
             "km": round(sum(c["km"][k] for c in lista), 1),
-            "viajes": sum(c["viajes"][k] for c in lista),
             "camiones_activos": sum(1 for c in lista if c["reportes"][k] > 0),
             "dias": int(fila.get("dias") or 0),
             "dias_cerrados": int(fila.get("cerrados") or 0),
@@ -117,7 +115,7 @@ def fleet_dashboard(cursor, hoy=None):
         "sin_reportes_dias": SIN_REPORTES_DIAS,
         "totales": {
             "reportes": sum(m["reportes"] for m in flota), "km": round(sum(m["km"] for m in flota), 1),
-            "viajes": sum(m["viajes"] for m in flota), "camiones": len(lista),
+            "camiones": len(lista),
             "dias": sum(m["dias"] for m in flota), "dias_cerrados": sum(m["dias_cerrados"] for m in flota),
             "descartados": sum(m["descartados"] for m in flota),
         },
@@ -125,14 +123,14 @@ def fleet_dashboard(cursor, hoy=None):
 
 
 def truck_days(cursor, asset_id):
-    """Reportes de un camión día por día desde el primer cierre: [[fecha, reportes, km, viajes]]."""
+    """Reportes de un camión día por día desde el primer cierre: [[fecha, reportes, km]]."""
     try:
         cursor.execute(
-            "SELECT fecha, reportes, km_observados, viajes FROM reporte_diario WHERE asset_id=%s ORDER BY fecha",
+            "SELECT fecha, reportes, km_observados FROM reporte_diario WHERE asset_id=%s ORDER BY fecha",
             (asset_id,),
         )
     except pymysql.err.ProgrammingError:
         return {"patente": asset_id, "dias": []}
     return {"patente": asset_id,
-            "dias": [[f["fecha"].isoformat(), int(f["reportes"]), round(float(f["km_observados"]), 1), int(f["viajes"])]
+            "dias": [[f["fecha"].isoformat(), int(f["reportes"]), round(float(f["km_observados"]), 1)]
                      for f in cursor.fetchall()]}
