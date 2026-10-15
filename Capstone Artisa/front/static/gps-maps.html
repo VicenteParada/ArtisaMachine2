@@ -166,6 +166,13 @@
   }
   .leaflet-popup.popup-uso-camiones .leaflet-popup-tip { background: var(--panel); }
   .leaflet-popup.popup-uso-camiones a.leaflet-popup-close-button:hover { color: var(--acento); }
+  .leaflet-tooltip.tooltip-uso-camiones {
+    width: min(430px, calc(100vw - 64px)); max-width: calc(100vw - 64px);
+    padding: 0; border: 0; border-radius: 10px; overflow: hidden;
+    box-shadow: 0 6px 20px rgba(23, 52, 42, .22); background: var(--panel);
+  }
+  .leaflet-tooltip.tooltip-uso-camiones::before { display: none; }
+  .uso-ruta-interactiva { cursor: pointer; }
   .tooltip-uso { width: 100%; }
   .tooltip-uso__titulo {
     display: block; padding: 9px 38px 9px 11px; background: #edf5f0;
@@ -661,26 +668,40 @@ async function vistaUso(D, progreso) {
   }
   const vmax = Math.max(maxCamiones, 2), escala = escalaLineal(COLORES, 1, vmax);
   const capa = L.featureGroup();
+  // El mapa general usa Canvas por rendimiento. La interacción se fuerza a SVG porque sus
+  // trazos reciben de manera fiable los eventos del cursor incluso cuando varias rutas coinciden.
+  const renderInteraccion = L.svg({padding: 0.5});
   const gruposOrdenados = [...grupos.values()].sort((a, b) => a.camiones.length - b.camiones.length);
   for (const grupo of gruposOrdenados) {
     const c = grupo.camiones.length;
     const filas = grupo.camiones.map(compacto => {
       const indice = indiceCamion[compacto];
       const patente = esc(D.camiones[indice] || "Patente no informada");
-      const conductor = D.conductores[indice] ? `<span>${esc(D.conductores[indice])}</span>` : "";
-      return `<li><strong>${patente}</strong>${conductor}</li>`;
+      const conductor = esc(D.conductores[indice] || "Conductor no informado");
+      return `<li><strong>${patente}</strong><span>${conductor}</span></li>`;
     }).join("");
     const titulo = c === 1 ? "1 camión pasó por aquí" : `${c} camiones distintos pasaron por aquí`;
     const detalle = `<div class="tooltip-uso"><strong class="tooltip-uso__titulo">${titulo}</strong>`
       + `<ul class="tooltip-uso__lista">${filas}</ul></div>`;
-    const linea = L.polyline(grupo.lineas, {color: escala(c), weight: 2 + 4 * c / maxCamiones, opacity: 0.9})
-      .bindPopup(detalle, {className: "popup-uso-camiones", minWidth: 520, maxWidth: 520,
-                           autoPan: true, autoPanPadding: [24, 24]})
+    const grosor = 2 + 4 * c / maxCamiones;
+    L.polyline(grupo.lineas, {color: escala(c), weight: grosor, opacity: 0.9, interactive: false})
       .addTo(capa);
-    // El recuadro se abre al pasar por la línea y permanece visible para poder recorrer
-    // la lista. Otro tramo reemplaza el recuadro actual; la X o un clic en el mapa lo cierra.
-    linea.on("mouseover", evento => linea.openPopup(evento.latlng));
-    linea.on("popupopen", evento => L.DomEvent.disableScrollPropagation(evento.popup.getElement()));
+
+    // La línea visible sigue siendo fina, pero una segunda línea transparente crea un área
+    // cómoda para el cursor. Esto evita tener que apuntar con precisión a un trazo de 2–6 px.
+    const zonaInteractiva = L.polyline(grupo.lineas, {
+      color: "#173d30", weight: Math.max(16, grosor + 10), opacity: 0.001,
+      className: "uso-ruta-interactiva", bubblingMouseEvents: false, renderer: renderInteraccion,
+    }).bindTooltip(detalle, {
+      className: "tooltip-uso-camiones", sticky: true, direction: "top", opacity: 1,
+    }).bindPopup(detalle, {
+      className: "popup-uso-camiones", minWidth: 520, maxWidth: 520,
+      autoPan: true, autoPanPadding: [24, 24],
+    }).addTo(capa);
+
+    // Leaflet abre el tooltip al pasar el cursor y el popup completo al hacer clic.
+    zonaInteractiva.on("tooltipopen", evento => L.DomEvent.disableScrollPropagation(evento.tooltip.getElement()));
+    zonaInteractiva.on("popupopen", evento => L.DomEvent.disableScrollPropagation(evento.popup.getElement()));
   }
   return {
     overlays: {"Uso de rutas": capa},
