@@ -587,6 +587,9 @@
 .truck-pin.end{background:#172d32}
 .truck-pin.trip{height:22px;min-width:30px;border-width:2px;border-radius:5px;font-size:10px}
 .truck-pin.play{min-width:30px;height:30px;border-radius:50%;background:#172d32;font-size:15px}
+.playback-truck-icon{background:transparent;border:0}
+.playback-truck-marker{display:grid;place-items:center;width:56px;height:38px;filter:drop-shadow(0 3px 3px rgba(20,40,42,.34))}
+.playback-truck-marker>.truck-glyph{width:54px;height:36px;object-fit:contain;transform:scaleX(var(--truck-facing,1));transform-origin:50% 50%;transition:transform .18s ease}
 .truck-arrow{display:block;width:14px;height:14px;background:var(--pin);clip-path:polygon(100% 50%,0 0,28% 50%,0 100%);filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff)}
 .truck-map-tools{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px}
 .truck-map-tools .button{padding:8px 12px;font-size:12px}

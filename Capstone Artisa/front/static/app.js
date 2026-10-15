@@ -3534,6 +3534,25 @@ function arrowIcon(angle, color) {
     iconSize: [14, 14], iconAnchor: [7, 7]});
 }
 
+function playbackTruckIcon(facing = 1) {
+  return L.divIcon({
+    className: "playback-truck-icon",
+    html: `<span class="playback-truck-marker" style="--truck-facing:${facing}">${TRUCK_MARKUP}</span>`,
+    iconSize: [56, 38],
+    iconAnchor: [28, 19]
+  });
+}
+
+function playbackTruckFacing(map, points, index, fallback = 1) {
+  if (!points || points.length < 2) return fallback;
+  const before = points[Math.max(0, index - 1)];
+  const after = points[Math.min(points.length - 1, index + 1)];
+  const first = map.latLngToLayerPoint(before);
+  const second = map.latLngToLayerPoint(after);
+  const dx = second.x - first.x;
+  return Math.abs(dx) < 0.25 ? fallback : dx > 0 ? -1 : 1;
+}
+
 // Los viajes se corren unos píxeles a la derecha de su sentido de marcha, como pistas de una
 // carretera: la ida y la vuelta por el mismo camino quedan lado a lado en vez de taparse.
 const TRIP_LANE_PX = 4;
@@ -3753,8 +3772,10 @@ function toggleTruckPlay() {
   }
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const play = {steps: playbackSteps(data), index: 0, frame: 0, timer: 0, layer: L.layerGroup().addTo(map)};
-  play.truck = L.marker(data.viajes[0].lineas[0][0],
-    {icon: L.divIcon({className: "truck-pin-icon", html: '<span class="truck-pin play">⛟</span>', iconSize: [0, 0], iconAnchor: [0, 0]}),
+  const firstPoints = data.viajes[0].lineas.flat();
+  play.facing = playbackTruckFacing(map, firstPoints, 0);
+  play.truck = L.marker(firstPoints[0],
+    {icon: playbackTruckIcon(play.facing),
       zIndexOffset: 900, pane: "truckMarks"}).addTo(play.layer);
   truckView.play = play;
   $("truck-play").textContent = "■ Detener";
@@ -3809,6 +3830,12 @@ function toggleTruckPlay() {
       const count = Math.max(1, Math.round(t * (step.points.length - 1)));
       drawn.setLatLngs(step.points.slice(0, count + 1));
       play.truck.setLatLng(step.points[count]);
+      const facing = playbackTruckFacing(map, step.points, count, play.facing);
+      if (facing !== play.facing) {
+        play.facing = facing;
+        const marker = play.truck.getElement() && play.truck.getElement().querySelector(".playback-truck-marker");
+        if (marker) marker.style.setProperty("--truck-facing", String(facing));
+      }
       if (t < 1) play.frame = requestAnimationFrame(animate);
       else play.timer = setTimeout(next, 250);
     };
