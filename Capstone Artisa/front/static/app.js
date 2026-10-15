@@ -1017,6 +1017,10 @@ const dashMonthLabel = (month, style = "short") => new Intl.DateTimeFormat("es-C
   .format(new Date(month + "-15T12:00:00Z")).replace(".", "");
 const dashDayLabel = (iso) => new Intl.DateTimeFormat("es-CL", {
   weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC"}).format(new Date(iso + "T12:00:00Z"));
+const dashWeekdayLabel = (iso) => new Intl.DateTimeFormat("es-CL", {
+  weekday: "short", timeZone: "UTC"}).format(new Date(iso + "T12:00:00Z")).replace(".", "");
+const dashCompact = (value) => new Intl.NumberFormat("es-CL", {
+  notation: "compact", maximumFractionDigits: 1}).format(Number(value || 0));
 const dashHeat = (value, max) => value ? (0.12 + 0.88 * Math.sqrt(value / max)).toFixed(3) : "0";
 
 function el(tag, className, text) {
@@ -1363,6 +1367,7 @@ function renderDashKpis(totalReports, totalKm, active, totalTrucks, label) {
 
 function renderDashAll(data) {
   const metric = DASH_METRICS[dashState.metric];
+  $("dash-day-guide").hidden = true;
   renderDashKpis(data.totales.reportes, data.totales.km,
     data.camiones.filter((truck) => truck.total > 0).length, data.totales.camiones, "desde " + dashDayLabel(data.desde));
   $("dash-chart-eyebrow").textContent = "MES A MES";
@@ -1394,10 +1399,19 @@ function renderDashMonth(data, month) {
   $("dash-chart-eyebrow").textContent = "DÍA A DÍA";
   $("dash-months-title").textContent = `${metric.title} de la flota en ${label}`;
   $("dash-months-unit").textContent = month.mes === data.mes_en_curso ? "Mes en curso" : `${format(month.dias.length)} días`;
+  const guide = $("dash-day-guide");
+  guide.hidden = false;
+  guide.replaceChildren(
+    el("strong", "", "Cómo leer este gráfico"),
+    el("span", "", `Cada columna es un día. El número superior muestra ${metric.unit} de toda la flota.`),
+    el("span", "fd-guide-key fd-guide-weekend", "Fin de semana"),
+    el("span", "fd-guide-key fd-guide-today", "Hoy · dato en curso")
+  );
   renderDashBars(month.dias.map((iso, k) => {
     const weekday = new Date(iso + "T12:00:00Z").getUTCDay();
     return {
-      key: iso, label: String(Number(iso.slice(8))), value: fleet[k], weekend: weekday === 0 || weekday === 6,
+      key: iso, label: String(Number(iso.slice(8))), weekday: dashWeekdayLabel(iso), value: fleet[k],
+      weekend: weekday === 0 || weekday === 6,
       current: iso === data.hoy, detail: "",
       title: `${dashDayLabel(iso)}: ${format(fleet[k])} ${metric.unit}` + (iso === data.hoy ? " · hoy, en curso" : "")
     };
@@ -1420,9 +1434,15 @@ function renderDashBars(items, daily) {
     const fill = el("i");
     fill.style.height = (item.value ? Math.max(3, item.value / max * 100) : 0) + "%";
     track.append(fill);
-    if (!daily) bar.append(el("b", "", format(item.value)));
-    bar.append(track, el("strong", "", item.label));
-    if (item.detail) bar.append(el("small", "", item.detail));
+    if (daily) {
+      const date = el("span", "fd-day-axis");
+      date.append(el("small", "", item.weekday), el("strong", "", item.label));
+      bar.append(el("b", "fd-day-value", dashCompact(item.value)), track, date);
+      if (item.current) bar.append(el("em", "fd-today-label", "Hoy"));
+    } else {
+      bar.append(el("b", "", format(item.value)), track, el("strong", "", item.label));
+      if (item.detail) bar.append(el("small", "", item.detail));
+    }
     return bar;
   }));
   requestAnimationFrame(() => { chart.scrollLeft = chart.scrollWidth; });  // lo reciente a la vista
@@ -1478,7 +1498,11 @@ function renderDashTable(columns, month) {
     headRow.append(el("th", "fd-col-total", "Total"));
   } else {
     headRow.append(el("th", "fd-col-total", "Total del mes"), el("th", "fd-col-num", "Días con datos"),
-      el("th", "fd-col-num", "Promedio diario"), el("th", "fd-col-strip", "Día a día"));
+      el("th", "fd-col-num", "Promedio diario"));
+    const activityHead = el("th", "fd-col-strip");
+    activityHead.append(el("span", "fd-th-main", "Actividad diaria"),
+      el("small", "fd-th-note", "Cada barra corresponde a un día"));
+    headRow.append(activityHead);
   }
   headRow.append(el("th", "fd-col-last", "Última señal"));
   head.append(headRow);
@@ -1511,7 +1535,9 @@ function renderDashTable(columns, month) {
     } else {
       const active = values.filter(Boolean).length;
       const strip = el("td", "fd-col-strip");
+      const stripWrap = el("div", "fd-strip-wrap");
       const bars = el("span", "fd-strip");
+      bars.style.setProperty("--days", String(values.length));
       values.forEach((value, k) => {
         const day = el("i");
         day.style.height = (value ? Math.max(12, value / max * 100) : 100) + "%";
@@ -1520,7 +1546,18 @@ function renderDashTable(columns, month) {
         day.title = `${dashDayLabel(month.dias[k])}: ${format(value, metric.decimals)} ${metric.unit}`;
         bars.append(day);
       });
-      strip.append(bars);
+      const ticks = el("span", "fd-strip-ticks");
+      ticks.style.setProperty("--days", String(values.length));
+      month.dias.forEach((iso, k) => {
+        const dayNumber = Number(iso.slice(8));
+        if (k === 0 || k === month.dias.length - 1 || dayNumber % 5 === 0) {
+          const tick = el("small", "", String(dayNumber));
+          tick.style.gridColumn = String(k + 1);
+          ticks.append(tick);
+        }
+      });
+      stripWrap.append(bars, ticks);
+      strip.append(stripWrap);
       const activeCell = el("td", "fd-col-num", `${format(active)} de ${format(values.length)}`);
       activeCell.classList.toggle("is-late", active < values.length / 2);
       row.append(totalCell, activeCell,
@@ -1654,12 +1691,48 @@ function dashCalendar(truck, days) {
   const wrap = el("div", "fd-cal-wrap");
   wrap.append(scroller, side);
   const box = el("div");
-  box.append(wrap, legend);
+  const heading = el("div", "fd-detail-heading");
+  heading.append(el("div", "", "Detalle diario de " + truck.patente),
+    el("span", "", "Toca una fecha para abrir el recorrido de ese día"));
+  box.append(heading);
+  if (dashState.period !== "todos") {
+    const month = dashState.months[dashState.period];
+    if (month && !month.loading && !month.error) box.append(dashDailyBreakdown(truck, month));
+  }
+  const historyTitle = el("div", "fd-history-title");
+  historyTitle.append(el("strong", "", "Historial completo"),
+    el("span", "", `Desde ${dashDayLabel(data.desde)} hasta hoy`));
+  box.append(historyTitle, wrap, legend);
   requestAnimationFrame(() => {
     const target = scroller.querySelector(".fd-day.is-period");
     scroller.scrollLeft = target ? target.parentElement.offsetLeft - 20 : scroller.scrollWidth;
   });
   return box;
+}
+
+function dashDailyBreakdown(truck, month) {
+  const metric = DASH_METRICS[dashState.metric];
+  const values = month.camiones[truck.patente][dashState.metric];
+  const panel = el("section", "fd-daily-breakdown");
+  const head = el("div", "fd-daily-breakdown-head");
+  head.append(el("strong", "", `${metric.title} por fecha · ${dashMonthLabel(month.mes, "long")}`),
+    el("span", "", "Valor exacto de cada día"));
+  const days = el("div", "fd-daily-cards");
+  month.dias.forEach((iso, k) => {
+    const value = values[k];
+    const weekday = new Date(iso + "T12:00:00Z").getUTCDay();
+    const card = el("a", "fd-daily-card");
+    card.href = `#camiones/${encodeURIComponent(truck.patente)}/${iso}`;
+    card.classList.toggle("is-zero", !value);
+    card.classList.toggle("is-weekend", weekday === 0 || weekday === 6);
+    card.classList.toggle("is-today", iso === dashState.data.hoy);
+    card.title = `${dashDayLabel(iso)}: ${format(value, metric.decimals)} ${metric.unit} · abrir el día`;
+    card.append(el("span", "", dashWeekdayLabel(iso)), el("strong", "", iso.slice(8)),
+      el("b", "", format(value, metric.decimals)), el("small", "", metric.unit));
+    days.append(card);
+  });
+  panel.append(head, days);
+  return panel;
 }
 
 function renderDashSilent(data) {
