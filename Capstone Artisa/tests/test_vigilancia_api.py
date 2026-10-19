@@ -45,18 +45,31 @@ class HuellaTests(unittest.TestCase):
     def test_road_cells_are_continuous_between_reports(self):
         # Dos reportes a 2 km (un minuto a 120 km/h): las celdas intermedias también cuentan.
         puntos = {"A": [(AHORA, -22.40, -68.90, 120.0), (AHORA + timedelta(minutes=1), -22.418, -68.90, 120.0)]}
-        conteo, propias = v.huella(puntos)
+        conteo, propias, red = v.huella(puntos)
         self.assertEqual(propias["A"], set(conteo))
         self.assertGreaterEqual(len(conteo), 4)
         self.assertEqual(set(conteo.values()), {1})
 
-    def test_too_many_cells_are_drawn_coarser(self):
-        conteo = {(i, 0): 1 for i in range(10)} | {(1, 1): 7}
-        with patch.object(v, "MAX_CELDAS", 6):
-            escala, celdas = v.celdas_mapa(conteo)
-        self.assertEqual(escala, v.ESCALA // 2)
-        self.assertIn([0, 0, 7], celdas)      # la celda gruesa conserva el mayor conteo
-        self.assertEqual(len(celdas), 5)
+    def test_routes_are_lines_over_the_road(self):
+        # Dos camiones por la misma recta: los nodos quedan sobre ella (no en el centro del
+        # cuadro) y las aristas los unen en orden, sin duplicarse.
+        puntos = {k: [(AHORA, -22.400, -68.9013, 60.0), (AHORA + timedelta(minutes=1), -22.412, -68.9013, 60.0)]
+                  for k in ("A", "B")}
+        conteo, _, red = v.huella(puntos)
+        escala, nodos, aristas = v.red_mapa(conteo, red)
+        self.assertEqual(escala, v.ESCALA)
+        self.assertTrue(all(abs(lon + 68.9013) < 1e-6 for _, lon, _ in nodos))
+        self.assertTrue(all(n == 2 for *_, n in nodos))
+        self.assertEqual(len(aristas) // 2, len(nodos) - 1)  # una cadena
+
+    def test_too_many_points_are_drawn_coarser(self):
+        puntos = {"A": [(AHORA, -22.40, -68.90, 60.0), (AHORA + timedelta(minutes=1), -22.418, -68.90, 60.0)]}
+        conteo, _, red = v.huella(puntos)
+        with patch.object(v, "MAX_NODOS", 3):
+            escala, nodos, aristas = v.red_mapa(conteo, red)
+        self.assertLess(escala, v.ESCALA)
+        self.assertLessEqual(len(nodos), 3)
+        self.assertTrue(all(a != b for a, b in zip(aristas[::2], aristas[1::2])))
 
     def test_gps_jumps_are_dropped(self):
         filas = camino("T00", AHORA - timedelta(hours=1), 3, lat1=-22.42)
@@ -100,7 +113,7 @@ class AlertasTests(unittest.TestCase):
         self.assertLess(alerta["pct_zona"], v.UMBRAL_PCT)
         self.assertEqual(data["resumen"]["activas"], 1)
         self.assertEqual([x["en_alerta"] for x in data["vehiculos"]], [True, False])
-        self.assertTrue(all(len(c) == 3 for c in data["celdas"]))
+        self.assertTrue(data["nodos"] and len(data["aristas"]) % 2 == 0)
 
     def test_old_episode_without_new_reports_is_without_signal(self):
         data = v.vigilancia(cursor_con(flota_con_desvio(termina=AHORA - timedelta(hours=2))), AHORA)
@@ -138,7 +151,8 @@ class AlertasTests(unittest.TestCase):
         cursor = FakeCursor([("FROM raw_gps USE INDEX", []), ("FROM telemetria_api USE INDEX", filas)])
         comienzo = time.monotonic()
         por_camion = v.leer_reportes(cursor, AHORA - timedelta(days=7), AHORA, catalogo)
-        conteo, propias = v.huella(por_camion)
+        conteo, propias, red = v.huella(por_camion)
+        v.red_mapa(conteo, red)
         zonas = v.Zonas(conteo, len(por_camion))
         for asset_id, puntos in por_camion.items():
             v.episodios(puntos, zonas, [], propias[asset_id])

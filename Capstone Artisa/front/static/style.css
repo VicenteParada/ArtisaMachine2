@@ -1008,7 +1008,7 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .vg-legend-title{font-size:10px;font-weight:700;color:var(--ink)}
 .vg-scale{display:flex;flex-wrap:wrap;gap:4px 12px}
 .vg-bin{display:inline-flex;align-items:center;gap:5px}
-.vg-bin i{width:22px;height:9px;border-radius:3px}
+.vg-bin i{width:24px;border-radius:4px}
 .vg-bin small{font-size:9px;color:var(--muted)}
 .vg-bin.is-rare small{color:#b0281b;font-weight:700}
 .atlas-foot.vg-legend #map-last-update{margin-left:auto}

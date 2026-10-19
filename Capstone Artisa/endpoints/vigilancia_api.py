@@ -39,7 +39,7 @@ ACTIVA_MIN = 30              # una alerta sin reportes nuevos en 30 min queda "s
 CORTE_HORAS = 6              # más de 6 h sin reportes separa dos episodios
 RADIO_BUSQUEDA = 12          # celdas de 0,1° alrededor para la distancia (~130 km)
 MAX_ALERTAS = 200
-MAX_CELDAS = 120_000         # más celdas que esto se dibujan al doble de tamaño (solo el mapa)
+MAX_NODOS = 120_000          # más puntos que esto se dibujan con celdas el doble de grandes
 MAX_ESTELA = 160
 
 
@@ -155,23 +155,47 @@ def en_faena(faenas, lat, lon):
 
 # --- Huella de 7 días -----------------------------------------------------------------------
 
-def celdas_tramo(la0, lo0, la1, lo1):
+def muestras_tramo(la0, lo0, la1, lo1):
     pasos = max(1, math.ceil(max(abs(la1 - la0), abs(lo1 - lo0)) / PASO))
-    return {celda(la0 + (la1 - la0) * k / pasos, lo0 + (lo1 - lo0) * k / pasos) for k in range(pasos + 1)}
+    return [(la0 + (la1 - la0) * k / pasos, lo0 + (lo1 - lo0) * k / pasos) for k in range(pasos + 1)]
+
+
+class Red:
+    """Lo que se dibuja: por cada celda recorrida, la posición promedio de los puntos que
+    cayeron en ella (queda sobre el camino, no en el centro del cuadro), y qué celdas se
+    recorrieron una a continuación de la otra (las líneas)."""
+
+    def __init__(self):
+        self.sumas = defaultdict(lambda: [0.0, 0.0, 0])
+        self.aristas = set()
+
+    def recorrer(self, muestras):
+        anterior = None
+        for lat, lon in muestras:
+            c = celda(lat, lon)
+            suma = self.sumas[c]
+            suma[0] += lat
+            suma[1] += lon
+            suma[2] += 1
+            if anterior is not None and c != anterior:
+                self.aristas.add((anterior, c) if anterior < c else (c, anterior))
+            anterior = c
 
 
 def huella(por_camion):
-    """({celda: camiones distintos que pasaron por ella}, {camión: sus celdas})."""
-    conteo, propias = defaultdict(int), {}
+    """({celda: camiones distintos que pasaron por ella}, {camión: sus celdas}, Red)."""
+    conteo, propias, red = defaultdict(int), {}, Red()
     for asset_id, puntos in por_camion.items():
         vistas = {celda(p[1], p[2]) for p in puntos}
         for (t0, la0, lo0, _), (t1, la1, lo1, _) in zip(puntos, puntos[1:]):
             if (t1 - t0).total_seconds() <= MAX_TRAMO_MIN * 60:
-                vistas |= celdas_tramo(la0, lo0, la1, lo1)
+                muestras = muestras_tramo(la0, lo0, la1, lo1)
+                vistas.update(celda(la, lo) for la, lo in muestras)
+                red.recorrer(muestras)
         for c in vistas:
             conteo[c] += 1
         propias[asset_id] = vistas
-    return conteo, propias
+    return conteo, propias, red
 
 
 class Zonas:
@@ -327,18 +351,36 @@ def alertas(cursor, por_camion, propias, zonas, faenas, ahora):
 
 # --- Respuesta ------------------------------------------------------------------------------
 
-def celdas_mapa(conteo):
-    """(escala, [[i, j, camiones]]) para dibujar; si son demasiadas, celdas el doble de grandes
-    con el mayor conteo de las que agrupa. Las alertas siempre usan las celdas finas."""
-    escala, celdas = ESCALA, conteo
-    while len(celdas) > MAX_CELDAS and escala > 25:
+def red_mapa(conteo, red):
+    """(escala, nodos [[lat, lon, camiones]], aristas [a, b, a, b, …]) para dibujar las rutas.
+
+    Los camiones de cada nodo son los de su celda y sus vecinas (~1,5 km), igual que la regla
+    de las alertas, para que una misma carretera no cambie de color por cómo cayeron los
+    reportes en sus bordes. Si hay demasiados nodos se agrupan en celdas el doble de grandes
+    (solo el dibujo; las alertas usan siempre las celdas finas)."""
+    escala, sumas, aristas = ESCALA, red.sumas, red.aristas
+    vecinos = {c: max(conteo.get((c[0] + di, c[1] + dj), 0) for di in (-1, 0, 1) for dj in (-1, 0, 1))
+               for c in sumas}
+    while len(sumas) > MAX_NODOS and escala > 25:
         escala //= 2
-        gruesas = defaultdict(int)
-        for (i, j), n in celdas.items():
-            clave = (i // 2, j // 2)
-            gruesas[clave] = max(gruesas[clave], n)
-        celdas = gruesas
-    return escala, [[i, j, n] for (i, j), n in celdas.items()]
+        gruesas, juntos = defaultdict(lambda: [0.0, 0.0, 0]), defaultdict(int)
+        for (i, j), (la, lo, n) in sumas.items():
+            g = gruesas[(i // 2, j // 2)]
+            g[0] += la
+            g[1] += lo
+            g[2] += n
+            juntos[(i // 2, j // 2)] = max(juntos[(i // 2, j // 2)], vecinos[(i, j)])
+        aristas = {(min(a, b), max(a, b)) for a, b in (((x[0] // 2, x[1] // 2), (y[0] // 2, y[1] // 2)) for x, y in aristas)
+                   if a != b}
+        sumas, vecinos = gruesas, juntos
+    indice, nodos = {}, []
+    for c, (la, lo, n) in sumas.items():
+        indice[c] = len(nodos)
+        nodos.append([round(la / n, 5), round(lo / n, 5), vecinos[c]])
+    planas = []
+    for a, b in aristas:
+        planas += (indice[a], indice[b])
+    return escala, nodos, planas
 
 
 def vigilancia(cursor, ahora=None):
@@ -349,13 +391,13 @@ def vigilancia(cursor, ahora=None):
     por_camion = leer_reportes(cursor, desde, ahora, catalogo)
     if not por_camion:
         return None
-    conteo, propias = huella(por_camion)
+    conteo, propias, red = huella(por_camion)
     zonas = Zonas(conteo, len(por_camion))
     faenas = leer_faenas(cursor)
     lista = alertas(cursor, por_camion, propias, zonas, faenas, ahora)
     en_alerta = {a["patente"] for a in lista if a["estado"] == "activa"}
     vehiculos = rutas_api.latest_positions(cursor, {})
-    escala, celdas = celdas_mapa(conteo)
+    escala, nodos, aristas = red_mapa(conteo, red)
     for vehiculo in vehiculos:
         vehiculo["en_alerta"] = vehiculo["vehicle_id"] in en_alerta
     return {
@@ -363,8 +405,8 @@ def vigilancia(cursor, ahora=None):
         "escala": escala, "camiones": len(por_camion), "catalogo": len(catalogo),
         "reportes": sum(len(p) for p in por_camion.values()),
         "umbral_pct": UMBRAL_PCT, "reportes_alerta": REPORTES, "refresh_seconds": rutas_api.REFRESH_SECONDS,
-        # [i, j, camiones]: la celda va de i/escala a (i+1)/escala en latitud (j, en longitud).
-        "celdas": celdas,
+        # Rutas: cada arista une dos nodos (índices en "nodos": [lat, lon, camiones de la zona]).
+        "nodos": nodos, "aristas": aristas,
         "alertas": lista,
         "resumen": {
             "activas": sum(a["estado"] == "activa" for a in lista),

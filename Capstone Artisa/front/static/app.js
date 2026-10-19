@@ -256,12 +256,13 @@ const ROUTE_LABELS = Object.freeze({HIGH: "Más usada", MEDIUM: "Uso medio", LOW
 // Colores de la clasificación de rutas: los usan Predicción y la ficha de cada camión.
 const ROUTE_COLORS = Object.freeze({HIGH: "#14532d", MEDIUM: "#f97316", LOW: "#dc2626"});
 // Tramos de la escala: hasta (sin incluir) el % indicado; el primero es "poco habitual".
+// Las rutas habituales se dibujan más gruesas: de un vistazo se ve por dónde anda la flota.
 const VG_BINS = [
-  {hasta: null, color: "#d7301f", label: "poco habitual"},  // hasta el umbral (se completa al cargar)
-  {hasta: 15, color: "#f28e2b"},
-  {hasta: 30, color: "#e3c443"},
-  {hasta: 50, color: "#74b06a"},
-  {hasta: Infinity, color: "#1f6b50"}
+  {hasta: null, color: "#d7301f", weight: 2},  // hasta el umbral: poco habitual (se completa al cargar)
+  {hasta: 15, color: "#f28e2b", weight: 3},
+  {hasta: 30, color: "#e3b43a", weight: 4},
+  {hasta: 50, color: "#5e9f58", weight: 5.5},
+  {hasta: Infinity, color: "#1f6b50", weight: 7}
 ];
 const VG_STATES = {
   activa: {label: "Activa", className: "active"},
@@ -272,11 +273,12 @@ const VG_REFRESH_MS = 60000;
 let activeMapMode = "live";
 let fleetMap = null;
 let usageLayer = null;
+let usageRenderer = null;
 let trailLayer = null;
 let truckLayer = null;
 let selectionLayer = null;
 const truckMarkers = new Map();
-var vg = {data: null, cells: new Map(), buckets: new Map(), alerts: new Map(), vehicles: [],
+var vg = {data: null, cells: new Map(), alerts: new Map(), vehicles: [],
   tab: "alerts", alertFilter: "all", zone: "all", layers: {usage: true, vehicles: true, trails: true},
   selected: null, fitted: false, loading: false, openPopup: null};
 
@@ -391,62 +393,45 @@ function truckPopup(vehicle) {
   return wrapper;
 }
 
-// --- Capa de uso: celdas dibujadas en canvas por teselas ---
+// --- Capa de uso: las rutas de la semana como líneas (canvas) ---
 function vgPct(count) {
   return count / Math.max(1, vg.data.camiones) * 100;
 }
 
-function vgColor(pct) {
-  return VG_BINS.find((bin) => pct < bin.hasta).color;
+function vgBin(pct) {
+  return VG_BINS.findIndex((bin) => pct < bin.hasta);
 }
 
-const UsageLayer = window.L ? L.GridLayer.extend({
-  createTile(coords) {
-    const tile = document.createElement("canvas");
-    const size = this.getTileSize();
-    tile.width = size.x;
-    tile.height = size.y;
-    if (!vg.data) return tile;
-    const context = tile.getContext("2d");
-    const map = this._map;
-    const origin = coords.scaleBy(size);
-    const nw = map.unproject(origin, coords.z), se = map.unproject(origin.add(size), coords.z);
-    const scale = vg.data.escala;
-    const cellPx = Math.max(3, map.project([0, 1 / scale], coords.z).x - map.project([0, 0], coords.z).x);
-    const umbral = vg.data.umbral_pct;
-    for (let lat = Math.floor(se.lat) - 1; lat <= Math.floor(nw.lat); lat++) {
-      for (let lon = Math.floor(nw.lng) - 1; lon <= Math.floor(se.lng); lon++) {
-        for (const [i, j, count] of vg.buckets.get(lat + "|" + lon) || []) {
-          const pct = vgPct(count);
-          const rare = pct < umbral;
-          if (vg.zone === "rare" && !rare) {
-            context.fillStyle = "rgba(112,128,131,.22)";
-          } else {
-            context.fillStyle = vgColor(pct);
-          }
-          const point = map.project([(i + 1) / scale, j / scale], coords.z).subtract(origin);
-          context.globalAlpha = vg.zone === "rare" && !rare ? 1 : (rare ? 0.95 : 0.85);
-          context.fillRect(Math.round(point.x), Math.round(point.y), Math.ceil(cellPx), Math.ceil(cellPx));
-        }
-      }
-    }
-    return tile;
+// Cada arista une dos puntos por donde pasó la flota; toma el mayor uso de sus extremos para
+// que una carretera no se corte por el ruido de los reportes. Se dibuja de menor a mayor uso.
+function vgDrawUsage() {
+  usageLayer.clearLayers();
+  if (!vg.data) return;
+  const nodes = vg.data.nodos, edges = vg.data.aristas;
+  const groups = VG_BINS.map(() => []);
+  for (let k = 0; k < edges.length; k += 2) {
+    const a = nodes[edges[k]], b = nodes[edges[k + 1]];
+    groups[vgBin(vgPct(Math.max(a[2], b[2])))].push([[a[0], a[1]], [b[0], b[1]]]);
   }
-}) : null;
+  const onlyRare = vg.zone === "rare";
+  groups.forEach((segments, k) => {
+    if (!segments.length) return;
+    const rare = k === 0;
+    const muted = onlyRare && !rare;
+    L.polyline(segments, {renderer: usageRenderer, interactive: false, lineCap: "round", lineJoin: "round",
+      color: muted ? "#9aa8a5" : VG_BINS[k].color, weight: muted ? 2 : (onlyRare && rare ? 4 : VG_BINS[k].weight),
+      opacity: muted ? 0.45 : (rare ? 0.8 : 0.92)}).addTo(usageLayer);
+  });
+}
 
 function vgIndexCells(data) {
   vg.cells = new Map();
-  vg.buckets = new Map();
-  for (const cell of data.celdas) {
-    const [i, j] = cell;
-    vg.cells.set(i + "|" + j, cell[2]);
-    const key = Math.floor(i / data.escala) + "|" + Math.floor(j / data.escala);
-    if (!vg.buckets.has(key)) vg.buckets.set(key, []);
-    vg.buckets.get(key).push(cell);
+  for (const [lat, lon, count] of data.nodos) {
+    vg.cells.set(Math.floor(lat * data.escala) + "|" + Math.floor(lon * data.escala), count);
   }
 }
 
-// Igual que el servidor: la celda y sus vecinas (~1,5 km).
+// Al tocar: la celda y sus vecinas (~1,5 km), igual que el servidor.
 function vgPctAt(lat, lng) {
   const scale = vg.data.escala;
   const i = Math.floor(lat * scale), j = Math.floor(lng * scale);
@@ -469,7 +454,8 @@ function initializeFleetMap() {
     fleetMap.createPane(pane).style.zIndex = String(zIndex);
   }
   fleetMap.getPane("usagePane").style.pointerEvents = "none";
-  usageLayer = new UsageLayer({pane: "usagePane", updateWhenZooming: false});
+  usageRenderer = L.canvas({pane: "usagePane", padding: 0.3});
+  usageLayer = L.layerGroup();
   trailLayer = L.layerGroup();
   truckLayer = L.layerGroup();
   selectionLayer = L.featureGroup().addTo(fleetMap);
@@ -554,7 +540,7 @@ function renderVigilance(data) {
   vgRenderScale(data);
   vgRenderStats(data);
   if (fleetMap) {
-    usageLayer.redraw();
+    vgDrawUsage();
     vgRenderTrails();
     vgRenderTrucks();
     vgApplyLayers();
@@ -562,9 +548,9 @@ function renderVigilance(data) {
   vgRenderLists();
   vgRestoreSelection();
   $("heatmap-method").textContent =
-    `El mapa se divide en cuadros de ~500 m. Para cada uno se cuenta cuántos camiones distintos pasaron por él en los últimos 7 días, ` +
-    `hasta este minuto, y se muestra como % de los ${format(data.camiones)} camiones con reportes. Entre dos reportes seguidos se marcan ` +
-    `también los cuadros intermedios, así una carretera queda continua; los saltos de GPS se descartan. ` +
+    `Las líneas son los caminos por donde anduvo la flota en los últimos 7 días, hasta este minuto (entre dos reportes seguidos ` +
+    `de 5 min o menos; los saltos de GPS se descartan). El color y el grosor dicen qué % de los ${format(data.camiones)} camiones con ` +
+    `reportes pasó por ese lugar, contando cuadros de ~500 m y sus vecinos: verde y grueso es la ruta habitual, rojo y fino es poco habitual. ` +
     `Hay alerta cuando un camión en movimiento, fuera de las faenas, suma ${format(data.reportes_alerta)} reportes o más por lugares donde pasó ` +
     `menos del ${format(data.umbral_pct)} % del resto de la flota (se mira el cuadro y sus vecinos, ~1,5 km). Termina cuando vuelve a una zona ` +
     `habitual o entra a una faena; si deja de reportar por ${format(30)} min queda "sin señal". Es un comportamiento inusual para revisar, ` +
@@ -578,6 +564,7 @@ function vgRenderScale(data) {
     const item = el("span", "vg-bin" + (k === 0 ? " is-rare" : ""));
     const swatch = el("i");
     swatch.style.background = bin.color;
+    swatch.style.height = bin.weight + "px";
     item.append(swatch, el("small", "", k === 0 ? `< ${format(data.umbral_pct)} % · poco habitual`
       : k === VG_BINS.length - 1 ? `${format(edges[k])} % o más` : `${format(edges[k])}–${format(VG_BINS[k].hasta)} %`));
     return item;
@@ -681,11 +668,11 @@ function vgRenderAlertList() {
       el("small", "", `desde ${vgTime(alert.inicio)} · ${vgDuration(alert.minutos)}`));
     const who = el("span", "vg-alert-who");
     who.append(el("span", "plate-chip", alert.patente), el("strong", "", alert.nombre || "Sin nombre"));
-    const driver = el("span", "vg-alert-driver", "👤 " + (alert.conductor || "Conductor no informado"));
+    const driver = el("span", "vg-alert-driver", "Conductor: " + (alert.conductor || "no informado"));
     const facts = el("span", "vg-alert-facts", (alert.km_al_corredor === null ? "a más de 130 km" : `a ${format(alert.km_al_corredor, 1)} km`) +
       ` del corredor habitual · zona usada por ${format(alert.pct_zona, 1)} % de la flota`);
     button.append(head, who, driver, facts);
-    if (alert.ubicacion) button.append(el("span", "vg-alert-place", "📍 " + alert.ubicacion));
+    if (alert.ubicacion) button.append(el("span", "vg-alert-place", "Ubicación: " + alert.ubicacion));
     button.addEventListener("click", () => vgSelect({kind: "alert", id}));
     item.append(button);
     return item;
@@ -856,7 +843,7 @@ function vgFit(force) {
   fleetMap.invalidateSize();
   const bounds = L.latLngBounds([]);
   for (const v of vg.vehicles) if (Number.isFinite(Number(v.latitude))) bounds.extend([v.latitude, v.longitude]);
-  for (const [i, j] of vg.data.celdas) bounds.extend([(i + 0.5) / vg.data.escala, (j + 0.5) / vg.data.escala]);
+  for (const [lat, lon] of vg.data.nodos) bounds.extend([lat, lon]);
   if (bounds.isValid()) { fleetMap.fitBounds(bounds, {padding: [28, 28], maxZoom: 11}); vg.fitted = true; }
 }
 
@@ -2126,7 +2113,7 @@ for (const button of document.querySelectorAll("[data-zone-filter]")) {
   button.addEventListener("click", () => {
     vg.zone = button.dataset.zoneFilter;
     vgApplyLayers();
-    if (usageLayer) usageLayer.redraw();
+    if (usageLayer) vgDrawUsage();
   });
 }
 for (const input of document.querySelectorAll("[data-map-layer]")) {
