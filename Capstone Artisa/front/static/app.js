@@ -61,6 +61,7 @@ function clearSessionWork() {
   pendingRequests.clear();
   refreshing = false;
   liveVehiclesRefreshing = false;
+  if (typeof vg !== "undefined") vg.loading = false;
   $("refresh").disabled = false;
   window.clearTimeout(fleetRetry);
 }
@@ -75,8 +76,7 @@ function clearPassword() {
 function logout(message = "") {
   clearSessionWork();
   if (typeof historyState !== "undefined") Object.assign(historyState, {month: null, detail: null});
-  activeMapMode = "historical";
-  userChoseMapMode = false;
+  activeMapMode = "live";
   for (const wrapper of document.querySelectorAll(".explorer-frame-wrap")) {
     wrapper.hidden = true;
     const frame = wrapper.querySelector("iframe");
@@ -118,7 +118,7 @@ function restoreSession() {
   scheduleExpiration();
   // Al abrir la página se cargan todas las secciones, no solo la visible: así, al cambiar
   // de pestaña los datos ya están (o vienen en camino).
-  if (changed) { refresh(); refreshTelemetry(); loadFleet(); }
+  if (changed) { refresh(); refreshTelemetry(); loadFleet(); loadVigilance(false); }
 }
 
 loginForm.addEventListener("submit", async (event) => {
@@ -238,8 +238,8 @@ function syncDatasetView() {
   if (view === "prediction") {
     window.setTimeout(() => { loadPrediction(); if (predictionState.map) predictionState.map.invalidateSize(); }, 50);
   }
-  if (view === "heatmap" && activeMapMode === "classified" && fleetMap) {
-    window.setTimeout(fitPendingMap, 0);
+  if (view === "heatmap" && activeMapMode === "live" && fleetMap) {
+    window.setTimeout(() => { fleetMap.invalidateSize(); vgFit(false); }, 0);
   }
 }
 
@@ -247,103 +247,76 @@ function routeProperties(route) {
   return route && route.properties ? route.properties : {};
 }
 
-function routeLabel(route) {
-  const properties = routeProperties(route);
-  return properties.label || properties.route_id || "Sin rutas suficientes";
-}
-
-function routeUsageSummary(route) {
-  const properties = routeProperties(route);
-  return route
-    ? format(properties.usage_count || 0) + " recorridos · " +
-      format(properties.unique_vehicle_count || 0) + " camiones"
-    : "Sin información";
-}
-
-const ROUTE_DRAW_ORDER = ["LOW", "MEDIUM", "HIGH"];
+// --- Mapa de rutas: últimos 7 días en vivo y alertas (/api/vigilancia) -------------------------
+// Sin rutas predefinidas: cada celda de ~500 m se pinta según el % de la flota que pasó por
+// ella en los últimos 7 días (hasta este minuto). Las alertas marcan camiones que anduvieron
+// por zonas que casi nadie de la flota usa. Si dejan de llegar datos, la ventana sigue
+// terminando en la hora actual y las alertas abiertas pasan a "sin señal".
+const ROUTE_LABELS = Object.freeze({HIGH: "Más usada", MEDIUM: "Uso medio", LOW: "Poco usada"});
+// Colores de la clasificación de rutas: los usan Predicción y la ficha de cada camión.
 const ROUTE_COLORS = Object.freeze({HIGH: "#14532d", MEDIUM: "#f97316", LOW: "#dc2626"});
-// Mapa de rutas estudia el histórico: parte solo con las rutas; los camiones se encienden aparte.
-const mapLayerVisibility = {routes: true, vehicles: false};
-let activeRouteFilter = "ALL";
-let activeMonitorTab = "routes";
-let activeMapMode = "classified";
-let userChoseMapMode = false;
+// Tramos de la escala: hasta (sin incluir) el % indicado; el primero es "poco habitual".
+const VG_BINS = [
+  {hasta: null, color: "#d7301f", label: "poco habitual"},  // hasta el umbral (se completa al cargar)
+  {hasta: 15, color: "#f28e2b"},
+  {hasta: 30, color: "#e3c443"},
+  {hasta: 50, color: "#74b06a"},
+  {hasta: Infinity, color: "#1f6b50"}
+];
+const VG_STATES = {
+  activa: {label: "Activa", className: "active"},
+  sin_senal: {label: "Sin señal", className: "nosignal"},
+  terminada: {label: "Terminada", className: "done"}
+};
+const VG_REFRESH_MS = 60000;
+let activeMapMode = "live";
 let fleetMap = null;
-const routeLayers = {LOW: null, MEDIUM: null, HIGH: null};
+let usageLayer = null;
+let trailLayer = null;
 let truckLayer = null;
-let selectedRouteLayer = null;
-let pendingMapBounds = null;
-let mapHasFitted = false;
-let currentMapData = null;
-let selectedRouteId = null;
-let selectedVehicleId = null;
+let selectionLayer = null;
 const truckMarkers = new Map();
-const routeMapLayers = new Map();
-let openPopupVehicleId = null;   // ficha de camión abierta (se reabre tras actualizar el mapa)
+var vg = {data: null, cells: new Map(), buckets: new Map(), alerts: new Map(), vehicles: [],
+  tab: "alerts", alertFilter: "all", zone: "all", layers: {usage: true, vehicles: true, trails: true},
+  selected: null, fitted: false, loading: false, openPopup: null};
 
-// Mientras llega la clasificación se muestra igual la vista de rutas (con «Cargando…»); solo
-// si Machine aún no tiene rutas se pasa a los mapas de telemetría.
-function setMapMode(mode, remember = false, pending = Boolean(currentMapData) && machinePending(currentMapData)) {
-  activeMapMode = mode === "classified" && !pending ? "classified" : "historical";
-  if (remember) userChoseMapMode = true;
+const vgTime = (iso) => iso ? new Intl.DateTimeFormat("es-CL", {
+  weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: HISTORY_ZONE}).format(new Date(iso)) : "—";
+const vgLocalDay = (iso) => new Intl.DateTimeFormat("en-CA", {timeZone: HISTORY_ZONE}).format(new Date(iso));
+const vgDuration = (minutes) => minutes < 60 ? `${format(minutes)} min`
+  : `${format(Math.floor(minutes / 60))} h ${String(Math.round(minutes % 60)).padStart(2, "0")} min`;
+
+function setMapMode(mode) {
+  activeMapMode = mode === "historical" ? "historical" : "live";
   const historical = activeMapMode === "historical";
   const explorer = $("explorer-routes");
   explorer.closest(".map-card").classList.toggle("showing-history", historical);
-  // El explorador histórico no usa las listas de rutas y vehículos: ocupa todo el ancho.
   explorer.closest(".heatmap-layout").classList.toggle("is-historical", historical);
   document.querySelector(".heatmap-method").hidden = historical;
-  // La lista de rutas y camiones es de las rutas clasificadas: en telemetría no se muestra.
   document.querySelector(".atlas-side").hidden = historical;
-  // Los filtros y capas solo aplican a las rutas clasificadas.
   for (const panel of document.querySelectorAll(".route-filter-panel, .map-layer-panel")) panel.hidden = historical;
   explorer.hidden = !historical;
   $("heatmap-map").hidden = historical;
   $("classified-map-legend").hidden = historical;
+  $("atlas-stats").hidden = historical;
   for (const button of document.querySelectorAll("[data-map-mode]")) {
     button.setAttribute("aria-pressed", String(button.dataset.mapMode === activeMapMode));
-    if (button.dataset.mapMode === "classified") button.disabled = pending;
-  }
-  $("atlas-stats").hidden = historical;
-  for (const control of document.querySelectorAll("[data-route-filter], [data-map-layer], [data-monitor-tab], #monitor-search, #reset-map-view")) {
-    control.disabled = pending || historical;
   }
   if (historical) {
     const frame = explorer.querySelector("iframe[data-explorer-frame]");
     if (frame && !frame.hasAttribute("src") && token()) frame.src = frame.dataset.explorerFrame;
     frame?.contentWindow?.postMessage("artisa:show-map", location.origin);
   } else if (fleetMap) {
-    requestAnimationFrame(() => fitPendingMap(true));
+    requestAnimationFrame(() => { fleetMap.invalidateSize(); vgFit(false); });
   }
 }
 
-function setLayerVisibility(layer, visible) {
-  if (!fleetMap || !layer) return;
-  if (visible && !fleetMap.hasLayer(layer)) fleetMap.addLayer(layer);
-  if (!visible && fleetMap.hasLayer(layer)) fleetMap.removeLayer(layer);
+function machinePending(data) {
+  return data.status === "pending" || data.sourceMode === "PENDING_MACHINE" || data.metadata?.status === "pending";
 }
-
-function updateRouteFilterCounts(routes) {
-  const counts = {ALL: routes.length, LOW: 0, MEDIUM: 0, HIGH: 0};
-  for (const route of routes) {
-    const level = routeProperties(route).usage_level;
-    if (Object.hasOwn(counts, level)) counts[level] += 1;
-  }
-  for (const counter of document.querySelectorAll("[data-route-count]")) {
-    counter.textContent = format(counts[counter.dataset.routeCount] || 0);
-  }
-  // Barra de niveles del resumen: cuánto pesa cada nivel en el total de rutas.
-  for (const bar of document.querySelectorAll("[data-level-bar]")) {
-    const level = bar.dataset.levelBar;
-    bar.style.flexGrow = String(counts[level] || 0);
-    bar.title = `${ROUTE_LABELS[level]}: ${format(counts[level] || 0)} rutas`;
-  }
-}
-
-const ROUTE_LABELS = Object.freeze({HIGH: "Más usada", MEDIUM: "Uso medio", LOW: "Poco usada"});
 
 function setSelectionDetail(kind, title, description, metadata) {
   const detail = $("map-selection-detail");
-  if (!detail) return;
   const type = document.createElement("span");
   type.textContent = kind;
   const heading = document.createElement("strong");
@@ -358,130 +331,18 @@ function setSelectionDetail(kind, title, description, metadata) {
   }
 }
 
-function drawSelectedRoute(record) {
-  // La ruta seleccionada se dibuja encima de todas, con contorno, y con sus dos extremos.
-  if (!selectedRouteLayer) return;
-  selectedRouteLayer.clearLayers();
-  if (!record) return;
-  const properties = routeProperties(record.route);
-  const coordinates = record.route.geometry.coordinates || [];
-  const latlngs = coordinates.map((point) => [point[1], point[0]]);
-  if (latlngs.length < 2) return;
-  L.polyline(latlngs, {pane: "routeSelectedPane", color: "#0b1f1a", weight: 13, opacity: 0.9,
-    lineCap: "round", lineJoin: "round", interactive: false}).addTo(selectedRouteLayer);
-  L.polyline(latlngs, {pane: "routeSelectedPane", color: ROUTE_COLORS[properties.usage_level] || "#246c55",
-    weight: 7, opacity: 1, lineCap: "round", lineJoin: "round", interactive: false}).addTo(selectedRouteLayer);
-  const [nameA, nameB] = String(properties.label || "").split("↔").map((part) => part.trim());
-  const ends = [[latlngs[0], nameA || "Extremo A"], [latlngs[latlngs.length - 1], nameB || nameA || "Extremo B"]];
-  for (const [latlng, name] of ends) {
-    L.circleMarker(latlng, {pane: "routeSelectedPane", radius: 8, color: "#0b1f1a", weight: 3,
-      fillColor: "#ffffff", fillOpacity: 1, interactive: false})
-      .bindTooltip(name, {permanent: true, direction: "top", offset: [0, -8], className: "route-endpoint"})
-      .addTo(selectedRouteLayer);
-  }
-}
-
-function refreshSelectionStyles() {
-  const focused = Boolean(selectedRouteId);
-  for (const [routeId, record] of routeMapLayers) {
-    const selected = routeId === selectedRouteId;
-    // Con una ruta seleccionada, el resto queda tenue para que se vea su recorrido completo.
-    record.halo.setStyle({
-      weight: record.haloWeight,
-      opacity: focused ? 0 : record.haloOpacity
-    });
-    record.line.setStyle({
-      weight: focused && !selected ? Math.max(2, record.baseWeight - 2) : record.baseWeight,
-      opacity: focused ? (selected ? 0 : 0.12) : record.baseOpacity
-    });
-  }
-  drawSelectedRoute(focused ? routeMapLayers.get(selectedRouteId) : null);
-  for (const [vehicleId, marker] of truckMarkers) {
-    const element = marker.getElement();
-    if (element) element.classList.toggle("is-selected", vehicleId === selectedVehicleId);
-  }
-  for (const button of document.querySelectorAll("[data-route-select]")) {
-    button.classList.toggle("is-active", button.dataset.routeSelect === selectedRouteId);
-  }
-  for (const button of document.querySelectorAll("[data-vehicle-select]")) {
-    button.classList.toggle("is-active", button.dataset.vehicleSelect === selectedVehicleId);
-  }
-}
-
-function routeMatchesFilter(route) {
-  return activeRouteFilter === "ALL" || routeProperties(route).usage_level === activeRouteFilter;
-}
-
-function renderRouteMonitor(routes) {
-  const list = $("route-monitor-list");
-  if (!list) return;
-  $("monitor-route-count").textContent = format(routes.length);
-  const query = $("monitor-search").value.trim().toLocaleLowerCase("es");
-  const visible = routes.filter((route) => {
-    const properties = routeProperties(route);
-    return routeMatchesFilter(route) &&
-      `${properties.route_id} ${properties.label}`.toLocaleLowerCase("es").includes(query);
-  });
-  list.replaceChildren();
-  for (const route of visible.slice(0, 150)) {
-    const properties = routeProperties(route);
-    const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "route-monitor-row";
-    button.dataset.routeSelect = properties.route_id;
-    const color = document.createElement("i");
-    color.style.backgroundColor = ROUTE_COLORS[properties.usage_level] || "#718785";
-    const copy = document.createElement("span");
-    const name = document.createElement("strong");
-    name.textContent = properties.label || properties.route_id;
-    const label = document.createElement("small");
-    label.textContent = `${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} camiones`;
-    copy.append(name, label);
-    const level = document.createElement("b");
-    level.className = "level-pill " + String(properties.usage_level || "").toLowerCase();
-    level.textContent = ROUTE_LABELS[properties.usage_level] || properties.usage_level;
-    button.append(color, copy, level);
-    button.addEventListener("click", () => selectRoute(route));
-    item.append(button);
-    list.append(item);
-  }
-  if (visible.length > 150) {
-    const item = document.createElement("li");
-    item.className = "monitor-empty";
-    item.textContent = "Mostrando 150 de " + format(visible.length) +
-      " rutas. Usa la búsqueda para encontrar otra; todas permanecen en el mapa.";
-    list.append(item);
-  }
-  if (!visible.length) {
-    const item = document.createElement("li");
-    item.className = "monitor-empty";
-    item.textContent = "No hay rutas para este filtro.";
-    list.append(item);
-  }
-  refreshSelectionStyles();
-}
-
+// --- Camiones ---
 function vehicleDriver(vehicle) {
   const structured = [vehicle.driver_name, vehicle.driver_last_name]
     .map((part) => String(part || "").trim()).filter(Boolean).join(" ");
-  if (structured) return structured;
-  return "No informado";
-}
-
-function vehiclePlate(vehicle) {
-  const explicit = String(vehicle.patente || vehicle.plate || vehicle.license_plate || "").trim();
-  if (explicit) return explicit;
-  return null;
+  return structured || "No informado";
 }
 
 function vehicleStatus(vehicle) {
   const timestamp = vehicle.timestamp ? new Date(vehicle.timestamp).getTime() : NaN;
   if (!Number.isFinite(timestamp)) return {label: "Estado no disponible", className: "off"};
-  const stale = Number.isFinite(timestamp) && Date.now() - timestamp > 30 * 60 * 1000;
-  if (stale) return {label: "Última posición histórica", className: "off"};
-  const speed = Number(vehicle.speed_kmh || 0);
-  if (speed > 3) return {label: "En movimiento", className: "moving"};
+  if (Date.now() - timestamp > 30 * 60 * 1000) return {label: "Última posición conocida", className: "off"};
+  if (Number(vehicle.speed_kmh || 0) > 3) return {label: "En movimiento", className: "moving"};
   if (vehicle.ignition !== null && vehicle.ignition !== undefined && Number(vehicle.ignition) === 0) {
     return {label: "Apagado", className: "off"};
   }
@@ -490,108 +351,109 @@ function vehicleStatus(vehicle) {
 
 const TRUCK_MARKUP = '<img class="truck-glyph" src="/artisa-truck-box-white-green.png?v=20261014" alt="" aria-hidden="true">';
 
-function renderLiveFleet(vehicles) {
-  const list = $("vehicle-live-list");
-  if (!list) return;
-  $("vehicle-live-count").textContent = format(vehicles.length);
-  const query = $("monitor-search").value.trim().toLocaleLowerCase("es");
-  const ordered = [...vehicles]
-    .filter((vehicle) => `${vehicle.vehicle_id} ${vehicle.vehicle_name} ${vehicleDriver(vehicle)}`.toLocaleLowerCase("es").includes(query))
-    .sort((first, second) => Number(second.speed_kmh || 0) - Number(first.speed_kmh || 0));
-  list.replaceChildren();
-  for (const vehicle of ordered) {
-    const status = vehicleStatus(vehicle);
-    const item = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "vehicle-live-row " + status.className;
-    button.dataset.vehicleSelect = vehicle.vehicle_id;
-    const icon = document.createElement("span");
-    icon.className = "vehicle-list-icon";
-    icon.innerHTML = TRUCK_MARKUP;
-    const copy = document.createElement("span");
-    const name = document.createElement("strong");
-    name.textContent = vehicle.vehicle_name || vehicle.vehicle_id;
-    const identity = document.createElement("small");
-    identity.className = "fleet-identity";
-    const driver = vehicleDriver(vehicle);
-    identity.append(...truckIdentity(vehicle.vehicle_id, driver === "No informado" ? null : driver, null));
-    copy.append(name, identity);
-    const state = document.createElement("em");
-    state.className = "vehicle-live-state";
-    state.textContent = status.className === "moving" && Number(vehicle.speed_kmh) > 3
-      ? format(vehicle.speed_kmh, 0) + " km/h" : status.label;
-    button.append(icon, copy, state);
-    button.addEventListener("click", () => selectVehicle(vehicle));
-    item.append(button);
-    list.append(item);
-  }
-  if (!ordered.length) {
-    const item = document.createElement("li");
-    item.className = "monitor-empty";
-    item.textContent = "No hay camiones para esta búsqueda.";
-    list.append(item);
-  }
-  refreshSelectionStyles();
+function truckIcon(vehicle) {
+  const status = vehicleStatus(vehicle);
+  const hasHeading = vehicle.heading !== null && vehicle.heading !== undefined &&
+    vehicle.heading !== "" && Number.isFinite(Number(vehicle.heading));
+  const heading = hasHeading ? ((Number(vehicle.heading) % 360) + 360) % 360 : null;
+  // La imagen base mira hacia la izquierda: se invierte cuando el rumbo tiene componente este.
+  const facing = hasHeading && heading <= 180 ? -1 : 1;
+  const direction = hasHeading ? "<span class='truck-direction' aria-hidden='true'></span>" : "";
+  const orientation = hasHeading ? " style='--truck-heading:" + heading + "deg;--truck-facing:" + facing + "'" : "";
+  const alert = vehicle.en_alerta ? " is-alert" : "";
+  return L.divIcon({
+    className: "truck-div-icon",
+    html: "<span class='truck-marker " + status.className + alert + "'" + orientation + ">" + direction + TRUCK_MARKUP + "</span>",
+    iconSize: [56, 38], iconAnchor: [28, 19], popupAnchor: [0, -21]
+  });
 }
 
-function renderMonitorLists() {
-  if (!currentMapData) return;
-  renderRouteMonitor(currentMapData.routes);
-  renderLiveFleet(currentMapData.vehicles);
+function truckAgeText(vehicle) {
+  const seconds = (Date.now() - new Date(vehicle.timestamp).getTime()) / 1000;
+  return Number.isFinite(seconds) ? formatAge(seconds) : "sin dato";
 }
 
-function setMonitorTab(tab) {
-  activeMonitorTab = tab === "vehicles" ? "vehicles" : "routes";
-  for (const button of document.querySelectorAll("[data-monitor-tab]")) {
-    const selected = button.dataset.monitorTab === activeMonitorTab;
-    button.classList.toggle("is-active", selected);
-    button.setAttribute("aria-selected", selected ? "true" : "false");
-  }
-  for (const list of document.querySelectorAll("[data-monitor-list]")) {
-    list.hidden = list.dataset.monitorList !== activeMonitorTab;
-  }
-  $("monitor-search").value = "";
-  $("monitor-search").placeholder = activeMonitorTab === "routes"
-    ? "Buscar ruta…"
-    : "Buscar camión…";
-  renderMonitorLists();
+function truckPopup(vehicle) {
+  const status = vehicleStatus(vehicle);
+  const wrapper = el("div", "truck-popup");
+  const state = el("b", status.className, vehicle.en_alerta ? "En alerta · " + status.label : status.label);
+  if (vehicle.en_alerta) state.classList.add("alert");
+  const speed = vehicle.speed_kmh === null || vehicle.speed_kmh === undefined ? "Sin velocidad" : format(vehicle.speed_kmh, 0) + " km/h";
+  const link = el("a", "truck-popup-link", "Ver su recorrido de hoy");
+  link.href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
+  wrapper.append(
+    el("strong", "", vehicle.vehicle_name || vehicle.vehicle_id), state,
+    el("p", "", speed + " · " + (vehicle.event || "Sin evento")),
+    el("small", "", "Patente: " + vehicle.vehicle_id),
+    el("small", "", "Conductor: " + vehicleDriver(vehicle)),
+    el("small", "", "Último dato: " + formatLocal(vehicle.timestamp) + " (" + truckAgeText(vehicle) + ")"),
+    link);
+  return wrapper;
 }
 
-function applyRouteFilter() {
-  if (!fleetMap) return;
-  for (const level of ROUTE_DRAW_ORDER) {
-    const visible = mapLayerVisibility.routes && !selectedRouteId &&
-      (activeRouteFilter === "ALL" || activeRouteFilter === level);
-    setLayerVisibility(routeLayers[level], visible);
-  }
-  for (const button of document.querySelectorAll("[data-route-filter]")) {
-    const selected = button.dataset.routeFilter === activeRouteFilter;
-    button.classList.toggle("is-active", selected);
-    button.setAttribute("aria-pressed", selected ? "true" : "false");
-    button.disabled = !mapLayerVisibility.routes;
-  }
-  if (currentMapData) renderRouteMonitor(currentMapData.routes);
+// --- Capa de uso: celdas dibujadas en canvas por teselas ---
+function vgPct(count) {
+  return count / Math.max(1, vg.data.camiones) * 100;
 }
 
-function applyMapLayerVisibility() {
-  if (!fleetMap) return;
-  // Con una ruta seleccionada se ven solo esa ruta y los camiones cuyo último viaje fue por
-  // ella. "Vista general" muestra todo.
-  const routeOf = new Map((currentMapData ? currentMapData.vehicles : []).map((v) => [v.vehicle_id, v.route_id]));
-  for (const [vehicleId, marker] of truckMarkers) {
-    // Con la casilla «Camiones» apagada solo se ve el camión elegido en la lista.
-    const visible = !mapLayerVisibility.vehicles ? vehicleId === selectedVehicleId
-      : selectedRouteId ? routeOf.get(vehicleId) === selectedRouteId : true;
-    if (visible && !truckLayer.hasLayer(marker)) truckLayer.addLayer(marker);
-    if (!visible && truckLayer.hasLayer(marker)) truckLayer.removeLayer(marker);
-  }
-  setLayerVisibility(truckLayer, mapLayerVisibility.vehicles || Boolean(selectedVehicleId));
-  applyRouteFilter();
+function vgColor(pct) {
+  return VG_BINS.find((bin) => pct < bin.hasta).color;
 }
 
-// Los cuatro mapas comparten fondo, selector de capas, faenas y densidad (mapa-base.js).
-const mapPedir = (path, timeoutMs) => api(path, {timeoutMs});
+const UsageLayer = window.L ? L.GridLayer.extend({
+  createTile(coords) {
+    const tile = document.createElement("canvas");
+    const size = this.getTileSize();
+    tile.width = size.x;
+    tile.height = size.y;
+    if (!vg.data) return tile;
+    const context = tile.getContext("2d");
+    const map = this._map;
+    const origin = coords.scaleBy(size);
+    const nw = map.unproject(origin, coords.z), se = map.unproject(origin.add(size), coords.z);
+    const scale = vg.data.escala;
+    const cellPx = Math.max(3, map.project([0, 1 / scale], coords.z).x - map.project([0, 0], coords.z).x);
+    const umbral = vg.data.umbral_pct;
+    for (let lat = Math.floor(se.lat) - 1; lat <= Math.floor(nw.lat); lat++) {
+      for (let lon = Math.floor(nw.lng) - 1; lon <= Math.floor(se.lng); lon++) {
+        for (const [i, j, count] of vg.buckets.get(lat + "|" + lon) || []) {
+          const pct = vgPct(count);
+          const rare = pct < umbral;
+          if (vg.zone === "rare" && !rare) {
+            context.fillStyle = "rgba(112,128,131,.22)";
+          } else {
+            context.fillStyle = vgColor(pct);
+          }
+          const point = map.project([(i + 1) / scale, j / scale], coords.z).subtract(origin);
+          context.globalAlpha = vg.zone === "rare" && !rare ? 1 : (rare ? 0.95 : 0.85);
+          context.fillRect(Math.round(point.x), Math.round(point.y), Math.ceil(cellPx), Math.ceil(cellPx));
+        }
+      }
+    }
+    return tile;
+  }
+}) : null;
+
+function vgIndexCells(data) {
+  vg.cells = new Map();
+  vg.buckets = new Map();
+  for (const cell of data.celdas) {
+    const [i, j] = cell;
+    vg.cells.set(i + "|" + j, cell[2]);
+    const key = Math.floor(i / data.escala) + "|" + Math.floor(j / data.escala);
+    if (!vg.buckets.has(key)) vg.buckets.set(key, []);
+    vg.buckets.get(key).push(cell);
+  }
+}
+
+// Igual que el servidor: la celda y sus vecinas (~1,5 km).
+function vgPctAt(lat, lng) {
+  const scale = vg.data.escala;
+  const i = Math.floor(lat * scale), j = Math.floor(lng * scale);
+  let count = 0;
+  for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) count = Math.max(count, vg.cells.get((i + di) + "|" + (j + dj)) || 0);
+  return count;
+}
 
 function initializeFleetMap() {
   const container = $("heatmap-map");
@@ -602,371 +464,421 @@ function initializeFleetMap() {
     return;
   }
   container.replaceChildren();
-  fleetMap = ArtisaMapaBase.crear(container, {pedir: mapPedir}).mapa;
-  const pendingNote = document.createElement("div");
-  pendingNote.id = "map-pending-note";
-  pendingNote.className = "map-pending-note";
-  pendingNote.textContent = "Mapa base OpenStreetMap · rutas pendientes de procesamiento Machine";
-  pendingNote.hidden = true;
-  container.append(pendingNote);
-
-  for (const [paneName, zIndex] of [
-    ["routeLowPane", 410], ["routeMediumPane", 420],
-    ["routeHighPane", 430], ["routeSelectedPane", 440], ["truckPane", 650]
-  ]) {
-    fleetMap.createPane(paneName).style.zIndex = String(zIndex);
+  fleetMap = ArtisaMapaBase.crear(container, {pedir: mapPedir, centro: [-24.5, -70], zoom: 6}).mapa;
+  for (const [pane, zIndex] of [["usagePane", 380], ["trailPane", 600], ["selectionPane", 620], ["truckPane", 650]]) {
+    fleetMap.createPane(pane).style.zIndex = String(zIndex);
   }
-
-  for (const level of ROUTE_DRAW_ORDER) routeLayers[level] = L.layerGroup();
+  fleetMap.getPane("usagePane").style.pointerEvents = "none";
+  usageLayer = new UsageLayer({pane: "usagePane", updateWhenZooming: false});
+  trailLayer = L.layerGroup();
   truckLayer = L.layerGroup();
-  selectedRouteLayer = L.featureGroup().addTo(fleetMap);
-  applyMapLayerVisibility();
+  selectionLayer = L.featureGroup().addTo(fleetMap);
+  fleetMap.on("click", (event) => vgInspect(event.latlng));
+  // De lejos los camiones se ven como puntos para no tapar el mapa.
+  const compact = () => container.classList.toggle("is-far", fleetMap.getZoom() < 9);
+  fleetMap.on("zoomend", compact);
+  compact();
+  vgApplyLayers();
 }
 
-function openTruckPopup(vehicleId) {
-  const marker = truckMarkers.get(vehicleId);
-  if (marker && fleetMap && truckLayer.hasLayer(marker)) marker.openPopup();
-}
-
-function fitPendingMap(force = false) {
+function vgApplyLayers() {
   if (!fleetMap) return;
-  fleetMap.invalidateSize();
-  // Con un camión o una ruta seleccionados se respeta esa vista: volver a la pestaña o la
-  // actualización automática no deben alejar el mapa a toda la flota.
-  if (selectedRouteId || selectedVehicleId) return;
-  if ((force || !mapHasFitted) && pendingMapBounds && pendingMapBounds.isValid()) {
-    fleetMap.fitBounds(pendingMapBounds, {padding: [28, 28], maxZoom: 11});
-    mapHasFitted = true;
+  const show = (layer, visible) => {
+    if (visible && !fleetMap.hasLayer(layer)) fleetMap.addLayer(layer);
+    if (!visible && fleetMap.hasLayer(layer)) fleetMap.removeLayer(layer);
+  };
+  show(usageLayer, vg.layers.usage && Boolean(vg.data));
+  show(trailLayer, vg.layers.trails);
+  show(truckLayer, vg.layers.vehicles);
+  for (const input of document.querySelectorAll("[data-map-layer]")) input.checked = vg.layers[input.dataset.mapLayer];
+  for (const button of document.querySelectorAll("[data-zone-filter]")) {
+    const active = button.dataset.zoneFilter === vg.zone;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.disabled = !vg.layers.usage;
   }
 }
 
-function truckIcon(vehicle) {
-  const status = vehicleStatus(vehicle);
-  const hasHeading = vehicle.heading !== null && vehicle.heading !== undefined &&
-    vehicle.heading !== "" && Number.isFinite(Number(vehicle.heading));
-  const heading = hasHeading ? ((Number(vehicle.heading) % 360) + 360) % 360 : null;
-  // La imagen base mira hacia la izquierda: se invierte cuando el rumbo tiene componente este.
-  const facing = hasHeading && heading <= 180 ? -1 : 1;
-  const direction = hasHeading
-    ? "<span class='truck-direction' aria-hidden='true'></span>"
-    : "";
-  const orientation = hasHeading
-    ? " style='--truck-heading:" + heading + "deg;--truck-facing:" + facing + "'"
-    : "";
-  const html = "<span class='truck-marker " + status.className +
-    "'" + orientation + ">" + direction + TRUCK_MARKUP + "</span>";
-  return L.divIcon({
-    className: "truck-div-icon",
-    html,
-    iconSize: [56, 38],
-    iconAnchor: [28, 19],
-    popupAnchor: [0, -21]
-  });
+// Al tocar el mapa: qué % de la flota pasó por ese lugar.
+function vgInspect(latlng) {
+  if (!vg.data || !vg.layers.usage) return;
+  const count = vgPctAt(latlng.lat, latlng.lng);
+  const pct = vgPct(count);
+  const text = count
+    ? `${format(pct, pct < 10 ? 1 : 0)} % de la flota pasó por aquí en 7 días (${format(count)} de ${format(vg.data.camiones)} camiones)` +
+      (pct < vg.data.umbral_pct ? " · zona poco habitual" : "")
+    : "Ningún camión pasó por aquí en los últimos 7 días";
+  L.popup({className: "vg-inspect"}).setLatLng(latlng).setContent(el("span", "", text)).openOn(fleetMap);
 }
 
-function truckPopup(vehicle) {
-  const status = vehicleStatus(vehicle);
-  const wrapper = document.createElement("div");
-  wrapper.className = "truck-popup";
-  const title = document.createElement("strong");
-  title.textContent = vehicle.vehicle_name || vehicle.vehicle_id || "Vehículo";
-  const identifier = document.createElement("span");
-  identifier.textContent = vehicle.vehicle_id || "Sin vehicle_id";
-  const state = document.createElement("b");
-  state.className = status.className;
-  state.textContent = status.label;
-  const details = document.createElement("p");
-  const speed = vehicle.speed_kmh === null || vehicle.speed_kmh === undefined
-    ? "Sin velocidad"
-    : format(vehicle.speed_kmh, 1) + " km/h";
-  details.textContent = speed + " · " + (vehicle.event || "Sin evento");
-  const driver = document.createElement("small");
-  driver.textContent = "Conductor: " + vehicleDriver(vehicle);
-  const route = document.createElement("small");
-  const matched = currentMapData && currentMapData.routes.find(
-    (item) => routeProperties(item).route_id === vehicle.route_id);
-  route.textContent = "Ruta histórica: " + (matched
-    ? routeProperties(matched).usage_label + " · " + vehicle.route_id
-    : "sin clasificar");
-  const date = document.createElement("small");
-  date.textContent = "Última posición: " + formatLocal(vehicle.timestamp) + " (hora de Chile)";
-  const plate = document.createElement("small");
-  plate.textContent = "Patente: " + (vehiclePlate(vehicle) || "No informada");
-  const link = document.createElement("a");
-  link.className = "truck-popup-link";
-  link.href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
-  link.textContent = "Ver su recorrido de hoy en Camiones en vivo";
-  wrapper.append(title, identifier, state, details, plate, driver, route, date, link);
-  return wrapper;
-}
-
-function selectRoute(route, focus = true) {
-  const properties = routeProperties(route);
-  const record = routeMapLayers.get(properties.route_id);
-  if (!record || !fleetMap) return;
-  selectedRouteId = properties.route_id;
-  selectedVehicleId = null;
-  fleetMap.closePopup();
-  if (!mapLayerVisibility.routes) {
-    mapLayerVisibility.routes = true;
-    const toggle = document.querySelector('[data-map-layer="routes"]');
-    if (toggle) toggle.checked = true;
-  }
-  applyMapLayerVisibility();
-  refreshSelectionStyles();
-  setSelectionDetail(
-    "Ruta seleccionada · " + (ROUTE_LABELS[properties.usage_level] || properties.usage_level),
-    routeLabel(route),
-    `${format(properties.usage_count)} recorridos · ${format(properties.unique_vehicle_count)} camiones` +
-      (properties.km_mediana ? ` · ~${format(properties.km_mediana, 0)} km por recorrido` : ""),
-    `${format(properties.observed_points)} posiciones del viaje representativo`
-  );
-  if (focus) {
-    fleetMap.fitBounds(record.bounds, {padding: [55, 55], maxZoom: 14});
-    record.line.openTooltip();
+// --- Carga ---
+async function loadVigilance(quiet = true) {
+  if (!token() || vg.loading) return;
+  vg.loading = true;
+  const version = sessionVersion;
+  try {
+    const data = await api("/api/vigilancia", {timeoutMs: 90000});
+    if (version !== sessionVersion) return;
+    renderVigilance(data);
+  } catch (error) {
+    if (version !== sessionVersion) return;
+    $("heatmap-source-status").textContent = "Sin conexión";
+    $("heatmap-source-status").className = "status warning";
+    $("map-last-update").textContent = "No se pudo actualizar (" + error.message + "). Se muestran los últimos datos y se reintenta cada minuto.";
+    if (!vg.data && !quiet) $("alert-list").replaceChildren(el("li", "monitor-empty", "No se pudo cargar: " + error.message));
+  } finally {
+    if (version === sessionVersion) vg.loading = false;
   }
 }
 
-function selectVehicle(vehicle, focus = true) {
-  const marker = truckMarkers.get(vehicle.vehicle_id);
-  if (!marker || !fleetMap) return;
-  selectedVehicleId = vehicle.vehicle_id;
-  selectedRouteId = null;
-  for (const record of routeMapLayers.values()) record.line.closeTooltip();
-  applyMapLayerVisibility();
-  refreshSelectionStyles();
-  const status = vehicleStatus(vehicle);
-  const speed = vehicle.speed_kmh === null || vehicle.speed_kmh === undefined
-    ? "Velocidad sin dato"
-    : format(vehicle.speed_kmh, 1) + " km/h";
-  setSelectionDetail(
-    "Camión seleccionado · " + status.label,
-    vehicle.vehicle_name || vehicle.vehicle_id,
-    `${speed} · ${vehicle.event || "Sin evento"}`,
-    `${Number(vehicle.latitude).toFixed(6)}, ${Number(vehicle.longitude).toFixed(6)} · ${formatLocal(vehicle.timestamp)} (hora de Chile)`
-  );
-  // El recorrido del día está en Camiones en vivo: aquí solo se enlaza.
-  const link = document.createElement("a");
-  link.className = "selection-link";
-  link.href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
-  link.textContent = "Ver su recorrido de hoy en Camiones en vivo";
-  $("map-selection-detail").append(link);
-  if (focus) focusTruck(vehicle.vehicle_id);
-}
-
-function focusTruck(vehicleId) {
-  const marker = truckMarkers.get(vehicleId);
-  if (!marker || !fleetMap) return;
-  fleetMap.setView(marker.getLatLng(), Math.max(fleetMap.getZoom(), 11));
-  openTruckPopup(vehicleId);
-}
-
-function resetMapSelection() {
-  if (fleetMap) fleetMap.closePopup();
-  for (const record of routeMapLayers.values()) record.line.closeTooltip();
-  selectedRouteId = null;
-  selectedVehicleId = null;
-  applyMapLayerVisibility();
-  refreshSelectionStyles();
-  setSelectionDetail("Selección", "Elige una ruta o un camión", "El mapa lo centra y muestra sus datos.");
-  fitPendingMap(true);
-}
-
-function textTooltip(text) {
-  const label = document.createElement("span");
-  label.textContent = text;
-  return label;
-}
-
-function renderFleetMap(data) {
+function renderVigilance(data) {
   initializeFleetMap();
-  if (!fleetMap) return;
-  currentMapData = data;
-  const reopenPopup = openPopupVehicleId;
-  for (const level of ROUTE_DRAW_ORDER) routeLayers[level].clearLayers();
+  if (data.status !== "ok") {
+    vg.data = null;
+    vg.alerts = new Map();
+    vg.vehicles = [];
+    $("heatmap-source-status").textContent = "Sin datos en 7 días";
+    $("heatmap-source-status").className = "status neutral";
+    for (const id of ["vg-window", "vg-trucks", "vg-moving", "vg-last", "vg-alerts"]) $(id).textContent = "—";
+    $("map-last-update").textContent = data.message || "Sin reportes de camiones en los últimos 7 días.";
+    $("alert-list").replaceChildren(el("li", "monitor-empty", data.message || "Sin reportes de camiones en los últimos 7 días."));
+    $("vehicle-live-list").replaceChildren();
+    if (fleetMap) { trailLayer.clearLayers(); truckLayer.clearLayers(); truckMarkers.clear(); vgApplyLayers(); }
+    return;
+  }
+  vg.data = data;
+  VG_BINS[0].hasta = data.umbral_pct;
+  vgIndexCells(data);
+  vg.alerts = new Map(data.alertas.map((alert) => [alert.patente + "|" + alert.inicio, alert]));
+  vg.vehicles = data.vehiculos;
+  vgRenderScale(data);
+  vgRenderStats(data);
+  if (fleetMap) {
+    usageLayer.redraw();
+    vgRenderTrails();
+    vgRenderTrucks();
+    vgApplyLayers();
+  }
+  vgRenderLists();
+  vgRestoreSelection();
+  $("heatmap-method").textContent =
+    `El mapa se divide en cuadros de ~500 m. Para cada uno se cuenta cuántos camiones distintos pasaron por él en los últimos 7 días, ` +
+    `hasta este minuto, y se muestra como % de los ${format(data.camiones)} camiones con reportes. Entre dos reportes seguidos se marcan ` +
+    `también los cuadros intermedios, así una carretera queda continua; los saltos de GPS se descartan. ` +
+    `Hay alerta cuando un camión en movimiento, fuera de las faenas, suma ${format(data.reportes_alerta)} reportes o más por lugares donde pasó ` +
+    `menos del ${format(data.umbral_pct)} % del resto de la flota (se mira el cuadro y sus vecinos, ~1,5 km). Termina cuando vuelve a una zona ` +
+    `habitual o entra a una faena; si deja de reportar por ${format(30)} min queda "sin señal". Es un comportamiento inusual para revisar, ` +
+    "no una falta comprobada. Si no llegan datos nuevos, la ventana igual termina en la hora actual: lo antiguo va saliendo y lo último recibido se mantiene.";
+  if (!vg.fitted && $("heatmap-map").offsetParent !== null) requestAnimationFrame(() => vgFit(false));
+}
+
+function vgRenderScale(data) {
+  const edges = [0, data.umbral_pct, 15, 30, 50];
+  $("vg-scale").replaceChildren(...VG_BINS.map((bin, k) => {
+    const item = el("span", "vg-bin" + (k === 0 ? " is-rare" : ""));
+    const swatch = el("i");
+    swatch.style.background = bin.color;
+    item.append(swatch, el("small", "", k === 0 ? `< ${format(data.umbral_pct)} % · poco habitual`
+      : k === VG_BINS.length - 1 ? `${format(edges[k])} % o más` : `${format(edges[k])}–${format(VG_BINS[k].hasta)} %`));
+    return item;
+  }));
+}
+
+function vgRenderStats(data) {
+  const desde = new Date(data.desde), hasta = new Date(data.hasta);
+  const short = (date) => new Intl.DateTimeFormat("es-CL", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+    timeZone: HISTORY_ZONE}).format(date);
+  $("vg-window").textContent = `${short(desde)} → ahora`;
+  $("vg-window-d").textContent = `Hasta ${short(hasta)} · se actualiza cada minuto`;
+  $("vg-trucks").textContent = `${format(data.camiones)} de ${format(data.catalogo)}`;
+  $("vg-trucks-d").textContent = `${format(data.reportes)} reportes en 7 días`;
+  vgRenderLive();
+  const summary = data.resumen;
+  $("vg-alerts").textContent = format(summary.activas);
+  $("vg-alerts-card").classList.toggle("has-alerts", summary.activas > 0);
+  $("vg-alerts-d").textContent = `${format(summary.sin_senal)} sin señal · ${format(summary.terminadas)} terminadas en 7 días`;
+  $("heatmap-source-status").textContent = summary.activas
+    ? `${format(summary.activas)} ${summary.activas === 1 ? "alerta activa" : "alertas activas"}` : "En vivo · sin alertas activas";
+  $("heatmap-source-status").className = "status " + (summary.activas ? "warning" : "info");
+}
+
+// Lo que cambia cada minuto con las posiciones: en movimiento, último dato, pie del mapa.
+function vgRenderLive() {
+  if (!vg.data) return;
+  const recent = vg.vehicles.filter((v) => Date.now() - new Date(v.timestamp).getTime() <= 15 * 60 * 1000);
+  $("vg-moving").textContent = format(recent.filter((v) => Number(v.speed_kmh || 0) > 3).length);
+  $("vg-moving-d").textContent = `${format(recent.length)} con dato de los últimos 15 min`;
+  const last = vg.vehicles.reduce((top, v) => (!top || v.timestamp > top ? v.timestamp : top), null);
+  $("vg-last").textContent = last ? formatAge((Date.now() - new Date(last).getTime()) / 1000) : "—";
+  $("vg-last-d").textContent = last ? formatLocal(last) + " (hora de Chile)" : "Sin reportes";
+  const stale = last && Date.now() - new Date(last).getTime() > 15 * 60 * 1000;
+  $("vg-last").closest(".atlas-stat").classList.toggle("is-stale", Boolean(stale));
+  $("map-last-update").textContent = (stale
+    ? "No están llegando datos nuevos: se muestra lo último recibido y la ventana sigue avanzando con la hora actual"
+    : "Uso calculado con los últimos 7 días") + " · actualizado " + new Intl.DateTimeFormat("es-CL", {
+    hour: "2-digit", minute: "2-digit", timeZone: HISTORY_ZONE}).format(new Date());
+}
+
+function vgRenderTrails() {
+  trailLayer.clearLayers();
+  for (const [id, alert] of vg.alerts) {
+    if (alert.estado === "terminada") continue;
+    const line = L.polyline(alert.estela, {pane: "trailPane", color: alert.estado === "activa" ? "#d7301f" : "#8a6a64",
+      weight: 3, opacity: 0.85, dashArray: "6 6", lineCap: "round"});
+    line.bindTooltip(el("span", "", `${alert.patente} · ${VG_STATES[alert.estado].label} · desde ${vgTime(alert.inicio)}`), {sticky: true});
+    line.on("click", (event) => { L.DomEvent.stopPropagation(event); vgSelect({kind: "alert", id}); });
+    line.addTo(trailLayer);
+  }
+}
+
+function vgRenderTrucks() {
   truckLayer.clearLayers();
   truckMarkers.clear();
-  routeMapLayers.clear();
-
-  const routes = [...data.routes].sort((first, second) => {
-    const firstLevel = ROUTE_DRAW_ORDER.indexOf(routeProperties(first).usage_level);
-    const secondLevel = ROUTE_DRAW_ORDER.indexOf(routeProperties(second).usage_level);
-    if (firstLevel !== secondLevel) return firstLevel - secondLevel;
-    return Number(routeProperties(first).usage_count || 0) - Number(routeProperties(second).usage_count || 0);
-  });
-
-  for (const route of routes) {
-    const properties = routeProperties(route);
-    const level = properties.usage_level;
-    const layer = routeLayers[level];
-    if (!layer || !route.geometry || route.geometry.type !== "LineString") continue;
-    const pane = level === "HIGH" ? "routeHighPane" : (level === "MEDIUM" ? "routeMediumPane" : "routeLowPane");
-    const feature = {type: "Feature", properties, geometry: route.geometry};
-    const baseWeight = level === "HIGH" ? 6 : (level === "MEDIUM" ? 4.8 : 3.3);
-    const baseOpacity = level === "HIGH" ? 0.98 : (level === "MEDIUM" ? 0.92 : 0.82);
-    const haloWeight = baseWeight + 1.5;
-    const haloOpacity = 0.9;
-    const halo = L.geoJSON(feature, {
-      pane, interactive: false,
-      style: {color: "#ffffff", weight: haloWeight, opacity: haloOpacity,
-        lineCap: "round", lineJoin: "round"}
-    }).addTo(layer);
-    const line = L.geoJSON(feature, {
-      pane,
-      style: {color: ROUTE_COLORS[level], weight: baseWeight, opacity: baseOpacity,
-        lineCap: "round", lineJoin: "round"}
-    }).bindTooltip(textTooltip(
-      (properties.usage_label || level) + " · " + (properties.route_id || "Ruta") +
-      " · " + format(properties.usage_count || 0) + " recorridos · " +
-      format(properties.unique_vehicle_count || 0) + " vehículos"
-    )).addTo(layer);
-    line.on("click", () => selectRoute(route));
-    line.on("mouseover", () => line.setStyle({weight: baseWeight + 2, opacity: 1}));
-    line.on("mouseout", refreshSelectionStyles);
-    routeMapLayers.set(properties.route_id, {
-      route, halo, line, bounds: line.getBounds(), baseWeight, baseOpacity,
-      haloWeight, haloOpacity
-    });
-  }
-  updateRouteFilterCounts(routes);
-
-  for (const vehicle of data.vehicles) {
-    const marker = L.marker([vehicle.latitude, vehicle.longitude], {
-      pane: "truckPane", icon: truckIcon(vehicle), zIndexOffset: 1000
-    }).bindPopup(truckPopup(vehicle));
-    marker.on("click", () => selectVehicle(vehicle, true));
-    marker.on("popupopen", () => { openPopupVehicleId = vehicle.vehicle_id; });
-    marker.on("popupclose", () => {
-      if (openPopupVehicleId === vehicle.vehicle_id) openPopupVehicleId = null;
-    });
+  for (const vehicle of vg.vehicles) {
+    if (!Number.isFinite(Number(vehicle.latitude)) || !Number.isFinite(Number(vehicle.longitude))) continue;
+    const marker = L.marker([vehicle.latitude, vehicle.longitude], {pane: "truckPane", icon: truckIcon(vehicle),
+      zIndexOffset: vehicle.en_alerta ? 2000 : 1000}).bindPopup(truckPopup(vehicle));
+    marker.on("click", () => vgSelect({kind: "vehicle", id: vehicle.vehicle_id}, false));
+    marker.on("popupopen", () => { vg.openPopup = vehicle.vehicle_id; });
+    marker.on("popupclose", () => { if (vg.openPopup === vehicle.vehicle_id) vg.openPopup = null; });
     marker.addTo(truckLayer);
     truckMarkers.set(vehicle.vehicle_id, marker);
   }
-  renderMonitorLists();
-  applyMapLayerVisibility();
-  if (reopenPopup) openTruckPopup(reopenPopup);
+  if (vg.openPopup && truckMarkers.has(vg.openPopup)) truckMarkers.get(vg.openPopup).openPopup();
+}
 
-  const minutes = Math.max(1, Math.round(Number(data.metadata.refresh_seconds || 60) / 60));
-  const cadence = minutes === 1 ? "cada minuto" : "cada " + minutes + " min";
-  $("map-last-update").textContent = "Rutas clasificadas con datos hasta el " +
-    formatDataDay(data.snapshotDate) + " · nuevas posiciones consultadas " + cadence;
-  const coverage = data.metadata.metricas?.cobertura;
-  const processingHistory = Number(coverage?.dias_pendientes || 0) > 0;
-  $("heatmap-source-status").textContent = processingHistory
-    ? "Rutas disponibles · histórico en procesamiento" : "Rutas clasificadas";
-  $("heatmap-intro").textContent =
-    "Para estudiar el histórico: qué rutas usó la flota y cuánto, con los viajes ya cerrados." +
-    (processingHistory ? ` Clasificación parcial: ${coverage.dias_cerrados} de ${coverage.dias_ventana} días procesados en la ventana.` : "");
+// --- Listas ---
+function vgRenderLists() {
+  vgRenderAlertList();
+  vgRenderVehicleList();
+}
 
-  const visibleBounds = L.latLngBounds([]);
-  for (const route of data.routes) {
-    if (!route.geometry || route.geometry.type !== "LineString") continue;
-    for (const point of route.geometry.coordinates) {
-      const longitude = Number(point[0]);
-      const latitude = Number(point[1]);
-      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-        visibleBounds.extend([latitude, longitude]);
-      }
-    }
+function vgMatches(text) {
+  const query = $("monitor-search").value.trim().toLocaleLowerCase("es");
+  return !query || text.toLocaleLowerCase("es").includes(query);
+}
+
+function vgRenderAlertList() {
+  const list = $("alert-list");
+  const alerts = [...vg.alerts.entries()];
+  $("alert-count").textContent = format(alerts.filter(([, a]) => a.estado === "activa").length);
+  for (const button of document.querySelectorAll("[data-alert-filter]")) {
+    const state = button.dataset.alertFilter;
+    const count = state === "all" ? alerts.length : alerts.filter(([, a]) => a.estado === state).length;
+    button.textContent = `${{all: "Todas", activa: "Activas", sin_senal: "Sin señal", terminada: "Terminadas"}[state]} ${format(count)}`;
+    button.classList.toggle("is-active", vg.alertFilter === state);
   }
-  {
-    for (const vehicle of data.vehicles) {
-      const latitude = Number(vehicle.latitude);
-      const longitude = Number(vehicle.longitude);
-      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-        visibleBounds.extend([latitude, longitude]);
-      }
-    }
+  const visible = alerts.filter(([, a]) => (vg.alertFilter === "all" || a.estado === vg.alertFilter) &&
+    vgMatches(`${a.patente} ${a.nombre || ""} ${a.conductor || ""} ${a.ubicacion || ""}`));
+  list.replaceChildren(...visible.map(([id, alert]) => {
+    const state = VG_STATES[alert.estado];
+    const item = el("li");
+    const button = el("button", "vg-alert " + state.className);
+    button.type = "button";
+    button.dataset.alertSelect = id;
+    const head = el("span", "vg-alert-head");
+    head.append(el("b", "vg-state " + state.className, state.label),
+      el("small", "", `desde ${vgTime(alert.inicio)} · ${vgDuration(alert.minutos)}`));
+    const who = el("span", "vg-alert-who");
+    who.append(el("span", "plate-chip", alert.patente), el("strong", "", alert.nombre || "Sin nombre"));
+    const driver = el("span", "vg-alert-driver", "👤 " + (alert.conductor || "Conductor no informado"));
+    const facts = el("span", "vg-alert-facts", (alert.km_al_corredor === null ? "a más de 130 km" : `a ${format(alert.km_al_corredor, 1)} km`) +
+      ` del corredor habitual · zona usada por ${format(alert.pct_zona, 1)} % de la flota`);
+    button.append(head, who, driver, facts);
+    if (alert.ubicacion) button.append(el("span", "vg-alert-place", "📍 " + alert.ubicacion));
+    button.addEventListener("click", () => vgSelect({kind: "alert", id}));
+    item.append(button);
+    return item;
+  }));
+  if (!visible.length) {
+    list.append(el("li", "monitor-empty", alerts.length ? "No hay alertas con este filtro o búsqueda."
+      : "Sin alertas en los últimos 7 días: todos los camiones anduvieron por zonas habituales de la flota."));
   }
-  pendingMapBounds = visibleBounds.isValid() ? visibleBounds : null;
-  if (selectedRouteId) {
-    const route = data.routes.find((value) => routeProperties(value).route_id === selectedRouteId);
-    if (route) selectRoute(route, false); else resetMapSelection();
-  } else if (selectedVehicleId) {
-    const vehicle = data.vehicles.find((value) => value.vehicle_id === selectedVehicleId);
-    if (vehicle) {
-      selectVehicle(vehicle, false);
-    } else resetMapSelection();
+  vgMarkSelection();
+}
+
+function vgRenderVehicleList() {
+  const list = $("vehicle-live-list");
+  $("vehicle-live-count").textContent = format(vg.vehicles.length);
+  const ordered = vg.vehicles
+    .filter((v) => vgMatches(`${v.vehicle_id} ${v.vehicle_name || ""} ${vehicleDriver(v)}`))
+    .sort((a, b) => (b.en_alerta - a.en_alerta) || Number(b.speed_kmh || 0) - Number(a.speed_kmh || 0));
+  list.replaceChildren(...ordered.map((vehicle) => {
+    const status = vehicleStatus(vehicle);
+    const item = el("li");
+    const button = el("button", "vehicle-live-row " + status.className + (vehicle.en_alerta ? " is-alert" : ""));
+    button.type = "button";
+    button.dataset.vehicleSelect = vehicle.vehicle_id;
+    const icon = el("span", "vehicle-list-icon");
+    icon.innerHTML = TRUCK_MARKUP;
+    const copy = el("span");
+    const identity = el("small", "fleet-identity");
+    const driver = vehicleDriver(vehicle);
+    identity.append(...truckIdentity(vehicle.vehicle_id, driver === "No informado" ? null : driver, null));
+    copy.append(el("strong", "", vehicle.vehicle_name || vehicle.vehicle_id), identity);
+    const state = el("em", "vehicle-live-state", vehicle.en_alerta ? "En alerta"
+      : status.className === "moving" && Number(vehicle.speed_kmh) > 3 ? format(vehicle.speed_kmh, 0) + " km/h" : truckAgeText(vehicle));
+    button.append(icon, copy, state);
+    button.addEventListener("click", () => vgSelect({kind: "vehicle", id: vehicle.vehicle_id}));
+    item.append(button);
+    return item;
+  }));
+  if (!ordered.length) list.append(el("li", "monitor-empty", "No hay camiones para esta búsqueda."));
+  vgMarkSelection();
+}
+
+function setMonitorTab(tab) {
+  vg.tab = tab === "vehicles" ? "vehicles" : "alerts";
+  for (const button of document.querySelectorAll("[data-monitor-tab]")) {
+    const selected = button.dataset.monitorTab === vg.tab;
+    button.classList.toggle("is-active", selected);
+    button.setAttribute("aria-selected", String(selected));
+  }
+  for (const list of document.querySelectorAll("[data-monitor-list]")) list.hidden = list.dataset.monitorList !== vg.tab;
+  $("vg-alert-filter").hidden = vg.tab !== "alerts";
+  vgRenderLists();
+}
+
+// --- Selección ---
+function vgSelect(selection, focus = true) {
+  vg.selected = selection;
+  selectionLayer.clearLayers();
+  if (selection.kind === "alert") {
+    const alert = vg.alerts.get(selection.id);
+    if (!alert) return vgReset(false);
+    vgShowAlert(alert, focus);
   } else {
-    refreshSelectionStyles();
+    const vehicle = vg.vehicles.find((v) => v.vehicle_id === selection.id);
+    if (!vehicle) return vgReset(false);
+    vgShowVehicle(vehicle, focus);
   }
-  if ($("heatmap-map").offsetParent !== null) requestAnimationFrame(() => fitPendingMap(false));
+  vgMarkSelection();
 }
 
-function machinePending(data) {
-  return data.status === "pending" || data.sourceMode === "PENDING_MACHINE" || data.metadata?.status === "pending";
-}
-
-function pendingText(ids, message = "Pendiente de procesamiento") {
-  for (const id of ids) $(id).textContent = message;
-}
-
-function renderHeatmap(data) {
-  const pending = machinePending(data);
-  if (!userChoseMapMode) activeMapMode = pending ? "historical" : "classified";
-  setMapMode(activeMapMode, false, pending);
-  if (pending) {
-    currentMapData = data;
-    selectedVehicleId = null;
-    selectedRouteId = null;
-    if (fleetMap) {
-      for (const level of ROUTE_DRAW_ORDER) routeLayers[level].clearLayers();
-      truckLayer.clearLayers();
-    }
-    truckMarkers.clear();
-    routeMapLayers.clear();
-    pendingMapBounds = null;
-    mapHasFitted = false;
-    initializeFleetMap();
-    const pendingNote = $("map-pending-note");
-    if (pendingNote) pendingNote.hidden = false;
-    if (fleetMap && $("heatmap-map").offsetParent !== null) {
-      requestAnimationFrame(() => fleetMap.invalidateSize());
-    }
-    pendingText(["heatmap-trips", "heatmap-vehicles", "heatmap-routes",
-      "most-route", "least-route", "geo-model-zones", "heatmap-source-status"]);
-    pendingText(["heatmap-intro", "heatmap-zones", "map-last-update", "most-route-usage",
-      "least-route-usage", "geo-model-detail", "heatmap-method", "map-selection-detail"],
-      "Disponible cuando Machine genere resultados");
-    pendingText(["monitor-route-count", "vehicle-live-count"], "—");
-    for (const counter of document.querySelectorAll("[data-route-count]")) counter.textContent = "—";
-    const item = document.createElement("li");
-    item.textContent = "Pendiente de procesamiento Machine.";
-    $("route-monitor-list").replaceChildren(item);
-    $("vehicle-live-list").replaceChildren(item.cloneNode(true));
-    return;
+function vgShowAlert(alert, focus) {
+  const state = VG_STATES[alert.estado];
+  L.polyline(alert.estela, {pane: "selectionPane", color: "#0b1f1a", weight: 9, opacity: 0.75, lineCap: "round", interactive: false}).addTo(selectionLayer);
+  L.polyline(alert.estela, {pane: "selectionPane", color: "#d7301f", weight: 5, opacity: 1, lineCap: "round", interactive: false}).addTo(selectionLayer);
+  L.circleMarker(alert.estela[0], {pane: "selectionPane", radius: 7, color: "#0b1f1a", weight: 3, fillColor: "#fff", fillOpacity: 1})
+    .bindTooltip("Sale de la zona habitual · " + vgTime(alert.inicio), {permanent: true, direction: "top", className: "route-endpoint"})
+    .addTo(selectionLayer);
+  if (alert.corredor) {
+    // Cuánto se alejó: línea desde su última posición hasta el corredor habitual más cercano.
+    L.polyline([alert.posicion, alert.corredor.punto], {pane: "selectionPane", color: "#0b1f1a", weight: 2,
+      dashArray: "4 7", opacity: 0.9, interactive: false}).addTo(selectionLayer);
+    L.circleMarker(alert.corredor.punto, {pane: "selectionPane", radius: 7, color: "#fff", weight: 3, fillColor: "#1f6b50", fillOpacity: 1})
+      .bindTooltip(`Corredor habitual · ${format(alert.corredor.km, 1)} km`, {permanent: true, direction: "left", className: "route-endpoint"})
+      .addTo(selectionLayer);
   }
-  const pendingNote = $("map-pending-note");
-  if (pendingNote) pendingNote.hidden = true;
-  const summary = data.summary;
-  $("heatmap-trips").textContent = format(summary.trip_count || 0);
-  $("heatmap-vehicles").textContent = format(summary.vehicle_count || 0);
-  $("heatmap-routes").textContent = format(summary.route_count || 0);
-  $("heatmap-zones").textContent = format(summary.trip_count || 0) + " viajes en " +
-    format(summary.route_count || 0) + " rutas · " + format(data.vehicles.length) + " camiones con posición";
-
-  const most = data.ranking.mostUsed;
-  const least = data.ranking.leastUsed;
-  $("most-route").textContent = routeLabel(most);
-  $("most-route-usage").textContent = routeUsageSummary(most);
-  $("least-route").textContent = routeLabel(least);
-  $("least-route-usage").textContent = routeUsageSummary(least);
-
-  const metadata = data.metadata;
-  $("heatmap-method").textContent = [
-    metadata.classification, metadata.geometry, metadata.road_matching,
-    metadata.data_retention
-  ].filter(Boolean).join(" ");
-
-  const window_ = metadata.window || {};
-  const shortDay = (iso) => new Intl.DateTimeFormat("es-CL", {day: "numeric", month: "short", timeZone: "UTC"})
-    .format(new Date(String(iso).slice(0, 10) + "T12:00:00Z"));
-  $("geo-model-zones").textContent = window_.desde
-    ? shortDay(window_.desde) + " – " + shortDay(window_.hasta) : "Clasificación vigente";
-  $("geo-model-detail").textContent = metadata.road_matching ||
-    "Rutas calculadas con la telemetría disponible.";
-  renderFleetMap(data);
+  L.circleMarker(alert.posicion, {pane: "selectionPane", radius: 9, color: "#fff", weight: 3, fillColor: "#d7301f", fillOpacity: 1})
+    .bindTooltip((alert.estado === "terminada" ? "Último punto fuera · " : "Último dato · ") + vgTime(alert.fin),
+      {permanent: true, direction: "bottom", className: "route-endpoint"})
+    .addTo(selectionLayer);
+  const detail = $("map-selection-detail");
+  setSelectionDetail("Alerta · " + state.label, `${alert.patente} · ${alert.nombre || "Sin nombre"}`,
+    alert.estado === "activa" ? "Anda por zonas que casi nadie de la flota usa. Revisa qué está haciendo."
+      : alert.estado === "sin_senal" ? "Dejó de reportar mientras estaba fuera de las zonas habituales."
+        : "Volvió a una zona habitual o entró a una faena.");
+  const facts = el("dl", "vg-facts");
+  const fact = (label, value) => { facts.append(el("dt", "", label), el("dd", "", value)); };
+  fact("Patente", alert.patente);
+  fact("Camión", alert.nombre || "Sin nombre");
+  fact("Conductor", alert.conductor || "No informado");
+  fact("Desde", vgTime(alert.inicio));
+  fact(alert.estado === "terminada" ? "Hasta" : "Último dato", vgTime(alert.fin));
+  fact("Duración", vgDuration(alert.minutos));
+  fact("Distancia al corredor", alert.km_al_corredor === null ? "Más de 130 km" : format(alert.km_al_corredor, 1) + " km");
+  fact("Km fuera del corredor", format(alert.km_recorridos, 1) + " km");
+  fact("Uso de la zona", format(alert.pct_zona, 1) + " % de la flota");
+  fact("Reportes", `${format(alert.reportes)} (${format(alert.reportes_en_movimiento)} en movimiento)`);
+  if (alert.velocidad !== null && alert.velocidad !== undefined) fact("Velocidad", format(alert.velocidad, 0) + " km/h");
+  if (alert.ubicacion) fact("Ubicación GPS", alert.ubicacion);
+  fact("Coordenadas", alert.posicion.map((value) => value.toFixed(5)).join(", "));
+  const link = el("a", "selection-link", "Ver su día completo →");
+  link.href = `#camiones/${encodeURIComponent(alert.patente)}/${vgLocalDay(alert.fin)}`;
+  detail.append(facts, link);
+  if (focus) {
+    const bounds = L.latLngBounds(alert.estela);
+    if (alert.corredor) bounds.extend(alert.corredor.punto);
+    fleetMap.fitBounds(bounds.pad(0.2), {maxZoom: 13});
+  }
 }
+
+function vgShowVehicle(vehicle, focus) {
+  const status = vehicleStatus(vehicle);
+  const speed = vehicle.speed_kmh === null || vehicle.speed_kmh === undefined ? "Velocidad sin dato" : format(vehicle.speed_kmh, 0) + " km/h";
+  setSelectionDetail("Camión · " + (vehicle.en_alerta ? "en alerta" : status.label), vehicle.vehicle_name || vehicle.vehicle_id,
+    `${speed} · ${vehicle.event || "Sin evento"}`,
+    `Patente ${vehicle.vehicle_id} · conductor ${vehicleDriver(vehicle)} · último dato ${formatLocal(vehicle.timestamp)} (${truckAgeText(vehicle)})`);
+  const link = el("a", "selection-link", "Ver su recorrido de hoy →");
+  link.href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
+  $("map-selection-detail").append(link);
+  const marker = truckMarkers.get(vehicle.vehicle_id);
+  if (marker && focus) {
+    if (!vg.layers.vehicles) { vg.layers.vehicles = true; vgApplyLayers(); }
+    fleetMap.setView(marker.getLatLng(), Math.max(fleetMap.getZoom(), 11));
+    marker.openPopup();
+  }
+}
+
+function vgMarkSelection() {
+  const selected = vg.selected || {};
+  for (const button of document.querySelectorAll("[data-alert-select]")) {
+    button.classList.toggle("is-active", selected.kind === "alert" && button.dataset.alertSelect === selected.id);
+  }
+  for (const button of document.querySelectorAll("[data-vehicle-select]")) {
+    button.classList.toggle("is-active", selected.kind === "vehicle" && button.dataset.vehicleSelect === selected.id);
+  }
+  for (const [vehicleId, marker] of truckMarkers) {
+    marker.getElement()?.classList.toggle("is-selected", selected.kind === "vehicle" && vehicleId === selected.id);
+  }
+}
+
+function vgRestoreSelection() {
+  if (!vg.selected) return;
+  const exists = vg.selected.kind === "alert" ? vg.alerts.has(vg.selected.id)
+    : vg.vehicles.some((v) => v.vehicle_id === vg.selected.id);
+  if (exists) vgSelect(vg.selected, false); else vgReset(false);
+}
+
+function vgReset(fit = true) {
+  vg.selected = null;
+  if (selectionLayer) selectionLayer.clearLayers();
+  if (fleetMap) fleetMap.closePopup();
+  setSelectionDetail("Selección", "Elige una alerta o un camión",
+    "El mapa lo centra y muestra sus datos. Toca el mapa para ver qué % de la flota pasó por ese lugar.");
+  vgMarkSelection();
+  if (fit) vgFit(true);
+}
+
+function vgFit(force) {
+  if (!fleetMap || !vg.data || (vg.fitted && !force) || vg.selected) return;
+  fleetMap.invalidateSize();
+  const bounds = L.latLngBounds([]);
+  for (const v of vg.vehicles) if (Number.isFinite(Number(v.latitude))) bounds.extend([v.latitude, v.longitude]);
+  for (const [i, j] of vg.data.celdas) bounds.extend([(i + 0.5) / vg.data.escala, (j + 0.5) / vg.data.escala]);
+  if (bounds.isValid()) { fleetMap.fitBounds(bounds, {padding: [28, 28], maxZoom: 11}); vg.fitted = true; }
+}
+
+// Cada minuto llegan posiciones nuevas (/api/vehiculos/posiciones): se mueven los camiones sin
+// recalcular la semana; la semana y las alertas se recalculan con /api/vigilancia.
+function vgMergePositions(incoming) {
+  const fresh = new Map(incoming.map((v) => [v.vehicle_id, v]));
+  vg.vehicles = vg.vehicles.map((vehicle) => {
+    const update = fresh.get(vehicle.vehicle_id);
+    if (!update || Date.parse(update.timestamp) <= Date.parse(vehicle.timestamp)) return vehicle;
+    return {...vehicle, ...update, en_alerta: vehicle.en_alerta,
+      driver_name: update.driver_name || vehicle.driver_name,
+      driver_last_name: update.driver_name ? update.driver_last_name : vehicle.driver_last_name};
+  });
+  if (fleetMap) vgRenderTrucks();
+  vgRenderVehicleList();
+  vgRenderLive();
+}
+
+// Los cuatro mapas comparten fondo, selector de capas, faenas y densidad (mapa-base.js).
+const mapPedir = (path, timeoutMs) => api(path, {timeoutMs});
+
 function renderDashboardBars(containerId, items, defaultColor) {
   const container = $(containerId);
   if (!container) return;
@@ -1203,9 +1115,7 @@ function renderDashboardGlobal(data) {
   $("dg-ranking").replaceChildren(...top.map((route, k) => {
     const properties = routeProperties(route);
     const item = el("li");
-    const button = el("button", "fd-rank");
-    button.type = "button";
-    button.title = "Ver esta ruta en el mapa de rutas";
+    const button = el("div", "fd-rank");
     const head = el("span", "fd-rank-head");
     head.append(el("b", "fd-rank-n", String(k + 1)), el("span", "fd-rank-name", properties.label || properties.route_id),
       el("strong", "", format(properties.usage_count || 0)));
@@ -1216,21 +1126,10 @@ function renderDashboardGlobal(data) {
     track.append(fill);
     button.append(head, track, el("small", "",
       `${properties.route_id} · ${format(properties.unique_vehicle_count || 0)} camiones · ${properties.usage_label || properties.usage_level}`));
-    button.addEventListener("click", () => openRouteOnMap(properties.route_id));
     item.append(button);
     return item;
   }));
   renderDashSnapshot();
-}
-
-function openRouteOnMap(routeId) {
-  location.hash = "#mapa-calor";
-  window.setTimeout(() => {
-    if (activeMapMode !== "classified") setMapMode("classified", true);
-    if (fleetMap) fleetMap.invalidateSize();
-    const route = currentMapData && currentMapData.routes.find((item) => routeProperties(item).route_id === routeId);
-    if (route) selectRoute(route);
-  }, 250);
 }
 
 // --- Datos detallados ---
@@ -1969,15 +1868,8 @@ async function refresh() {
       renderTelemetry(summaryResult.value, datasetResult.value, state || {});
       } else problems.push("reportes");
     if (mapResult.status === "fulfilled" && window.ArtisaMapData) {
-      const mapData = window.ArtisaMapData.adaptMapPayload(mapResult.value);
-      if (currentMapData) {
-        const visible = new Map(currentMapData.vehicles.map((vehicle) => [vehicle.vehicle_id, vehicle]));
-        mapData.vehicles = mapData.vehicles.map((vehicle) =>
-          mergeVehiclePosition(vehicle, visible.get(vehicle.vehicle_id)));
-      }
-      renderHeatmap(mapData);
-      renderDashboardGlobal(mapData);
-    } else problems.push("mapa");
+      renderDashboardGlobal(window.ArtisaMapData.adaptMapPayload(mapResult.value));
+    } else problems.push("dashboard global");
     if (dashboardResult.status === "fulfilled") renderDashboard(dashboardResult.value);
     else problems.push("dashboard");
 
@@ -2002,32 +1894,16 @@ async function refresh() {
   }
 }
 
-function mergeVehiclePosition(vehicle, incoming) {
-  if (!incoming || Date.parse(incoming.timestamp) <= Date.parse(vehicle.timestamp)) return vehicle;
-  return {
-    ...vehicle,
-    ...incoming,
-    route_id: vehicle.route_id,
-    driver_name: incoming.driver_name || vehicle.driver_name,
-    driver_last_name: incoming.driver_name ? incoming.driver_last_name : vehicle.driver_last_name
-  };
-}
-
 async function refreshMapVehicles() {
-  if (!token() || document.hidden || liveVehiclesRefreshing || !currentMapData ||
-      machinePending(currentMapData)) return;
+  if (!token() || document.hidden || liveVehiclesRefreshing || !vg.data) return;
   const version = sessionVersion;
   liveVehiclesRefreshing = true;
   try {
     const payload = await api("/api/vehiculos/posiciones", {timeoutMs: 20000});
-    if (version !== sessionVersion || !token() || !currentMapData) return;
-    const incoming = new Map((payload.vehicles || []).map((vehicle) => [vehicle.vehicle_id, vehicle]));
-    const merged = currentMapData.vehicles.map((vehicle) =>
-      mergeVehiclePosition(vehicle, incoming.get(vehicle.vehicle_id)));
-    currentMapData = {...currentMapData, vehicles: merged};
-    renderFleetMap(currentMapData);
+    if (version !== sessionVersion || !token() || !vg.data) return;
+    vgMergePositions(payload.vehicles || []);
   } catch {
-    // El refresco completo conserva la última posición visible y seguirá reintentando.
+    // Se conservan las últimas posiciones y se reintenta al minuto siguiente.
   } finally {
     if (version === sessionVersion) liveVehiclesRefreshing = false;
   }
@@ -2225,12 +2101,13 @@ async function refreshAll() {
   refreshing = false;
   telemetryRefreshing = false;
   liveVehiclesRefreshing = false;
+  vg.loading = false;
   predictionState.loading = false;
   predictionState.cache = {};
   try {
     const onTruck = Boolean(truckHash()) && truckView.id && !$("truck-view").hidden;
     await Promise.allSettled([
-      refresh(), refreshTelemetry(), loadFleet(),
+      refresh(), refreshTelemetry(), loadFleet(), loadVigilance(false),
       onTruck ? loadTruckDay(truckView.id, truckView.day, true) : null,
       truckView.boardDay ? setBoardDay(truckView.boardDay) : null,
       window.location.hash === "#prediccion" ? loadPrediction(true) : null
@@ -2243,39 +2120,32 @@ async function refreshAll() {
 }
 $("refresh-all").addEventListener("click", refreshAll);
 for (const button of document.querySelectorAll("[data-map-mode]")) {
-  button.addEventListener("click", () => setMapMode(button.dataset.mapMode, true));
+  button.addEventListener("click", () => setMapMode(button.dataset.mapMode));
 }
-for (const button of document.querySelectorAll("[data-route-filter]")) {
+for (const button of document.querySelectorAll("[data-zone-filter]")) {
   button.addEventListener("click", () => {
-    activeRouteFilter = button.dataset.routeFilter || "ALL";
-    if (selectedRouteId || selectedVehicleId) resetMapSelection();
-    applyRouteFilter();
+    vg.zone = button.dataset.zoneFilter;
+    vgApplyLayers();
+    if (usageLayer) usageLayer.redraw();
   });
 }
 for (const input of document.querySelectorAll("[data-map-layer]")) {
-  input.addEventListener("change", () => {
-    const layerName = input.dataset.mapLayer;
-    if (Object.hasOwn(mapLayerVisibility, layerName)) {
-      mapLayerVisibility[layerName] = input.checked;
-      applyMapLayerVisibility();
-    }
-  });
+  input.addEventListener("change", () => { vg.layers[input.dataset.mapLayer] = input.checked; vgApplyLayers(); });
 }
 for (const button of document.querySelectorAll("[data-monitor-tab]")) {
   button.addEventListener("click", () => setMonitorTab(button.dataset.monitorTab));
 }
-$("monitor-search").addEventListener("input", () => {
-  if (activeMonitorTab === "routes") renderRouteMonitor(currentMapData ? currentMapData.routes : []);
-  else renderLiveFleet(currentMapData ? currentMapData.vehicles : []);
-});
-$("reset-map-view").addEventListener("click", resetMapSelection);
-for (const [id, key] of [["most-route-card", "mostUsed"], ["least-route-card", "leastUsed"]]) {
-  $(id).addEventListener("click", () => {
-    const target = currentMapData && currentMapData.ranking[key];
-    const route = target && currentMapData.routes.find((item) => routeProperties(item).route_id === routeProperties(target).route_id);
-    if (route && activeMapMode === "classified") selectRoute(route);
-  });
+for (const button of document.querySelectorAll("[data-alert-filter]")) {
+  button.addEventListener("click", () => { vg.alertFilter = button.dataset.alertFilter; vgRenderAlertList(); });
 }
+$("monitor-search").addEventListener("input", vgRenderLists);
+$("reset-map-view").addEventListener("click", () => vgReset(true));
+$("vg-alerts-card").addEventListener("click", () => {
+  vg.alertFilter = "activa";
+  setMonitorTab("alerts");
+  const first = [...vg.alerts.entries()].find(([, alert]) => alert.estado === "activa");
+  if (first) vgSelect({kind: "alert", id: first[0]});
+});
 // Retirar el almacenamiento de la implementación anterior sin persistir el usuario.
 try {
   sessionStorage.removeItem("artisa_token");
@@ -4048,13 +3918,16 @@ setInterval(() => {
 restoreSession();
 setInterval(refresh, 300000);
 setInterval(refreshMapVehicles, 60000);
+// Los últimos 7 días avanzan con la hora real: se recalculan cada minuto aunque no lleguen datos.
+setInterval(() => { if (!document.hidden) loadVigilance(); }, VG_REFRESH_MS);
 setInterval(refreshTelemetry, TELEMETRY_REFRESH_MS);
 // Al recuperar la red o volver a la pestaña, actualizar de inmediato sin esperar el minuto.
-window.addEventListener("online", () => { refreshTelemetry(); refreshMapVehicles(); refresh(); });
+window.addEventListener("online", () => { refreshTelemetry(); refreshMapVehicles(); loadVigilance(); refresh(); });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     refreshTelemetry();
     refreshMapVehicles();
+    loadVigilance();
     refresh();
   }
 });

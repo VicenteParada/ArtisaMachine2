@@ -14,7 +14,7 @@ import pymysql
 from common import dias
 from common.db import connect_db
 from common.http import JsonHandler, serve
-from endpoints import camiones_api, dashboard_api, prediccion_api, rutas_api
+from endpoints import camiones_api, dashboard_api, prediccion_api, rutas_api, vigilancia_api
 
 
 STARTED_AT = time.monotonic()
@@ -37,6 +37,8 @@ PENDING_RESPONSES = {
             "data_retention": "Sin resultados Machine disponibles.",
         },
     },
+    "/api/vigilancia": {"status": "pending", "celdas": [], "alertas": [], "vehiculos": [],
+                        "message": "Sin reportes de camiones en los últimos 7 días."},
     "/api/dashboard": {"status": "pending", "meses": [], "flota": [], "camiones": [], "sin_reportar": [],
                        "totales": None},
     "/api/prediccion": {
@@ -54,7 +56,7 @@ PENDING_RESPONSES = {
 BUILDERS = {"/api/mapa": rutas_api.classified_map, "/api/dashboard": dashboard_api.fleet_dashboard,
             "/api/prediccion": prediccion_api.prediction,
             "/api/prediccion-rutas": lambda cursor: prediccion_api.prediction(cursor, "rutas"),
-            "/api/camiones": camiones_api.fleet}
+            "/api/camiones": camiones_api.fleet, "/api/vigilancia": vigilancia_api.vigilancia}
 
 
 # Telemetría actual (servicio telemetria). Mientras la API de la empresa no esté
