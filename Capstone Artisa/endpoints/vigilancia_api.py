@@ -7,11 +7,15 @@ porcentaje de la flota que pasó por una zona dice qué tan habitual es.
 - Huella: entre dos reportes seguidos de un camión (5 min o menos y bajo 150 km/h) se
   marcan también las celdas intermedias, así una carretera queda continua aunque cada
   camión reporte en puntos distintos. Los saltos de GPS (más de 150 km/h) se descartan.
-- Alerta: un camión en movimiento, fuera de las faenas, que durante al menos
-  VIGILANCIA_REPORTES reportes anda por zonas donde pasó menos del VIGILANCIA_UMBRAL_PCT % de
-  la flota (se mira la celda y sus vecinas, ~1,5 km, para no alertar por el borde de una
-  carretera). La alerta termina cuando el camión vuelve a una zona habitual o entra a una
-  faena. Es un comportamiento inusual para revisar, no una falta comprobada.
+- Categorías de las rutas según el % de la flota que pasó (celda y vecinas, ~1,5 km):
+  A (VIGILANCIA_CAT_A % o más, la más transitada), B (VIGILANCIA_CAT_B %), C
+  (VIGILANCIA_UMBRAL_PCT %) y D (menos de eso, poco transitada).
+- Alerta: un camión en movimiento, fuera de las faenas, que anda fuera de las rutas A–C (en
+  zonas D o sin uso) durante al menos VIGILANCIA_REPORTES reportes, VIGILANCIA_MIN_MINUTOS
+  minutos y alejándose VIGILANCIA_MIN_KM km o más de una ruta A–C. Las condiciones de tiempo
+  y distancia evitan alertas por desvíos cortos (entrar a un cliente cerca de la carretera).
+  La alerta termina cuando vuelve a una ruta A–C o entra a una faena. Es un comportamiento
+  inusual para revisar, no una falta comprobada.
 
 Solo camiones del catálogo. Se calcula con los reportes del histórico (raw_gps) y de la API
 de la empresa (telemetria_api); no escribe nada en la base.
@@ -35,12 +39,22 @@ VEL_MAX_KMH = 150            # más rápido es un salto de GPS
 VEL_MOVIMIENTO = 5           # km/h
 UMBRAL_PCT = float(os.environ.get("VIGILANCIA_UMBRAL_PCT", "5"))
 REPORTES = int(os.environ.get("VIGILANCIA_REPORTES", "3"))
+MIN_MINUTOS = float(os.environ.get("VIGILANCIA_MIN_MINUTOS", "10"))
+MIN_KM = float(os.environ.get("VIGILANCIA_MIN_KM", "2"))
+# (letra, % mínimo de la flota): de la más transitada a la menos.
+CATEGORIAS = (("A", float(os.environ.get("VIGILANCIA_CAT_A", "30"))),
+              ("B", float(os.environ.get("VIGILANCIA_CAT_B", "15"))),
+              ("C", UMBRAL_PCT), ("D", 0.0))
 ACTIVA_MIN = 30              # una alerta sin reportes nuevos en 30 min queda "sin señal"
 CORTE_HORAS = 6              # más de 6 h sin reportes separa dos episodios
 RADIO_BUSQUEDA = 12          # celdas de 0,1° alrededor para la distancia (~130 km)
 MAX_ALERTAS = 200
 MAX_NODOS = 120_000          # más puntos que esto se dibujan con celdas el doble de grandes
 MAX_ESTELA = 160
+
+
+def categoria(pct):
+    return next(letra for letra, desde in CATEGORIAS if pct >= desde)
 
 
 def _gps_valido(lat, lon):
@@ -321,9 +335,14 @@ def alertas(cursor, por_camion, propias, zonas, faenas, ahora):
                 estado = "terminada"
             else:
                 estado = "activa" if (ahora - fin).total_seconds() <= ACTIVA_MIN * 60 else "sin_senal"
+            minutos = (fin - inicio).total_seconds() / 60
+            if minutos < MIN_MINUTOS:
+                continue  # desvío corto: no alcanza a ser alerta
             muestra = episodio[::max(1, len(episodio) // 40)] + [episodio[-1]]
             distancias = [zonas.distancia(p[1], p[2], propias[asset_id]) for p in muestra]
             lejos = None if any(d is None for d in distancias) else max(distancias)
+            if lejos is not None and lejos < MIN_KM:
+                continue  # anduvo a menos de MIN_KM de una ruta A–C: no es un desvío real
             recorrido = sum(distancia_km(a[1], a[2], b[1], b[2]) for a, b in zip(episodio, episodio[1:]))
             ultimo = episodio[-1]
             # Desde la última posición hasta el corredor habitual más cercano (para dibujarlo).
@@ -331,11 +350,12 @@ def alertas(cursor, por_camion, propias, zonas, faenas, ahora):
             lista.append({
                 "patente": asset_id, "estado": estado,
                 "inicio": _iso(inicio), "fin": _iso(fin),
-                "minutos": round((fin - inicio).total_seconds() / 60),
+                "minutos": round(minutos),
                 "reportes": len(episodio), "reportes_en_movimiento": movimientos,
                 "km_recorridos": round(recorrido, 1),
                 "km_al_corredor": None if lejos is None else round(lejos, 1),
                 "pct_zona": round(min(zonas.pct(p[1], p[2], propias[asset_id]) for p in episodio), 1),
+                "categoria_zona": "D" if any(zonas.pct(p[1], p[2], propias[asset_id]) > 0 for p in episodio) else "sin uso",
                 "posicion": [round(ultimo[1], 5), round(ultimo[2], 5)],
                 "velocidad": ultimo[3], "estela": _estela(episodio),
                 "corredor": None if cercana is None else {"km": round(cercana[0], 1), "punto": cercana[1]},
@@ -405,6 +425,8 @@ def vigilancia(cursor, ahora=None):
         "escala": escala, "camiones": len(por_camion), "catalogo": len(catalogo),
         "reportes": sum(len(p) for p in por_camion.values()),
         "umbral_pct": UMBRAL_PCT, "reportes_alerta": REPORTES, "refresh_seconds": rutas_api.REFRESH_SECONDS,
+        "min_minutos": MIN_MINUTOS, "min_km": MIN_KM,
+        "categorias": [{"letra": letra, "desde": desde} for letra, desde in CATEGORIAS],
         # Rutas: cada arista une dos nodos (índices en "nodos": [lat, lon, camiones de la zona]).
         "nodos": nodos, "aristas": aristas,
         "alertas": lista,

@@ -24,7 +24,7 @@ def flota_con_desvio(desvio_lon=-68.50, termina=AHORA):
     filas = []
     for k in range(20):
         filas += camino(f"T{k:02d}", AHORA - timedelta(days=2, hours=k), 30)
-    desvio = camino("T19", termina - timedelta(minutes=9), 10, lat0=-22.50, lat1=-22.52, lon=desvio_lon)
+    desvio = camino("T19", termina - timedelta(minutes=11), 12, lat0=-22.50, lat1=-22.52, lon=desvio_lon)
     return filas + desvio
 
 
@@ -104,7 +104,8 @@ class AlertasTests(unittest.TestCase):
         data = v.vigilancia(cursor_con(flota_con_desvio()), AHORA)
         self.assertEqual(data["camiones"], 20)
         alerta, = data["alertas"]
-        self.assertEqual((alerta["patente"], alerta["estado"], alerta["reportes"]), ("T19", "activa", 10))
+        self.assertEqual((alerta["patente"], alerta["estado"], alerta["reportes"]), ("T19", "activa", 12))
+        self.assertEqual(alerta["categoria_zona"], "sin uso")
         self.assertAlmostEqual(alerta["km_al_corredor"], 41, delta=2)
         self.assertAlmostEqual(alerta["corredor"]["km"], 41, delta=2)
         self.assertAlmostEqual(alerta["corredor"]["punto"][1], -68.9, delta=0.01)  # sobre el camino habitual
@@ -135,6 +136,18 @@ class AlertasTests(unittest.TestCase):
         self.assertEqual(v.vigilancia(cursor_con(filas), AHORA)["alertas"], [])
         detenido = [dict(f, speed=0.0) if f["longitude"] == -68.50 else f for f in flota_con_desvio()]
         self.assertEqual(v.vigilancia(cursor_con(detenido), AHORA)["alertas"], [])
+
+    def test_short_or_nearby_detours_are_not_alerts(self):
+        # 8 minutos fuera: no alcanza los 10.
+        corto = [f for f in flota_con_desvio() if not (f["asset_id"] == "T19" and f["longitude"] == -68.50)]
+        corto += camino("T19", AHORA - timedelta(minutes=7), 8, lat0=-22.50, lat1=-22.52, lon=-68.50)
+        self.assertEqual(v.vigilancia(cursor_con(corto), AHORA)["alertas"], [])
+        # 11 minutos, pero a ~1,5 km del camino habitual (fuera de su celda y vecinas).
+        cerca = flota_con_desvio(desvio_lon=-68.885)
+        self.assertEqual(v.vigilancia(cursor_con(cerca), AHORA)["alertas"], [])
+
+    def test_categories_go_from_a_to_d(self):
+        self.assertEqual([v.categoria(p) for p in (80, 30, 20, 15, 10, 5, 4.9, 0)], list("AABBCCDD"))
 
     def test_pending_without_reports(self):
         self.assertIsNone(v.vigilancia(cursor_con([]), AHORA))

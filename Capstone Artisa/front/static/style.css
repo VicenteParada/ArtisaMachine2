@@ -1030,10 +1030,7 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .vg-alert-who{display:flex;align-items:center;gap:7px;min-width:0}
 .vg-alert-who strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .vg-alert-driver{font-size:10px;font-weight:600}
-.vg-alert-facts,.vg-alert-place{font-size:9px;color:var(--muted);line-height:1.45}
-.vg-facts{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;margin:10px 0 2px;font-size:10px}
-.vg-facts dt{color:var(--muted)}
-.vg-facts dd{margin:0;font-weight:600;text-align:right;overflow-wrap:anywhere}
+.vg-alert-facts{font-size:9px;color:var(--muted);line-height:1.45}
 .vehicle-live-row.is-alert{border-color:#d7301f;background:#fdeee8}
 .vehicle-live-row.is-alert .vehicle-live-state{color:#c0281a;font-weight:800}
 .truck-marker.is-alert::after{content:"";position:absolute;inset:-7px;border-radius:50%;border:3px solid #d7301f;animation:vgRing 1.4s ease-out infinite;pointer-events:none}
@@ -1046,3 +1043,26 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .heatmap-map.is-far .truck-marker{transform:scale(.38);transform-origin:center}
 .heatmap-map.is-far .truck-marker.is-alert{transform:scale(.6)}
 @media(max-width:690px){.atlas .map-layer-actions{flex-direction:row;flex-wrap:wrap;align-items:center}}
+/* Categorías A–D, ficha compacta de la selección y etiquetas del mapa */
+.vg-cat{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:5px;color:#fff;font-size:10px;font-weight:800}
+.vg-cat-A{background:#1f6b50}.vg-cat-B{background:#5e9f58}.vg-cat-C{background:#e3a33a}.vg-cat-D{background:#d7301f}
+.vg-bin{gap:6px}
+.vg-state.ok{background:#1f6b50}
+.map-selection-detail.vg-card{gap:8px;border-left-color:#d7301f;background:#fff;border:1px solid var(--line);border-left:4px solid #d7301f}
+.vg-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.vg-card-kind{color:var(--muted);font-size:8px;font-weight:800;letter-spacing:.8px;text-transform:uppercase}
+.vg-card-title{display:flex;align-items:center;gap:8px;min-width:0}
+.vg-card-title strong{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vg-card-line{margin:0;font-size:10px;color:var(--ink)}
+.vg-card-place{margin:0;font-size:9px;color:var(--muted);line-height:1.45}
+.vg-facts-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.vg-fact{display:grid;gap:1px;padding:7px 9px;border-radius:7px;background:#f4f7f5}
+.vg-fact strong{font-size:14px;font-variant-numeric:tabular-nums}
+.vg-fact small{font-size:8.5px;color:var(--muted)}
+.leaflet-tooltip.vg-tag{padding:3px 8px;border:0;border-radius:999px;background:#173f35;color:#fff;font-size:10px;font-weight:700;box-shadow:0 2px 8px rgba(20,40,42,.25)}
+.leaflet-tooltip.vg-tag::before{display:none}
+.vg-inspect-box{display:grid;gap:4px;font-size:11px;line-height:1.4}
+.vg-inspect-head{display:flex;align-items:center;gap:7px}
+.vg-inspect-head strong{font-size:12px}
+.vg-inspect-box small{color:var(--muted);font-size:10px}
+.vg-hit{cursor:pointer}

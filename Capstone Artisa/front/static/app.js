@@ -248,22 +248,21 @@ function routeProperties(route) {
 }
 
 // --- Mapa de rutas: últimos 7 días en vivo y alertas (/api/vigilancia) -------------------------
-// Sin rutas predefinidas: cada celda de ~500 m se pinta según el % de la flota que pasó por
-// ella en los últimos 7 días (hasta este minuto). Las alertas marcan camiones que anduvieron
-// por zonas que casi nadie de la flota usa. Si dejan de llegar datos, la ventana sigue
+// Sin rutas predefinidas: los caminos de la semana se clasifican A–D según el % de la flota que
+// pasó por ellos (hasta este minuto). Las alertas marcan camiones que anduvieron fuera de las
+// rutas A–C. Si dejan de llegar datos, la ventana sigue
 // terminando en la hora actual y las alertas abiertas pasan a "sin señal".
 const ROUTE_LABELS = Object.freeze({HIGH: "Más usada", MEDIUM: "Uso medio", LOW: "Poco usada"});
 // Colores de la clasificación de rutas: los usan Predicción y la ficha de cada camión.
 const ROUTE_COLORS = Object.freeze({HIGH: "#14532d", MEDIUM: "#f97316", LOW: "#dc2626"});
-// Tramos de la escala: hasta (sin incluir) el % indicado; el primero es "poco habitual".
-// Las rutas habituales se dibujan más gruesas: de un vistazo se ve por dónde anda la flota.
-const VG_BINS = [
-  {hasta: null, color: "#d7301f", weight: 2},  // hasta el umbral: poco habitual (se completa al cargar)
-  {hasta: 15, color: "#f28e2b", weight: 3},
-  {hasta: 30, color: "#e3b43a", weight: 4},
-  {hasta: 50, color: "#5e9f58", weight: 5.5},
-  {hasta: Infinity, color: "#1f6b50", weight: 7}
-];
+// Categorías de las rutas (los % vienen del servidor): A la más transitada, D la menos. Las más
+// transitadas se dibujan más gruesas, así de un vistazo se ve por dónde anda la flota.
+const VG_CATS = {
+  A: {color: "#1f6b50", weight: 7, label: "Ruta troncal: la usa gran parte de la flota"},
+  B: {color: "#5e9f58", weight: 5, label: "Ruta frecuente"},
+  C: {color: "#e3a33a", weight: 3.5, label: "Ruta ocasional"},
+  D: {color: "#d7301f", weight: 2, label: "Poco transitada: andar por aquí puede generar una alerta"}
+};
 const VG_STATES = {
   activa: {label: "Activa", className: "active"},
   sin_senal: {label: "Sin señal", className: "nosignal"},
@@ -274,12 +273,14 @@ let activeMapMode = "live";
 let fleetMap = null;
 let usageLayer = null;
 let usageRenderer = null;
+let trailRenderer = null;
+let selectionRenderer = null;
 let trailLayer = null;
 let truckLayer = null;
 let selectionLayer = null;
 const truckMarkers = new Map();
 var vg = {data: null, cells: new Map(), alerts: new Map(), vehicles: [],
-  tab: "alerts", alertFilter: "all", zone: "all", layers: {usage: true, vehicles: true, trails: true},
+  tab: "alerts", alertFilter: "activa", zone: "all", layers: {usage: true, vehicles: true, trails: true},
   selected: null, fitted: false, loading: false, openPopup: null};
 
 const vgTime = (iso) => iso ? new Intl.DateTimeFormat("es-CL", {
@@ -378,7 +379,7 @@ function truckAgeText(vehicle) {
 function truckPopup(vehicle) {
   const status = vehicleStatus(vehicle);
   const wrapper = el("div", "truck-popup");
-  const state = el("b", status.className, vehicle.en_alerta ? "En alerta · " + status.label : status.label);
+  const state = el("b", status.className, vehicle.en_alerta ? "Fuera de ruta · " + status.label : status.label);
   if (vehicle.en_alerta) state.classList.add("alert");
   const speed = vehicle.speed_kmh === null || vehicle.speed_kmh === undefined ? "Sin velocidad" : format(vehicle.speed_kmh, 0) + " km/h";
   const link = el("a", "truck-popup-link", "Ver su recorrido de hoy");
@@ -393,35 +394,47 @@ function truckPopup(vehicle) {
   return wrapper;
 }
 
-// --- Capa de uso: las rutas de la semana como líneas (canvas) ---
+// --- Rutas de la semana por categoría (A más transitada … D menos), en canvas ---
 function vgPct(count) {
   return count / Math.max(1, vg.data.camiones) * 100;
 }
 
-function vgBin(pct) {
-  return VG_BINS.findIndex((bin) => pct < bin.hasta);
+function vgCategory(pct) {
+  return vg.data.categorias.find((cat) => pct >= cat.desde).letra;
 }
 
-// Cada arista une dos puntos por donde pasó la flota; toma el mayor uso de sus extremos para
-// que una carretera no se corte por el ruido de los reportes. Se dibuja de menor a mayor uso.
+function vgCategoryRange(letter) {
+  const cats = vg.data.categorias;
+  const k = cats.findIndex((cat) => cat.letra === letter);
+  return k === 0 ? `${format(cats[0].desde)} % o más de la flota`
+    : k === cats.length - 1 ? `menos del ${format(cats[k - 1].desde)} %`
+      : `${format(cats[k].desde)}–${format(cats[k - 1].desde)} %`;
+}
+
+// Cada arista une dos puntos por donde pasó la flota y toma la categoría del más transitado de
+// sus extremos, así una carretera no se corta por el ruido de los reportes. Se dibuja de D a A.
 function vgDrawUsage() {
   usageLayer.clearLayers();
   if (!vg.data) return;
   const nodes = vg.data.nodos, edges = vg.data.aristas;
-  const groups = VG_BINS.map(() => []);
+  const groups = {A: [], B: [], C: [], D: []};
   for (let k = 0; k < edges.length; k += 2) {
     const a = nodes[edges[k]], b = nodes[edges[k + 1]];
-    groups[vgBin(vgPct(Math.max(a[2], b[2])))].push([[a[0], a[1]], [b[0], b[1]]]);
+    groups[vgCategory(vgPct(Math.max(a[2], b[2])))].push([[a[0], a[1]], [b[0], b[1]]]);
   }
-  const onlyRare = vg.zone === "rare";
-  groups.forEach((segments, k) => {
-    if (!segments.length) return;
-    const rare = k === 0;
-    const muted = onlyRare && !rare;
-    L.polyline(segments, {renderer: usageRenderer, interactive: false, lineCap: "round", lineJoin: "round",
-      color: muted ? "#9aa8a5" : VG_BINS[k].color, weight: muted ? 2 : (onlyRare && rare ? 4 : VG_BINS[k].weight),
-      opacity: muted ? 0.45 : (rare ? 0.8 : 0.92)}).addTo(usageLayer);
-  });
+  const onlyD = vg.zone === "rare";
+  for (const letter of ["D", "C", "B", "A"]) {
+    if (!groups[letter].length) continue;
+    const cat = VG_CATS[letter];
+    const muted = onlyD && letter !== "D";
+    L.polyline(groups[letter], {renderer: usageRenderer, lineCap: "round", lineJoin: "round", interactive: false,
+      color: muted ? "#9aa8a5" : cat.color, weight: muted ? 2 : (onlyD ? 4 : cat.weight),
+      opacity: muted ? 0.45 : (letter === "D" ? 0.85 : 0.92)}).addTo(usageLayer);
+    // Franja invisible más ancha encima: tocar una ruta (aunque sea fina) dice qué % de la flota pasó.
+    L.polyline(groups[letter], {renderer: usageRenderer, weight: 14, opacity: 0, lineCap: "round", className: "vg-hit"})
+      .on("click", (event) => { L.DomEvent.stopPropagation(event); vgInspect(event.latlng); })
+      .addTo(usageLayer);
+  }
 }
 
 function vgIndexCells(data) {
@@ -431,13 +444,27 @@ function vgIndexCells(data) {
   }
 }
 
-// Al tocar: la celda y sus vecinas (~1,5 km), igual que el servidor.
+// La celda y sus vecinas (~1,5 km), igual que el servidor.
 function vgPctAt(lat, lng) {
   const scale = vg.data.escala;
   const i = Math.floor(lat * scale), j = Math.floor(lng * scale);
   let count = 0;
   for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) count = Math.max(count, vg.cells.get((i + di) + "|" + (j + dj)) || 0);
   return count;
+}
+
+function vgInspect(latlng) {
+  const count = vgPctAt(latlng.lat, latlng.lng);
+  const pct = vgPct(count);
+  const letter = vgCategory(pct);
+  const box = el("div", "vg-inspect-box");
+  const badge = el("b", "vg-cat vg-cat-" + letter, letter);
+  const title = el("strong", "", `Ruta categoría ${letter}`);
+  const head = el("span", "vg-inspect-head");
+  head.append(badge, title);
+  box.append(head, el("span", "", `${format(pct, pct < 10 ? 1 : 0)} % de la flota pasó por aquí en 7 días ` +
+    `(${format(count)} de ${format(vg.data.camiones)} camiones)`), el("small", "", VG_CATS[letter].label));
+  L.popup({className: "vg-inspect"}).setLatLng(latlng).setContent(box).openOn(fleetMap);
 }
 
 function initializeFleetMap() {
@@ -450,17 +477,20 @@ function initializeFleetMap() {
   }
   container.replaceChildren();
   fleetMap = ArtisaMapaBase.crear(container, {pedir: mapPedir, centro: [-24.5, -70], zoom: 6}).mapa;
-  for (const [pane, zIndex] of [["usagePane", 380], ["trailPane", 600], ["selectionPane", 620], ["truckPane", 650]]) {
+  // Las rutas van sobre las faenas (405): su lienzo cubre todo el mapa y si no, taparía los clics.
+  for (const [pane, zIndex] of [["usagePane", 410], ["trailPane", 600], ["selectionPane", 620], ["truckPane", 650]]) {
     fleetMap.createPane(pane).style.zIndex = String(zIndex);
   }
-  fleetMap.getPane("usagePane").style.pointerEvents = "none";
-  usageRenderer = L.canvas({pane: "usagePane", padding: 0.3});
+  // SVG y no canvas: un lienzo cubre todo el mapa y se queda con los clics de lo que está
+  // debajo; con SVG solo la línea recibe el clic.
+  usageRenderer = L.svg({pane: "usagePane", padding: 0.3});
+  trailRenderer = L.svg({pane: "trailPane"});
+  selectionRenderer = L.svg({pane: "selectionPane"});
   usageLayer = L.layerGroup();
   trailLayer = L.layerGroup();
   truckLayer = L.layerGroup();
   selectionLayer = L.featureGroup().addTo(fleetMap);
-  fleetMap.on("click", (event) => vgInspect(event.latlng));
-  // De lejos los camiones se ven como puntos para no tapar el mapa.
+  // De lejos los camiones se ven pequeños para no tapar el mapa.
   const compact = () => container.classList.toggle("is-far", fleetMap.getZoom() < 9);
   fleetMap.on("zoomend", compact);
   compact();
@@ -473,9 +503,18 @@ function vgApplyLayers() {
     if (visible && !fleetMap.hasLayer(layer)) fleetMap.addLayer(layer);
     if (!visible && fleetMap.hasLayer(layer)) fleetMap.removeLayer(layer);
   };
+  const selected = vg.selected || {};
   show(usageLayer, vg.layers.usage && Boolean(vg.data));
-  show(trailLayer, vg.layers.trails);
-  show(truckLayer, vg.layers.vehicles);
+  // Con algo seleccionado se ve solo eso: un camión, o la alerta con su camión.
+  show(trailLayer, vg.layers.trails && !vg.selected);
+  show(truckLayer, vg.layers.vehicles || Boolean(vg.selected));
+  const only = selected.kind === "vehicle" ? selected.id
+    : selected.kind === "alert" ? vg.alerts.get(selected.id)?.patente : null;
+  for (const [vehicleId, marker] of truckMarkers) {
+    const visible = only ? vehicleId === only : vg.layers.vehicles;
+    if (visible && !truckLayer.hasLayer(marker)) truckLayer.addLayer(marker);
+    if (!visible && truckLayer.hasLayer(marker)) truckLayer.removeLayer(marker);
+  }
   for (const input of document.querySelectorAll("[data-map-layer]")) input.checked = vg.layers[input.dataset.mapLayer];
   for (const button of document.querySelectorAll("[data-zone-filter]")) {
     const active = button.dataset.zoneFilter === vg.zone;
@@ -483,18 +522,6 @@ function vgApplyLayers() {
     button.setAttribute("aria-pressed", String(active));
     button.disabled = !vg.layers.usage;
   }
-}
-
-// Al tocar el mapa: qué % de la flota pasó por ese lugar.
-function vgInspect(latlng) {
-  if (!vg.data || !vg.layers.usage) return;
-  const count = vgPctAt(latlng.lat, latlng.lng);
-  const pct = vgPct(count);
-  const text = count
-    ? `${format(pct, pct < 10 ? 1 : 0)} % de la flota pasó por aquí en 7 días (${format(count)} de ${format(vg.data.camiones)} camiones)` +
-      (pct < vg.data.umbral_pct ? " · zona poco habitual" : "")
-    : "Ningún camión pasó por aquí en los últimos 7 días";
-  L.popup({className: "vg-inspect"}).setLatLng(latlng).setContent(el("span", "", text)).openOn(fleetMap);
 }
 
 // --- Carga ---
@@ -529,11 +556,10 @@ function renderVigilance(data) {
     $("map-last-update").textContent = data.message || "Sin reportes de camiones en los últimos 7 días.";
     $("alert-list").replaceChildren(el("li", "monitor-empty", data.message || "Sin reportes de camiones en los últimos 7 días."));
     $("vehicle-live-list").replaceChildren();
-    if (fleetMap) { trailLayer.clearLayers(); truckLayer.clearLayers(); truckMarkers.clear(); vgApplyLayers(); }
+    if (fleetMap) { usageLayer.clearLayers(); trailLayer.clearLayers(); truckLayer.clearLayers(); truckMarkers.clear(); vgApplyLayers(); }
     return;
   }
   vg.data = data;
-  VG_BINS[0].hasta = data.umbral_pct;
   vgIndexCells(data);
   vg.alerts = new Map(data.alertas.map((alert) => [alert.patente + "|" + alert.inicio, alert]));
   vg.vehicles = data.vehiculos;
@@ -543,30 +569,31 @@ function renderVigilance(data) {
     vgDrawUsage();
     vgRenderTrails();
     vgRenderTrucks();
-    vgApplyLayers();
   }
   vgRenderLists();
   vgRestoreSelection();
+  vgApplyLayers();
+  const cats = data.categorias;
   $("heatmap-method").textContent =
     `Las líneas son los caminos por donde anduvo la flota en los últimos 7 días, hasta este minuto (entre dos reportes seguidos ` +
-    `de 5 min o menos; los saltos de GPS se descartan). El color y el grosor dicen qué % de los ${format(data.camiones)} camiones con ` +
-    `reportes pasó por ese lugar, contando cuadros de ~500 m y sus vecinos: verde y grueso es la ruta habitual, rojo y fino es poco habitual. ` +
-    `Hay alerta cuando un camión en movimiento, fuera de las faenas, suma ${format(data.reportes_alerta)} reportes o más por lugares donde pasó ` +
-    `menos del ${format(data.umbral_pct)} % del resto de la flota (se mira el cuadro y sus vecinos, ~1,5 km). Termina cuando vuelve a una zona ` +
-    `habitual o entra a una faena; si deja de reportar por ${format(30)} min queda "sin señal". Es un comportamiento inusual para revisar, ` +
-    "no una falta comprobada. Si no llegan datos nuevos, la ventana igual termina en la hora actual: lo antiguo va saliendo y lo último recibido se mantiene.";
+    `de 5 min o menos; los saltos de GPS se descartan). Cada tramo tiene una categoría según qué % de los ${format(data.camiones)} ` +
+    `camiones con reportes pasó por ahí (cuadros de ~500 m y sus vecinos): A ${vgCategoryRange("A")}, B ${vgCategoryRange("B")}, ` +
+    `C ${vgCategoryRange("C")} y D ${vgCategoryRange("D")}. Hay alerta cuando un camión en movimiento, fuera de las faenas, anda ` +
+    `fuera de las rutas A–C (en tramos D o donde no pasó nadie) durante ${format(data.min_minutos)} min o más y a ${format(data.min_km)} km ` +
+    `o más de una ruta A–C. Termina cuando vuelve a una ruta A–C o entra a una faena; si deja de reportar por 30 min queda "sin señal". ` +
+    "Es un comportamiento inusual para revisar, no una falta comprobada. Si no llegan datos nuevos, la ventana igual termina en la hora " +
+    `actual: lo antiguo va saliendo y lo último recibido se mantiene. (${cats.length} categorías)`;
   if (!vg.fitted && $("heatmap-map").offsetParent !== null) requestAnimationFrame(() => vgFit(false));
 }
 
 function vgRenderScale(data) {
-  const edges = [0, data.umbral_pct, 15, 30, 50];
-  $("vg-scale").replaceChildren(...VG_BINS.map((bin, k) => {
-    const item = el("span", "vg-bin" + (k === 0 ? " is-rare" : ""));
+  $("vg-scale").replaceChildren(...data.categorias.map(({letra}) => {
+    const cat = VG_CATS[letra];
+    const item = el("span", "vg-bin");
     const swatch = el("i");
-    swatch.style.background = bin.color;
-    swatch.style.height = bin.weight + "px";
-    item.append(swatch, el("small", "", k === 0 ? `< ${format(data.umbral_pct)} % · poco habitual`
-      : k === VG_BINS.length - 1 ? `${format(edges[k])} % o más` : `${format(edges[k])}–${format(VG_BINS[k].hasta)} %`));
+    swatch.style.background = cat.color;
+    swatch.style.height = cat.weight + "px";
+    item.append(el("b", "vg-cat vg-cat-" + letra, letra), swatch, el("small", "", vgCategoryRange(letra)));
     return item;
   }));
 }
@@ -583,9 +610,9 @@ function vgRenderStats(data) {
   const summary = data.resumen;
   $("vg-alerts").textContent = format(summary.activas);
   $("vg-alerts-card").classList.toggle("has-alerts", summary.activas > 0);
-  $("vg-alerts-d").textContent = `${format(summary.sin_senal)} sin señal · ${format(summary.terminadas)} terminadas en 7 días`;
+  $("vg-alerts-d").textContent = `${format(summary.sin_senal)} sin señal · ${format(summary.terminadas)} en la semana`;
   $("heatmap-source-status").textContent = summary.activas
-    ? `${format(summary.activas)} ${summary.activas === 1 ? "alerta activa" : "alertas activas"}` : "En vivo · sin alertas activas";
+    ? `${format(summary.activas)} ${summary.activas === 1 ? "camión fuera de ruta" : "camiones fuera de ruta"}` : "En vivo · todos en rutas A–C";
   $("heatmap-source-status").className = "status " + (summary.activas ? "warning" : "info");
 }
 
@@ -602,15 +629,16 @@ function vgRenderLive() {
   $("vg-last").closest(".atlas-stat").classList.toggle("is-stale", Boolean(stale));
   $("map-last-update").textContent = (stale
     ? "No están llegando datos nuevos: se muestra lo último recibido y la ventana sigue avanzando con la hora actual"
-    : "Uso calculado con los últimos 7 días") + " · actualizado " + new Intl.DateTimeFormat("es-CL", {
+    : "Toca una ruta para ver qué % de la flota pasó") + " · actualizado " + new Intl.DateTimeFormat("es-CL", {
     hour: "2-digit", minute: "2-digit", timeZone: HISTORY_ZONE}).format(new Date());
 }
 
+// Sin selección se ven los recorridos de las alertas activas y sin señal (las de la semana no).
 function vgRenderTrails() {
   trailLayer.clearLayers();
   for (const [id, alert] of vg.alerts) {
     if (alert.estado === "terminada") continue;
-    const line = L.polyline(alert.estela, {pane: "trailPane", color: alert.estado === "activa" ? "#d7301f" : "#8a6a64",
+    const line = L.polyline(alert.estela, {renderer: trailRenderer, color: alert.estado === "activa" ? "#d7301f" : "#8a6a64",
       weight: 3, opacity: 0.85, dashArray: "6 6", lineCap: "round"});
     line.bindTooltip(el("span", "", `${alert.patente} · ${VG_STATES[alert.estado].label} · desde ${vgTime(alert.inicio)}`), {sticky: true});
     line.on("click", (event) => { L.DomEvent.stopPropagation(event); vgSelect({kind: "alert", id}); });
@@ -631,7 +659,11 @@ function vgRenderTrucks() {
     marker.addTo(truckLayer);
     truckMarkers.set(vehicle.vehicle_id, marker);
   }
-  if (vg.openPopup && truckMarkers.has(vg.openPopup)) truckMarkers.get(vg.openPopup).openPopup();
+  vgApplyLayers();
+  vgMarkSelection();
+  if (vg.openPopup && truckMarkers.has(vg.openPopup) && truckLayer.hasLayer(truckMarkers.get(vg.openPopup))) {
+    truckMarkers.get(vg.openPopup).openPopup();
+  }
 }
 
 // --- Listas ---
@@ -645,17 +677,19 @@ function vgMatches(text) {
   return !query || text.toLocaleLowerCase("es").includes(query);
 }
 
+const VG_FILTERS = {activa: "Activas", sin_senal: "Sin señal", terminada: "En la semana"};
+
 function vgRenderAlertList() {
   const list = $("alert-list");
   const alerts = [...vg.alerts.entries()];
-  $("alert-count").textContent = format(alerts.filter(([, a]) => a.estado === "activa").length);
+  const count = (state) => alerts.filter(([, a]) => a.estado === state).length;
+  $("alert-count").textContent = format(count("activa"));
   for (const button of document.querySelectorAll("[data-alert-filter]")) {
     const state = button.dataset.alertFilter;
-    const count = state === "all" ? alerts.length : alerts.filter(([, a]) => a.estado === state).length;
-    button.textContent = `${{all: "Todas", activa: "Activas", sin_senal: "Sin señal", terminada: "Terminadas"}[state]} ${format(count)}`;
+    button.textContent = `${VG_FILTERS[state]} ${format(count(state))}`;
     button.classList.toggle("is-active", vg.alertFilter === state);
   }
-  const visible = alerts.filter(([, a]) => (vg.alertFilter === "all" || a.estado === vg.alertFilter) &&
+  const visible = alerts.filter(([, a]) => a.estado === vg.alertFilter &&
     vgMatches(`${a.patente} ${a.nombre || ""} ${a.conductor || ""} ${a.ubicacion || ""}`));
   list.replaceChildren(...visible.map(([id, alert]) => {
     const state = VG_STATES[alert.estado];
@@ -668,18 +702,20 @@ function vgRenderAlertList() {
       el("small", "", `desde ${vgTime(alert.inicio)} · ${vgDuration(alert.minutos)}`));
     const who = el("span", "vg-alert-who");
     who.append(el("span", "plate-chip", alert.patente), el("strong", "", alert.nombre || "Sin nombre"));
-    const driver = el("span", "vg-alert-driver", "Conductor: " + (alert.conductor || "no informado"));
     const facts = el("span", "vg-alert-facts", (alert.km_al_corredor === null ? "a más de 130 km" : `a ${format(alert.km_al_corredor, 1)} km`) +
-      ` del corredor habitual · zona usada por ${format(alert.pct_zona, 1)} % de la flota`);
-    button.append(head, who, driver, facts);
-    if (alert.ubicacion) button.append(el("span", "vg-alert-place", "Ubicación: " + alert.ubicacion));
+      " de una ruta A–C");
+    button.append(head, who, el("span", "vg-alert-driver", "Conductor: " + (alert.conductor || "no informado")), facts);
     button.addEventListener("click", () => vgSelect({kind: "alert", id}));
     item.append(button);
     return item;
   }));
   if (!visible.length) {
-    list.append(el("li", "monitor-empty", alerts.length ? "No hay alertas con este filtro o búsqueda."
-      : "Sin alertas en los últimos 7 días: todos los camiones anduvieron por zonas habituales de la flota."));
+    const empty = {
+      activa: "Ningún camión anda fuera de las rutas A–C en este momento.",
+      sin_senal: "Ningún camión dejó de reportar fuera de las rutas A–C.",
+      terminada: "Sin desvíos en los últimos 7 días."
+    }[vg.alertFilter];
+    list.append(el("li", "monitor-empty", alerts.length && vgMatches("") ? empty : "No hay alertas para esta búsqueda."));
   }
   vgMarkSelection();
 }
@@ -703,7 +739,7 @@ function vgRenderVehicleList() {
     const driver = vehicleDriver(vehicle);
     identity.append(...truckIdentity(vehicle.vehicle_id, driver === "No informado" ? null : driver, null));
     copy.append(el("strong", "", vehicle.vehicle_name || vehicle.vehicle_id), identity);
-    const state = el("em", "vehicle-live-state", vehicle.en_alerta ? "En alerta"
+    const state = el("em", "vehicle-live-state", vehicle.en_alerta ? "Fuera de ruta"
       : status.className === "moving" && Number(vehicle.speed_kmh) > 3 ? format(vehicle.speed_kmh, 0) + " km/h" : truckAgeText(vehicle));
     button.append(icon, copy, state);
     button.addEventListener("click", () => vgSelect({kind: "vehicle", id: vehicle.vehicle_id}));
@@ -726,83 +762,101 @@ function setMonitorTab(tab) {
   vgRenderLists();
 }
 
-// --- Selección ---
+// --- Selección: se ve solo lo elegido; "Vista general" vuelve a todo ---
 function vgSelect(selection, focus = true) {
   vg.selected = selection;
   selectionLayer.clearLayers();
+  if (fleetMap) fleetMap.closePopup();
   if (selection.kind === "alert") {
     const alert = vg.alerts.get(selection.id);
     if (!alert) return vgReset(false);
+    vgApplyLayers();
     vgShowAlert(alert, focus);
   } else {
     const vehicle = vg.vehicles.find((v) => v.vehicle_id === selection.id);
     if (!vehicle) return vgReset(false);
+    vgApplyLayers();
     vgShowVehicle(vehicle, focus);
   }
   vgMarkSelection();
 }
 
+function vgFact(value, label) {
+  const box = el("div", "vg-fact");
+  box.append(el("strong", "", value), el("small", "", label));
+  return box;
+}
+
+function vgCard(kind, state, title, extra) {
+  const detail = $("map-selection-detail");
+  detail.classList.add("vg-card");
+  const head = el("div", "vg-card-head");
+  head.append(el("span", "vg-card-kind", kind));
+  if (state) head.append(state);
+  detail.replaceChildren(head, title, ...extra);
+}
+
 function vgShowAlert(alert, focus) {
   const state = VG_STATES[alert.estado];
-  L.polyline(alert.estela, {pane: "selectionPane", color: "#0b1f1a", weight: 9, opacity: 0.75, lineCap: "round", interactive: false}).addTo(selectionLayer);
-  L.polyline(alert.estela, {pane: "selectionPane", color: "#d7301f", weight: 5, opacity: 1, lineCap: "round", interactive: false}).addTo(selectionLayer);
-  L.circleMarker(alert.estela[0], {pane: "selectionPane", radius: 7, color: "#0b1f1a", weight: 3, fillColor: "#fff", fillOpacity: 1})
-    .bindTooltip("Sale de la zona habitual · " + vgTime(alert.inicio), {permanent: true, direction: "top", className: "route-endpoint"})
+  // Recorrido fuera de ruta (con borde blanco), su inicio y la ruta habitual más cercana.
+  L.polyline(alert.estela, {renderer: selectionRenderer, color: "#ffffff", weight: 8, opacity: 0.95, lineCap: "round", interactive: false}).addTo(selectionLayer);
+  L.polyline(alert.estela, {renderer: selectionRenderer, color: "#d7301f", weight: 4, opacity: 1, lineCap: "round", interactive: false}).addTo(selectionLayer);
+  L.circleMarker(alert.estela[0], {renderer: selectionRenderer, radius: 6, color: "#d7301f", weight: 3, fillColor: "#fff", fillOpacity: 1})
+    .bindTooltip("Salió de las rutas A–C · " + vgTime(alert.inicio), {direction: "top", className: "vg-tag"})
     .addTo(selectionLayer);
   if (alert.corredor) {
-    // Cuánto se alejó: línea desde su última posición hasta el corredor habitual más cercano.
-    L.polyline([alert.posicion, alert.corredor.punto], {pane: "selectionPane", color: "#0b1f1a", weight: 2,
-      dashArray: "4 7", opacity: 0.9, interactive: false}).addTo(selectionLayer);
-    L.circleMarker(alert.corredor.punto, {pane: "selectionPane", radius: 7, color: "#fff", weight: 3, fillColor: "#1f6b50", fillOpacity: 1})
-      .bindTooltip(`Corredor habitual · ${format(alert.corredor.km, 1)} km`, {permanent: true, direction: "left", className: "route-endpoint"})
+    L.polyline([alert.posicion, alert.corredor.punto], {renderer: selectionRenderer, color: "#173f35", weight: 2,
+      dashArray: "3 6", opacity: 0.85, interactive: false}).addTo(selectionLayer);
+    L.circleMarker(alert.corredor.punto, {renderer: selectionRenderer, radius: 6, color: "#fff", weight: 3, fillColor: "#1f6b50", fillOpacity: 1})
+      .bindTooltip(`Ruta A–C más cercana · ${format(alert.corredor.km, 1)} km`, {permanent: true, direction: "auto", className: "vg-tag"})
       .addTo(selectionLayer);
   }
-  L.circleMarker(alert.posicion, {pane: "selectionPane", radius: 9, color: "#fff", weight: 3, fillColor: "#d7301f", fillOpacity: 1})
-    .bindTooltip((alert.estado === "terminada" ? "Último punto fuera · " : "Último dato · ") + vgTime(alert.fin),
-      {permanent: true, direction: "bottom", className: "route-endpoint"})
-    .addTo(selectionLayer);
-  const detail = $("map-selection-detail");
-  setSelectionDetail("Alerta · " + state.label, `${alert.patente} · ${alert.nombre || "Sin nombre"}`,
-    alert.estado === "activa" ? "Anda por zonas que casi nadie de la flota usa. Revisa qué está haciendo."
-      : alert.estado === "sin_senal" ? "Dejó de reportar mientras estaba fuera de las zonas habituales."
-        : "Volvió a una zona habitual o entró a una faena.");
-  const facts = el("dl", "vg-facts");
-  const fact = (label, value) => { facts.append(el("dt", "", label), el("dd", "", value)); };
-  fact("Patente", alert.patente);
-  fact("Camión", alert.nombre || "Sin nombre");
-  fact("Conductor", alert.conductor || "No informado");
-  fact("Desde", vgTime(alert.inicio));
-  fact(alert.estado === "terminada" ? "Hasta" : "Último dato", vgTime(alert.fin));
-  fact("Duración", vgDuration(alert.minutos));
-  fact("Distancia al corredor", alert.km_al_corredor === null ? "Más de 130 km" : format(alert.km_al_corredor, 1) + " km");
-  fact("Km fuera del corredor", format(alert.km_recorridos, 1) + " km");
-  fact("Uso de la zona", format(alert.pct_zona, 1) + " % de la flota");
-  fact("Reportes", `${format(alert.reportes)} (${format(alert.reportes_en_movimiento)} en movimiento)`);
-  if (alert.velocidad !== null && alert.velocidad !== undefined) fact("Velocidad", format(alert.velocidad, 0) + " km/h");
-  if (alert.ubicacion) fact("Ubicación GPS", alert.ubicacion);
-  fact("Coordenadas", alert.posicion.map((value) => value.toFixed(5)).join(", "));
+  if (!truckMarkers.has(alert.patente)) {
+    L.circleMarker(alert.posicion, {renderer: selectionRenderer, radius: 8, color: "#fff", weight: 3, fillColor: "#d7301f", fillOpacity: 1})
+      .bindTooltip("Último dato · " + vgTime(alert.fin), {direction: "top", className: "vg-tag"}).addTo(selectionLayer);
+  }
+  const title = el("div", "vg-card-title");
+  title.append(el("span", "plate-chip", alert.patente), el("strong", "", alert.nombre || "Sin nombre"));
+  const facts = el("div", "vg-facts-grid");
+  facts.append(
+    vgFact(alert.km_al_corredor === null ? "+130 km" : format(alert.km_al_corredor, 1) + " km", "de una ruta A–C"),
+    vgFact(vgDuration(alert.minutos), alert.estado === "terminada" ? "fuera de ruta" : "fuera de ruta hasta ahora"),
+    vgFact(format(alert.km_recorridos, 1) + " km", "recorridos fuera"),
+    vgFact(alert.velocidad === null || alert.velocidad === undefined ? "—" : format(alert.velocidad, 0) + " km/h", "último dato " + vgTime(alert.fin).split(", ").pop()));
+  const lines = [
+    el("p", "vg-card-line", "Conductor: " + (alert.conductor || "no informado")),
+    el("p", "vg-card-line", "Desde " + vgTime(alert.inicio) + (alert.estado === "terminada" ? " hasta " + vgTime(alert.fin) : "")),
+    facts
+  ];
+  if (alert.ubicacion) lines.push(el("p", "vg-card-place", alert.ubicacion));
   const link = el("a", "selection-link", "Ver su día completo →");
   link.href = `#camiones/${encodeURIComponent(alert.patente)}/${vgLocalDay(alert.fin)}`;
-  detail.append(facts, link);
+  lines.push(link);
+  vgCard("Alerta", el("b", "vg-state " + state.className, state.label), title, lines);
   if (focus) {
     const bounds = L.latLngBounds(alert.estela);
     if (alert.corredor) bounds.extend(alert.corredor.punto);
-    fleetMap.fitBounds(bounds.pad(0.2), {maxZoom: 13});
+    fleetMap.fitBounds(bounds, {padding: [60, 60], maxZoom: 13});
   }
 }
 
 function vgShowVehicle(vehicle, focus) {
   const status = vehicleStatus(vehicle);
-  const speed = vehicle.speed_kmh === null || vehicle.speed_kmh === undefined ? "Velocidad sin dato" : format(vehicle.speed_kmh, 0) + " km/h";
-  setSelectionDetail("Camión · " + (vehicle.en_alerta ? "en alerta" : status.label), vehicle.vehicle_name || vehicle.vehicle_id,
-    `${speed} · ${vehicle.event || "Sin evento"}`,
-    `Patente ${vehicle.vehicle_id} · conductor ${vehicleDriver(vehicle)} · último dato ${formatLocal(vehicle.timestamp)} (${truckAgeText(vehicle)})`);
+  const title = el("div", "vg-card-title");
+  title.append(el("span", "plate-chip", vehicle.vehicle_id), el("strong", "", vehicle.vehicle_name || vehicle.vehicle_id));
+  const facts = el("div", "vg-facts-grid");
+  facts.append(
+    vgFact(vehicle.speed_kmh === null || vehicle.speed_kmh === undefined ? "—" : format(vehicle.speed_kmh, 0) + " km/h", vehicle.event || "velocidad"),
+    vgFact(truckAgeText(vehicle).replace(/^hace /, ""), "desde el último dato"));
   const link = el("a", "selection-link", "Ver su recorrido de hoy →");
   link.href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
-  $("map-selection-detail").append(link);
+  vgCard("Camión", el("b", "vg-state " + (vehicle.en_alerta ? "active" : status.className === "moving" ? "ok" : "done"),
+    vehicle.en_alerta ? "Fuera de ruta" : status.label), title, [
+    el("p", "vg-card-line", "Conductor: " + vehicleDriver(vehicle)),
+    el("p", "vg-card-line", "Último dato: " + formatLocal(vehicle.timestamp)),
+    facts, link]);
   const marker = truckMarkers.get(vehicle.vehicle_id);
   if (marker && focus) {
-    if (!vg.layers.vehicles) { vg.layers.vehicles = true; vgApplyLayers(); }
     fleetMap.setView(marker.getLatLng(), Math.max(fleetMap.getZoom(), 11));
     marker.openPopup();
   }
@@ -815,9 +869,6 @@ function vgMarkSelection() {
   }
   for (const button of document.querySelectorAll("[data-vehicle-select]")) {
     button.classList.toggle("is-active", selected.kind === "vehicle" && button.dataset.vehicleSelect === selected.id);
-  }
-  for (const [vehicleId, marker] of truckMarkers) {
-    marker.getElement()?.classList.toggle("is-selected", selected.kind === "vehicle" && vehicleId === selected.id);
   }
 }
 
@@ -832,8 +883,10 @@ function vgReset(fit = true) {
   vg.selected = null;
   if (selectionLayer) selectionLayer.clearLayers();
   if (fleetMap) fleetMap.closePopup();
+  $("map-selection-detail").classList.remove("vg-card");
   setSelectionDetail("Selección", "Elige una alerta o un camión",
-    "El mapa lo centra y muestra sus datos. Toca el mapa para ver qué % de la flota pasó por ese lugar.");
+    "El mapa muestra solo lo elegido. Toca una ruta para ver qué % de la flota pasó por ahí.");
+  vgApplyLayers();
   vgMarkSelection();
   if (fit) vgFit(true);
 }

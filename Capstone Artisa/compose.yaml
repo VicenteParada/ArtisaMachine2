@@ -148,9 +148,14 @@ services:
       COMPANY_API_INTERVAL_SECONDS: ${COMPANY_API_INTERVAL_SECONDS:-30}
       ARTISA_TIMEZONE: ${ARTISA_TIMEZONE:-America/Santiago}
       ETL_HISTORICO: ${ETL_HISTORICO:-1}
-      # Alertas del Mapa de rutas: zona poco habitual = la usó menos de este % de la flota en 7 días.
+      # Mapa de rutas: categorías por % de la flota en 7 días (A ≥ CAT_A, B ≥ CAT_B, C ≥ UMBRAL, D menos).
+      VIGILANCIA_CAT_A: ${VIGILANCIA_CAT_A:-30}
+      VIGILANCIA_CAT_B: ${VIGILANCIA_CAT_B:-15}
       VIGILANCIA_UMBRAL_PCT: ${VIGILANCIA_UMBRAL_PCT:-5}
+      # Alerta: fuera de las rutas A–C al menos estos reportes, minutos y km de distancia.
       VIGILANCIA_REPORTES: ${VIGILANCIA_REPORTES:-3}
+      VIGILANCIA_MIN_MINUTOS: ${VIGILANCIA_MIN_MINUTOS:-10}
+      VIGILANCIA_MIN_KM: ${VIGILANCIA_MIN_KM:-2}
     depends_on:
       mariadb:
         condition: service_healthy
