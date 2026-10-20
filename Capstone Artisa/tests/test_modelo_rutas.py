@@ -185,6 +185,17 @@ class RouteTests(unittest.TestCase):
             self.assertIn(tuple(map(tuple, ruta["geometry"]["coordinates"])), observados)
             self.assertEqual(ruta["geometry_source"], "viaje_real_medoide")
 
+    def test_route_ids_are_unique_even_if_the_short_code_repeats(self):
+        from machine_learning import modelo_rutas
+        medoide = self.viajes[0]
+        usados = set()
+        primero = modelo_rutas._route_id("L1", "L2", medoide, usados)
+        segundo = modelo_rutas._route_id("L1", "L2", medoide, usados)   # mismo origen: choque forzado
+        self.assertNotEqual(primero, segundo)
+        self.assertLessEqual(len(segundo), 16)                         # route_id VARCHAR(16)
+        rutas, _, _ = construir_rutas(self.viajes, [FAENA_A])
+        self.assertEqual(len({r["route_id"] for r in rutas}), len(rutas))
+
     def test_natural_breaks_are_learned_and_contiguous(self):
         valores = [3, 3, 3, 4, 5, 18, 20, 25, 30, 90, 100, 110]
         tramos = cortes_naturales(valores, 4)

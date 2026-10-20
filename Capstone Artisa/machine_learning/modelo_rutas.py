@@ -497,9 +497,16 @@ def _orientar(v):
     return v
 
 
-def _route_id(lugar_a, lugar_b, medoide):
-    base = f"{lugar_a}|{lugar_b}|{medoide.asset_id}|{medoide.inicio.isoformat()}"
-    return "R-" + hashlib.sha1(base.encode()).hexdigest()[:6].upper()
+def _route_id(lugar_a, lugar_b, medoide, usados):
+    """Identificador estable de la ruta (cabe en route_id VARCHAR(16)). Con miles de rutas un
+    código corto puede repetirse: si ya se usó en esta versión, se vuelve a calcular."""
+    base, intento = f"{lugar_a}|{lugar_b}|{medoide.asset_id}|{medoide.inicio.isoformat()}", 0
+    while True:
+        codigo = "R-" + hashlib.sha1(f"{base}|{intento}".encode() if intento else base.encode()).hexdigest()[:12].upper()
+        if codigo not in usados:
+            usados.add(codigo)
+            return codigo
+        intento += 1
 
 
 # ==============================================================================================
@@ -616,7 +623,7 @@ def construir_rutas(viajes, faenas, nombrar=None):
         _orientar(v)
         grupos[(v.lugar_origen, v.lugar_destino)].append(v)
 
-    rutas = []
+    rutas, usados = [], set()
     rng = np.random.default_rng(42)
     for (a, b), miembros in sorted(grupos.items()):
         firmas_todas = np.stack([firma(v.tramos, lat_ref) for v in miembros])
@@ -660,7 +667,7 @@ def construir_rutas(viajes, faenas, nombrar=None):
                 tramos = [max(tramos, key=len)]
                 fuente = "viaje_real_parcial"
             rutas.append({
-                "route_id": _route_id(a, b, medoide),
+                "route_id": _route_id(a, b, medoide, usados),
                 "origen": a, "destino": b,
                 "label": f"{lugares[a]['nombre']} ↔ {lugares[b]['nombre']}" if a != b
                          else f"Circuito en {lugares[a]['nombre']}",
