@@ -1,6 +1,6 @@
-"""Vigilancia de 7 días: huella por % de la flota y alertas por zonas poco habituales."""
+"""Camiones en vivo sobre las rutas aprendidas: nivel de cada posición y alertas en N5/N6."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import json
 import time
 import unittest
@@ -10,6 +10,28 @@ from endpoints import vigilancia_api as v
 from tests.test_rutas_api import FakeCursor
 
 AHORA = datetime(2026, 10, 19, 15, 0)
+VERSION = {"id": 9, "desde": date(2026, 7, 12), "hasta": date(2026, 10, 9), "activa": 1,
+           "creado_en": datetime(2026, 10, 10, 1, 0),
+           "metricas_json": json.dumps({"viajes_clasificados": 300, "camiones": 20, "lugares": 4,
+                                        "parametros": {"metodo": "camiones-jenks-v1"},
+                                        "umbrales": {"cortes": [{"nivel": "N1", "desde": 15, "hasta": 20},
+                                                                {"nivel": "N2", "desde": 3, "hasta": 14},
+                                                                {"nivel": "N5", "desde": 1, "hasta": 2}]}}),
+           "lugares_json": "{}"}
+
+
+def linea(lon, lat0=-22.40, lat1=-22.60):
+    return json.dumps({"type": "LineString", "coordinates": [[lon, lat0], [lon, lat1]]})
+
+
+RUTAS = [
+    {"route_id": "R-TRONCAL", "label": "Faena Norte ↔ Calama", "usage_level": "N1", "usage_count": 280,
+     "unique_vehicle_count": 20, "km_mediana": 22.0, "geometria": linea(-68.90),
+     "primer_viaje": datetime(2026, 7, 12), "ultimo_viaje": datetime(2026, 10, 9)},
+    {"route_id": "R-MINIMA", "label": "Calama ↔ Punto aislado 3", "usage_level": "N5", "usage_count": 2,
+     "unique_vehicle_count": 1, "km_mediana": 22.0, "geometria": linea(-68.70),
+     "primer_viaje": datetime(2026, 8, 1), "ultimo_viaje": datetime(2026, 8, 2)},
+]
 
 
 def camino(asset_id, inicio, minutos, lat0=-22.40, lat1=-22.60, lon=-68.90, speed=60.0):
@@ -19,19 +41,20 @@ def camino(asset_id, inicio, minutos, lat0=-22.40, lat1=-22.60, lon=-68.90, spee
             for k in range(minutos)]
 
 
-def flota_con_desvio(desvio_lon=-68.50, termina=AHORA):
-    """20 camiones por el camino habitual; el último sale 40 km al este y sigue allí."""
+def flota(desvio_lon=-68.50, termina=AHORA, minutos=12):
+    """20 camiones por la troncal; T19 sale de ella y sigue por desvio_lon hasta `termina`."""
     filas = []
     for k in range(20):
         filas += camino(f"T{k:02d}", AHORA - timedelta(days=2, hours=k), 30)
-    desvio = camino("T19", termina - timedelta(minutes=11), 12, lat0=-22.50, lat1=-22.52, lon=desvio_lon)
-    return filas + desvio
+    return filas + camino("T19", termina - timedelta(minutes=minutos - 1), minutos, lat0=-22.50, lat1=-22.52,
+                          lon=desvio_lon)
 
 
-def cursor_con(filas, faenas=()):
+def cursor_con(filas, faenas=(), version=VERSION):
     catalogo = [{"asset_id": f"T{k:02d}"} for k in range(20)]
     return FakeCursor([
-        ("FROM vehiculos AS v INNER JOIN tipos_vehiculo AS t ON t.id_tipo = v.id_tipo\n           WHERE t.nombre = 'camion'\"", catalogo),
+        ("FROM rutas_version", lambda _: [dict(version)] if version else []),
+        ("FROM rutas_clasificadas", RUTAS),
         ("WHERE t.nombre = 'camion'", catalogo),
         ("FROM raw_gps USE INDEX", []),
         ("FROM telemetria_api USE INDEX", filas),
@@ -41,135 +64,110 @@ def cursor_con(filas, faenas=()):
     ])
 
 
-class HuellaTests(unittest.TestCase):
-    def test_road_cells_are_continuous_between_reports(self):
-        # Dos reportes a 2 km (un minuto a 120 km/h): las celdas intermedias también cuentan.
-        puntos = {"A": [(AHORA, -22.40, -68.90, 120.0), (AHORA + timedelta(minutes=1), -22.418, -68.90, 120.0)]}
-        conteo, propias, red = v.huella(puntos)
-        self.assertEqual(propias["A"], set(conteo))
-        self.assertGreaterEqual(len(conteo), 4)
-        self.assertEqual(set(conteo.values()), {1})
+class ModeloTests(unittest.TestCase):
+    def setUp(self):
+        v._CACHE.update(version=None, modelo=None, mapa=None)
 
-    def test_routes_are_lines_over_the_road(self):
-        # Dos camiones por la misma recta: los nodos quedan sobre ella (no en el centro del
-        # cuadro) y las aristas los unen en orden, sin duplicarse.
-        puntos = {k: [(AHORA, -22.400, -68.9013, 60.0), (AHORA + timedelta(minutes=1), -22.412, -68.9013, 60.0)]
-                  for k in ("A", "B")}
-        conteo, _, red = v.huella(puntos)
-        escala, nodos, aristas = v.red_mapa(conteo, red)
-        self.assertEqual(escala, v.ESCALA)
-        self.assertTrue(all(abs(lon + 68.9013) < 1e-6 for _, lon, _ in nodos))
-        self.assertTrue(all(n == 2 for *_, n in nodos))
-        self.assertEqual(len(aristas) // 2, len(nodos) - 1)  # una cadena
+    def test_learned_routes_with_levels_and_table(self):
+        data = v.rutas_aprendidas(cursor_con([]))
+        self.assertEqual([r["id"] for r in data["rutas"]], ["R-TRONCAL", "R-MINIMA"])
+        self.assertEqual(data["total_rutas"], 2)
+        self.assertEqual(data["rutas"][0]["lineas"], [[[-22.4, -68.9], [-22.6, -68.9]]])
+        tabla = {n["nivel"]: n for n in data["niveles"]}
+        self.assertEqual(list(tabla), ["N1", "N2", "N5", "N6"])   # N3/N4: el modelo aprendió 2 grupos
+        self.assertEqual((tabla["N1"]["desde"], tabla["N1"]["hasta"], tabla["N1"]["rutas"]), (15, 20, 1))
+        self.assertEqual([n["nivel"] for n in data["niveles"] if n["alerta"]], ["N5", "N6"])
+        self.assertEqual((data["datos_hasta"], data["proxima_con_datos_hasta"]), ("2026-10-09", "2026-10-16"))
 
-    def test_too_many_points_are_drawn_coarser(self):
-        puntos = {"A": [(AHORA, -22.40, -68.90, 60.0), (AHORA + timedelta(minutes=1), -22.418, -68.90, 60.0)]}
-        conteo, _, red = v.huella(puntos)
-        with patch.object(v, "MAX_NODOS", 3):
-            escala, nodos, aristas = v.red_mapa(conteo, red)
-        self.assertLess(escala, v.ESCALA)
-        self.assertLessEqual(len(nodos), 3)
-        self.assertTrue(all(a != b for a, b in zip(aristas[::2], aristas[1::2])))
+    def test_position_level_uses_the_cell_and_its_neighbors(self):
+        _, mapa = v.leer_modelo(cursor_con([]))
+        self.assertEqual(mapa.en(-22.5, -68.9), (1, "R-TRONCAL"))
+        self.assertEqual(mapa.en(-22.5, -68.9 + 1 / v.ESCALA)[0], 1)     # celda vecina
+        self.assertEqual(mapa.en(-22.5, -68.70), (5, "R-MINIMA"))
+        self.assertEqual(mapa.en(-22.5, -68.50), (6, None))               # fuera de ruta
+        self.assertAlmostEqual(mapa.distancia(-22.5, -68.5), 41.1, delta=1.5)
 
-    def test_gps_jumps_are_dropped(self):
-        filas = camino("T00", AHORA - timedelta(hours=1), 3, lat1=-22.42)
-        filas.insert(1, {"asset_id": "T00", "report_date": filas[0]["report_date"] + timedelta(seconds=30),
-                         "latitude": -33.4, "longitude": -70.6, "speed": 60})  # Santiago en 30 s
-        cursor = FakeCursor([("FROM raw_gps USE INDEX", []), ("FROM telemetria_api USE INDEX", filas)])
-        puntos = v.leer_reportes(cursor, AHORA - timedelta(days=7), AHORA, {"T00"})["T00"]
-        self.assertEqual(len(puntos), 3)
-        self.assertTrue(all(p[1] > -23 for p in puntos))
-
-    def test_percent_uses_the_cell_and_its_neighbors(self):
-        zonas = v.Zonas({v.celda(-22.5, -68.9): 10}, 20)
-        self.assertEqual(zonas.pct(-22.5, -68.9), 50)
-        self.assertEqual(zonas.pct(-22.5 + 1 / v.ESCALA, -68.9), 50)    # celda vecina
-        self.assertEqual(zonas.pct(-22.5 + 3 / v.ESCALA, -68.9), 0)     # ~1,5 km
-        self.assertAlmostEqual(zonas.distancia(-22.5, -68.5), 41.1, delta=1.5)
-        # Un camión no cuenta para sí mismo: en su propia celda solo ve a los demás.
-        propia = v.Zonas({v.celda(-22.5, -68.5): 1}, 20)
-        self.assertEqual(propia.pct(-22.5, -68.5, {v.celda(-22.5, -68.5)}), 0)
+    def test_pending_without_a_learned_model(self):
+        self.assertIsNone(v.rutas_aprendidas(cursor_con([], version=None)))
+        self.assertIsNone(v.vigilancia(cursor_con(flota(), version=None), AHORA))
 
 
 class AlertasTests(unittest.TestCase):
     def setUp(self):
-        self.vehiculos = patch.object(v.rutas_api, "latest_positions",
-                                      return_value=[{"vehicle_id": "T19"}, {"vehicle_id": "T00"}])
+        v._CACHE.update(version=None, modelo=None, mapa=None)
+        posiciones = [{"vehicle_id": "T19", "latitude": -22.52, "longitude": -68.50,
+                       "timestamp": (AHORA - timedelta(minutes=1)).isoformat() + "Z"},
+                      {"vehicle_id": "T00", "latitude": -22.5, "longitude": -68.9,
+                       "timestamp": (AHORA - timedelta(minutes=2)).isoformat() + "Z"},
+                      {"vehicle_id": "T01", "latitude": -22.5, "longitude": -68.9,
+                       "timestamp": (AHORA - timedelta(days=1)).isoformat() + "Z"}]
+        self.vehiculos = patch.object(v.rutas_api, "latest_positions", return_value=posiciones)
         self.vehiculos.start()
 
     def tearDown(self):
         self.vehiculos.stop()
 
-    def test_truck_far_from_the_usual_corridor_raises_an_active_alert(self):
-        data = v.vigilancia(cursor_con(flota_con_desvio()), AHORA)
-        self.assertEqual(data["camiones"], 20)
+    def test_truck_off_every_learned_route_raises_an_active_alert(self):
+        data = v.vigilancia(cursor_con(flota()), AHORA)
         alerta, = data["alertas"]
-        self.assertEqual((alerta["patente"], alerta["estado"], alerta["reportes"]), ("T19", "activa", 12))
-        self.assertEqual(alerta["categoria_zona"], "sin uso")
+        self.assertEqual((alerta["patente"], alerta["estado"], alerta["nivel"], alerta["reportes"]),
+                         ("T19", "activa", "N6", 12))
         self.assertAlmostEqual(alerta["km_al_corredor"], 41, delta=2)
-        self.assertAlmostEqual(alerta["corredor"]["km"], 41, delta=2)
-        self.assertAlmostEqual(alerta["corredor"]["punto"][1], -68.9, delta=0.01)  # sobre el camino habitual
+        self.assertAlmostEqual(alerta["corredor"]["punto"][1], -68.9, delta=0.01)  # sobre la troncal
         self.assertEqual((alerta["nombre"], alerta["conductor"], alerta["ubicacion"]),
                          ("Lampa-919", "JUAN PÉREZ", "Sierra Gorda"))
-        self.assertLess(alerta["pct_zona"], v.UMBRAL_PCT)
         self.assertEqual(data["resumen"]["activas"], 1)
-        self.assertEqual([x["en_alerta"] for x in data["vehiculos"]], [True, False])
-        self.assertTrue(data["nodos"] and len(data["aristas"]) % 2 == 0)
+        self.assertEqual(data["modelo"]["version"], 9)
+        self.assertNotIn("rutas", data["modelo"])  # las líneas van en /api/rutas-aprendidas
+        t19, t00, t01 = data["vehiculos"]
+        self.assertEqual((t19["en_alerta"], t19["nivel"]), (True, "N6"))
+        self.assertEqual((t00["en_alerta"], t00["nivel"], t00["ruta_label"]), (False, "N1", "Faena Norte ↔ Calama"))
+        self.assertIsNone(t01["nivel"])  # posición de ayer: no se clasifica
+        self.assertEqual(data["resumen"]["camiones_por_nivel"], {"N6": 1, "N1": 1})
+
+    def test_truck_on_a_minimal_route_raises_an_alert_with_that_route(self):
+        alerta, = v.vigilancia(cursor_con(flota(desvio_lon=-68.70)), AHORA)["alertas"]
+        self.assertEqual((alerta["nivel"], alerta["ruta"], alerta["ruta_label"]),
+                         ("N5", "R-MINIMA", "Calama ↔ Punto aislado 3"))
 
     def test_old_episode_without_new_reports_is_without_signal(self):
-        data = v.vigilancia(cursor_con(flota_con_desvio(termina=AHORA - timedelta(hours=2))), AHORA)
+        data = v.vigilancia(cursor_con(flota(termina=AHORA - timedelta(hours=2))), AHORA)
         self.assertEqual(data["alertas"][0]["estado"], "sin_senal")
 
-    def test_back_on_the_corridor_closes_the_alert(self):
-        filas = flota_con_desvio(termina=AHORA - timedelta(minutes=30))
+    def test_back_on_a_usual_route_closes_the_alert(self):
+        filas = flota(termina=AHORA - timedelta(minutes=30))
         filas += camino("T19", AHORA - timedelta(minutes=10), 5, lat0=-22.45, lat1=-22.46)
         self.assertEqual(v.vigilancia(cursor_con(filas), AHORA)["alertas"][0]["estado"], "terminada")
 
     def test_inside_a_worksite_there_is_no_alert(self):
         faena = {"nombre": "Faena Este", "geojson": json.dumps({"type": "Polygon", "coordinates": [[
             [-68.6, -22.6], [-68.4, -22.6], [-68.4, -22.4], [-68.6, -22.4], [-68.6, -22.6]]]})}
-        self.assertEqual(v.vigilancia(cursor_con(flota_con_desvio(), [faena]), AHORA)["alertas"], [])
+        self.assertEqual(v.vigilancia(cursor_con(flota(), [faena]), AHORA)["alertas"], [])
 
-    def test_two_reports_or_a_stopped_truck_are_not_enough(self):
-        filas = [f for f in flota_con_desvio() if not (f["asset_id"] == "T19" and f["longitude"] == -68.50)]
-        filas += camino("T19", AHORA - timedelta(minutes=2), 2, lat0=-22.50, lat1=-22.51, lon=-68.50)
-        self.assertEqual(v.vigilancia(cursor_con(filas), AHORA)["alertas"], [])
-        detenido = [dict(f, speed=0.0) if f["longitude"] == -68.50 else f for f in flota_con_desvio()]
+    def test_short_stopped_or_nearby_detours_are_not_alerts(self):
+        self.assertEqual(v.vigilancia(cursor_con(flota(minutos=8)), AHORA)["alertas"], [])   # 8 min
+        detenido = [dict(f, speed=0.0) if f["longitude"] == -68.50 else f for f in flota()]
         self.assertEqual(v.vigilancia(cursor_con(detenido), AHORA)["alertas"], [])
-
-    def test_short_or_nearby_detours_are_not_alerts(self):
-        # 8 minutos fuera: no alcanza los 10.
-        corto = [f for f in flota_con_desvio() if not (f["asset_id"] == "T19" and f["longitude"] == -68.50)]
-        corto += camino("T19", AHORA - timedelta(minutes=7), 8, lat0=-22.50, lat1=-22.52, lon=-68.50)
-        self.assertEqual(v.vigilancia(cursor_con(corto), AHORA)["alertas"], [])
-        # 11 minutos, pero a ~1,5 km del camino habitual (fuera de su celda y vecinas).
-        cerca = flota_con_desvio(desvio_lon=-68.885)
-        self.assertEqual(v.vigilancia(cursor_con(cerca), AHORA)["alertas"], [])
-
-    def test_categories_go_from_a_to_d(self):
-        self.assertEqual([v.categoria(p) for p in (80, 30, 20, 15, 10, 5, 4.9, 0)], list("AABBCCDD"))
-
-    def test_pending_without_reports(self):
-        self.assertIsNone(v.vigilancia(cursor_con([]), AHORA))
+        # 12 minutos fuera, pero a ~1,5 km de la troncal.
+        self.assertEqual(v.vigilancia(cursor_con(flota(desvio_lon=-68.885)), AHORA)["alertas"], [])
 
     def test_a_week_of_the_whole_fleet_is_fast(self):
-        # ~100 camiones reportando cada 3 min durante 7 días (~340 mil reportes), como la flota real.
-        filas = []
-        for k in range(100):
-            lon = -68.9 - (k % 10) * 0.05
-            for dia in range(7):
-                filas += camino(f"T{k % 20:02d}" if k < 20 else f"X{k}", AHORA - timedelta(days=dia, hours=8), 160,
-                                lat0=-22.0, lat1=-23.5, lon=lon)
-        catalogo = {f["asset_id"] for f in filas}
-        cursor = FakeCursor([("FROM raw_gps USE INDEX", []), ("FROM telemetria_api USE INDEX", filas)])
-        comienzo = time.monotonic()
-        por_camion = v.leer_reportes(cursor, AHORA - timedelta(days=7), AHORA, catalogo)
-        conteo, propias, red = v.huella(por_camion)
-        v.red_mapa(conteo, red)
-        zonas = v.Zonas(conteo, len(por_camion))
-        for asset_id, puntos in por_camion.items():
-            v.episodios(puntos, zonas, [], propias[asset_id])
-        self.assertLess(time.monotonic() - comienzo, 20)
+        # ~100 camiones reportando cada minuto ~2,7 h al día durante 7 días, sobre 300 rutas.
+        global RUTAS
+        original = RUTAS
+        RUTAS = original + [dict(original[0], route_id=f"R{k}", usage_level="N2", geometria=linea(-69.0 - k * 0.01))
+                            for k in range(300)]
+        try:
+            filas = []
+            for k in range(100):
+                for dia in range(7):
+                    filas += camino(f"T{k % 20:02d}" if k < 20 else f"X{k}", AHORA - timedelta(days=dia, hours=8), 160,
+                                    lat0=-22.0, lat1=-23.5, lon=-68.9 - (k % 10) * 0.05)
+            comienzo = time.monotonic()
+            v.vigilancia(cursor_con(filas), AHORA)
+            self.assertLess(time.monotonic() - comienzo, 20)
+        finally:
+            RUTAS = original
 
 
 if __name__ == "__main__":

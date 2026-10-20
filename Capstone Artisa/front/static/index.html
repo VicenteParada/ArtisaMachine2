@@ -6,13 +6,13 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/mapa-base.css?v=20261020-niveles">
-  <link rel="stylesheet" href="/style.css?v=20261020-niveles">
+  <link rel="stylesheet" href="/mapa-base.css?v=20261020-rutas-aprendidas">
+  <link rel="stylesheet" href="/style.css?v=20261020-rutas-aprendidas">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
-  <script src="/mapa-base.js?v=20261020-niveles" defer></script>
-  <script src="/map-data.js?v=20261020-niveles" defer></script>
-  <script src="/app.js?v=20261020-niveles" defer></script>
+  <script src="/mapa-base.js?v=20261020-rutas-aprendidas" defer></script>
+  <script src="/map-data.js?v=20261020-rutas-aprendidas" defer></script>
+  <script src="/app.js?v=20261020-rutas-aprendidas" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -60,7 +60,7 @@
     <div class="nav-label">ESPACIO DE TRABAJO</div>
     <nav aria-label="Navegación principal">
       <a data-dataset-link="trucks" href="#camiones"><span>⛟</span> Camiones en vivo</a>
-      <a data-dataset-link="heatmap" href="#mapa-calor"><span>◉</span> Mapa de rutas</a>
+      <a data-dataset-link="heatmap" href="#mapa-calor"><span>◷</span> Datos históricos</a>
       <a data-dataset-link="prediction" href="#prediccion"><span>◈</span> Predicción</a>
       <a data-dataset-link="dashboard" href="#dashboard"><span>▥</span> Dashboard</a>
       <a id="overview-link" href="#flujo"><span>▦</span> Arquitectura</a>
@@ -96,15 +96,15 @@
         <div class="flow-arrow arrow-c" aria-hidden="true">→</div>
         <article class="node front" data-service="front"><span class="node-number">05</span><h3>Frontend</h3><p>Visualiza y explora</p><span class="node-status">Consultando…</span></article>
         <div class="machine-link">↕ <span>Lee datos · guarda resultados</span></div>
-        <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Cierre diario y clasificación de rutas</p><span class="node-status">Consultando…</span></article>
-        <div class="flow-explanation"><strong>Servicios conectados.</strong><p>El ETL trae la telemetría de la API de la empresa a MariaDB. Machine cierra cada día y clasifica las rutas, y los endpoints entregan los resultados a esta pantalla.</p></div>
+        <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Cierre diario y modelo que aprende las rutas</p><span class="node-status">Consultando…</span></article>
+        <div class="flow-explanation"><strong>Servicios conectados.</strong><p>El ETL trae la telemetría de la API de la empresa a MariaDB. Machine cierra cada día y reaprende las rutas cada semana, y los endpoints entregan los resultados a esta pantalla.</p></div>
       </div>
       <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada minuto</span></div>
     </section>
     <nav class="dataset-tabs" aria-label="Espacios de análisis">
       <a class="dataset-tab" data-dataset-tab="trucks" href="#camiones"><span class="dataset-icon">⛟</span><span><strong>Camiones en vivo</strong><small>Dónde están y qué hicieron</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◉</span><span><strong>Mapa de rutas</strong><small>Rutas más y menos usadas</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="prediction" href="#prediccion"><span class="dataset-icon">◈</span><span><strong>Predicción</strong><small>Próximos 15 días</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◷</span><span><strong>Datos históricos</strong><small>Mapas de telemetría guardados</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="prediction" href="#prediccion"><span class="dataset-icon">◈</span><span><strong>Predicción</strong><small>Rutas aprendidas y alertas en vivo</small></span></a>
       <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores e informes</small></span></a>
     </nav>
     <div id="camiones" class="dataset-space" data-dataset-view="trucks" hidden>
@@ -225,7 +225,6 @@
         <div class="fd-tabs" role="tablist" aria-label="Vista del dashboard">
           <button type="button" class="fd-tab is-active" role="tab" aria-selected="true" data-dash-tab="global"><strong>Centro de control</strong><small>Estado actual, rendimiento y alertas</small></button>
           <button type="button" class="fd-tab" role="tab" aria-selected="false" data-dash-tab="detalle"><strong>Informes históricos</strong><small>Resumen por día y comparación por camión</small></button>
-          <button type="button" class="fd-tab" role="tab" aria-selected="false" data-dash-tab="plan"><strong>Planificación</strong><small>Actividad y rutas esperadas para 15 días</small></button>
         </div>
 
         <div id="dash-global" role="tabpanel" aria-label="Datos globales">
@@ -405,74 +404,49 @@
           </div>
         </div>
 
-        <div id="dash-plan" role="tabpanel" aria-label="Planificación de los próximos días" hidden>
-          <p class="telemetry-intro">Planifica los próximos 15 días con la actividad, las rutas y la confianza del modelo. Son estimaciones operativas, no posiciones reales de camiones.</p>
-          <div class="dashboard-kpis fd-kpis" aria-label="Resumen de la predicción">
-            <article><span>Actividad esperada</span><strong id="dp-total">—</strong><small id="dp-total-d">Reportes de camiones en movimiento</small></article>
-            <article><span>Día con más actividad</span><strong id="dp-peak">—</strong><small id="dp-peak-d">—</small></article>
-            <article><span>Rutas previstas</span><strong id="dp-routes">—</strong><small id="dp-routes-d">Con camiones esperados</small></article>
-            <article><span>Error del modelo</span><strong id="dp-error">—</strong><small id="dp-error-d">Menor es mejor</small></article>
-          </div>
-          <article class="dashboard-card fd-plan-days">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">PRÓXIMOS 15 DÍAS</span><h3>Actividad esperada por día</h3></div><a class="fd-open fd-live-link" href="#prediccion">Abrir mapa predictivo →</a></div>
-            <p>Reportes GPS esperados de camiones en movimiento. La intensidad indica la confianza para cada día.</p>
-            <div id="dp-days" class="fd-overview-chart fd-plan-chart" role="group" aria-label="Actividad esperada por día"><span class="chart-empty">La predicción se cargará al abrir esta pestaña.</span></div>
-          </article>
-          <div class="fd-pair fd-plan-pair">
-            <article class="dashboard-card">
-              <div class="dashboard-card-heading"><div><span class="eyebrow">DEMANDA POR RUTA</span><h3>Rutas con más camiones esperados</h3></div><span class="chart-unit">Promedio diario</span></div>
-              <p>Promedio de camiones distintos estimados por día en cada ruta completa.</p>
-              <div id="dp-route-ranking" class="dashboard-bars"><span class="chart-empty">Cargando rutas…</span></div>
-            </article>
-            <article class="dashboard-card">
-              <div class="dashboard-card-heading"><div><span class="eyebrow">CONFIANZA</span><h3>Qué tan confiable es la planificación</h3></div><span id="dp-method" class="fd-chip">—</span></div>
-              <p>La confianza usa el error real obtenido al predecir la misma cantidad de días hacia adelante.</p>
-              <div id="dp-confidence" class="fd-donut-wrap" aria-label="Confianza de los días predichos"><span class="chart-empty">Cargando evaluación…</span></div>
-              <div id="dp-quality-note" class="dashboard-method"><strong>Base del modelo</strong><span>—</span></div>
-            </article>
-          </div>
-        </div>
       </section>
     </div>
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
-      <section class="panel heatmap-panel atlas" aria-labelledby="atlas-title">
+      <section class="panel heatmap-panel atlas history-panel" aria-labelledby="history-title">
         <div class="atlas-head">
-          <div><h2 id="atlas-title">Mapa de rutas</h2><p id="heatmap-intro" class="atlas-lede">Las rutas de la flota en los últimos 7 días, de la A (más transitada) a la D (menos), con los camiones en vivo y una alerta cuando uno anda fuera de las rutas A–C.</p></div>
+          <div><h2 id="history-title">Datos históricos</h2><p class="atlas-lede">Estudia cómo se movió la flota en cualquier día o rango guardado: mapa de calor, rutas por camión, uso de rutas y puntos. Es solo historial; lo que pasa ahora, sobre las rutas que aprendió el modelo, está en Predicción.</p></div>
+          <a class="status info history-live-link" href="#prediccion">Ver en vivo →</a>
+        </div>
+        <div id="explorer-routes" class="explorer-frame-wrap">
+          <iframe title="Mapas de telemetría histórica" data-explorer-frame="/exploracion-gps" referrerpolicy="no-referrer"></iframe>
+        </div>
+      </section>
+    </div>
+    <div id="prediccion" class="dataset-space" data-dataset-view="prediction" hidden>
+      <section class="panel heatmap-panel atlas learned-panel" aria-labelledby="atlas-title">
+        <div class="atlas-head">
+          <div><span class="eyebrow">MACHINE LEARNING · RUTAS APRENDIDAS</span><h2 id="atlas-title">Predicción de rutas</h2><p id="heatmap-intro" class="atlas-lede">Las rutas que el modelo aprendió de los viajes reales, de la más concurrida (N1) a la menos (N5), con los camiones en vivo encima. Se reaprende cada semana y hay alerta cuando un camión anda por una ruta mínima o fuera de toda ruta.</p></div>
           <span id="heatmap-source-status" class="status info">Cargando…</span>
         </div>
-        <div class="atlas-modes map-view-selector" role="tablist" aria-label="Qué ver">
-          <button type="button" class="atlas-mode" data-map-mode="live" aria-pressed="true"><strong>Últimos 7 días · en vivo</strong><small>Por dónde anda la flota, camiones en vivo y alertas</small></button>
-          <button type="button" class="atlas-mode" data-map-mode="historical" aria-pressed="false"><strong>Mapas de telemetría</strong><small id="map-view-description">Estudio de cualquier día o rango guardado</small></button>
-        </div>
-        <div class="atlas-stats vg-stats" id="atlas-stats" aria-label="Resumen de los últimos 7 días">
-          <div class="atlas-stat"><span>Ventana</span><strong id="vg-window">—</strong><small id="vg-window-d">Se actualiza cada minuto</small></div>
-          <div class="atlas-stat"><span>Camiones con reportes</span><strong id="vg-trucks">—</strong><small id="vg-trucks-d">En los 7 días</small></div>
+        <div class="atlas-stats vg-stats" id="atlas-stats" aria-label="Resumen del modelo y de la flota en vivo">
+          <div class="atlas-stat"><span>Modelo vigente</span><strong id="vg-model">—</strong><small id="vg-model-d">—</small></div>
+          <div class="atlas-stat"><span>Rutas aprendidas</span><strong id="vg-routes">—</strong><small id="vg-routes-d">—</small></div>
           <div class="atlas-stat"><span>En movimiento ahora</span><strong id="vg-moving">—</strong><small id="vg-moving-d">Con dato de los últimos 15 min</small></div>
           <div class="atlas-stat"><span>Último dato recibido</span><strong id="vg-last">—</strong><small id="vg-last-d">—</small></div>
           <button type="button" class="atlas-stat atlas-pick vg-alert-card" id="vg-alerts-card"><span>Alertas activas</span><strong id="vg-alerts">—</strong><small id="vg-alerts-d">—</small></button>
         </div>
         <div class="heatmap-layout atlas-stage">
           <article class="map-card">
-            <div class="map-view-stage">
-              <div id="explorer-routes" class="explorer-frame-wrap" hidden>
-                <iframe title="Mapas de telemetría histórica" data-explorer-frame="/exploracion-gps" referrerpolicy="no-referrer"></iframe>
-              </div>
-              <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa de los últimos 7 días con los camiones en vivo"><span class="map-loading">Cargando los últimos 7 días…</span></div>
-            </div>
+            <div id="heatmap-map" class="heatmap-map" role="application" aria-label="Mapa de las rutas aprendidas con los camiones en vivo"><span class="map-loading">Cargando las rutas aprendidas…</span></div>
             <div class="atlas-toolbar route-filter-panel">
               <div class="route-filter-actions" role="group" aria-label="Qué resaltar">
-                <button type="button" class="route-filter is-active" data-zone-filter="all" aria-pressed="true">Rutas A–D</button>
-                <button type="button" class="route-filter low" data-zone-filter="rare" aria-pressed="false"><i></i>Resaltar rutas D (poco transitadas)</button>
+                <button type="button" class="route-filter is-active" data-zone-filter="all" aria-pressed="true">Todas las rutas</button>
+                <button type="button" class="route-filter low" data-zone-filter="rare" aria-pressed="false"><i></i>Resaltar rutas mínimas (N5)</button>
               </div>
               <div class="map-layer-panel map-layer-actions" role="group" aria-label="Capas del mapa">
-                <label class="map-layer-toggle routes"><input type="checkbox" data-map-layer="usage" checked> Uso 7 días</label>
+                <label class="map-layer-toggle routes"><input type="checkbox" data-map-layer="usage" checked> Rutas aprendidas</label>
                 <label class="map-layer-toggle vehicles"><input type="checkbox" data-map-layer="vehicles" checked> Camiones</label>
                 <label class="map-layer-toggle trails"><input type="checkbox" data-map-layer="trails" checked> Alertas</label>
                 <button id="reset-map-view" class="map-reset" type="button">⌖ Vista general</button>
               </div>
             </div>
             <div class="atlas-foot vg-legend" id="classified-map-legend">
-              <span class="vg-legend-title">Rutas de los últimos 7 días</span>
+              <span class="vg-legend-title">Niveles de las rutas</span>
               <span class="vg-scale" id="vg-scale"></span>
               <small id="map-last-update">Cargando…</small>
             </div>
@@ -489,69 +463,26 @@
                 <button type="button" data-alert-filter="terminada">En la semana</button>
               </div>
               <label class="monitor-search"><span>⌕</span><input id="monitor-search" type="search" placeholder="Buscar patente, camión o conductor…" aria-label="Buscar"></label>
-              <ul id="alert-list" class="monitor-list vg-alert-list" data-monitor-list="alerts"><li class="monitor-empty">Esperando los últimos 7 días…</li></ul>
+              <ul id="alert-list" class="monitor-list vg-alert-list" data-monitor-list="alerts"><li class="monitor-empty">Esperando las rutas aprendidas…</li></ul>
               <ul id="vehicle-live-list" class="monitor-list" data-monitor-list="vehicles" hidden><li class="monitor-empty">Esperando posiciones…</li></ul>
               <div id="map-selection-detail" class="map-selection-detail" aria-live="polite">
-                <span>Selección</span><strong>Elige una alerta o un camión</strong><p>El mapa muestra solo lo elegido. Toca una ruta para ver qué % de la flota pasó por ahí.</p>
+                <span>Selección</span><strong>Elige una alerta o un camión</strong><p>El mapa muestra solo lo elegido. Toca una ruta para ver su nivel y cuántos camiones la usan.</p>
               </div>
             </article>
           </aside>
         </div>
-        <details class="heatmap-method"><summary>¿Cómo se calculan el uso y las alertas?</summary><p id="heatmap-method">Esperando los datos…</p></details>
-      </section>
-    </div>
-    <div id="prediccion" class="dataset-space" data-dataset-view="prediction" hidden>
-      <section class="panel prediction-panel" aria-labelledby="prediction-title">
-        <div class="section-top"><div><span class="eyebrow">MACHINE LEARNING · PREDICCIÓN</span><h2 id="prediction-title">Actividad esperada de la flota</h2></div><span id="prediction-status" class="status neutral">Cargando…</span></div>
-        <div class="prediction-tabs" role="tablist" aria-label="Modelo de predicción">
-          <button type="button" role="tab" class="prediction-tab is-active" data-prediction-tab="calor" aria-selected="true"><span>◉</span><span><strong>Mapa de calor</strong><small>Zonas con más movimiento</small></span></button>
-          <button type="button" role="tab" class="prediction-tab" data-prediction-tab="rutas" aria-selected="false"><span>⟋</span><span><strong>Rutas</strong><small>Rutas completas y camiones esperados</small></span></button>
+        <div class="lr-grid">
+        <article class="dashboard-card lr-table-card">
+          <div class="dashboard-card-heading"><div><span class="eyebrow">TABLA DE CLASIFICACIÓN</span><h3>Niveles de las rutas aprendidas</h3></div><span class="chart-unit">Parámetro: camiones distintos por ruta</span></div>
+          <div class="lr-table-wrap"><table id="lr-table" class="lr-table"></table></div>
+          <small id="lr-table-foot" class="lr-table-foot">Esperando el modelo…</small>
+        </article>
+        <article class="dashboard-card lr-model-card">
+          <div class="dashboard-card-heading"><div><span class="eyebrow">FICHA DEL MODELO</span><h3>Cómo aprende las rutas</h3></div><span class="chart-unit">Aprendizaje no supervisado</span></div>
+          <ol id="lr-model" class="lr-model"><li class="chart-empty">Esperando el modelo…</li></ol>
+        </article>
         </div>
-        <p id="prediction-intro" class="telemetry-intro">Zonas donde se espera más movimiento de camiones en los próximos días, según lo ocurrido en las últimas semanas.</p>
-        <div class="real-metrics prediction-metrics" aria-label="Resumen de la predicción">
-          <article><span id="prediction-total-label">Reportes esperados</span><strong id="prediction-total">—</strong><small id="prediction-total-detail">Camiones en movimiento</small></article>
-          <article><span>Día con más actividad</span><strong id="prediction-peak">—</strong><small id="prediction-peak-detail">—</small></article>
-          <article><span>Error en días de prueba</span><strong id="prediction-error">—</strong><small id="prediction-error-detail">Reportes por zona y día</small></article>
-          <article><span>Aprendió con datos hasta</span><strong id="prediction-base">—</strong><small id="prediction-base-detail">—</small></article>
-        </div>
-        <div class="prediction-control">
-          <div class="prediction-toolbar">
-            <div class="prediction-modes" role="group" aria-label="Qué días ver">
-              <button type="button" data-prediction-mode="day" aria-pressed="true">Un día</button>
-              <button type="button" data-prediction-mode="range" aria-pressed="false">Rango de días</button>
-              <button type="button" data-prediction-mode="all" aria-pressed="false">Todos</button>
-            </div>
-            <button type="button" id="prediction-play" class="prediction-play" aria-pressed="false">▶ Recorrer días</button>
-          </div>
-          <div class="prediction-wheel-wrap">
-            <button type="button" id="prediction-prev" class="wheel-arrow" aria-label="Día anterior">‹</button>
-            <div id="prediction-wheel" class="prediction-wheel" tabindex="0" role="listbox" aria-label="Ruleta de días: gira con la rueda del mouse, arrastra o usa las flechas"></div>
-            <button type="button" id="prediction-next" class="wheel-arrow" aria-label="Día siguiente">›</button>
-          </div>
-          <div id="prediction-range" class="prediction-range" hidden>
-            <div class="range-track"><i id="prediction-range-fill"></i></div>
-            <input type="range" id="prediction-range-from" min="0" max="14" step="1" value="0" aria-label="Desde">
-            <input type="range" id="prediction-range-to" min="0" max="14" step="1" value="6" aria-label="Hasta">
-          </div>
-          <p id="prediction-selection" class="prediction-selection" aria-live="polite"></p>
-          <div class="confidence-legend"><span><i class="confidence-dot alta"></i>Confianza alta</span><span><i class="confidence-dot media"></i>Media</span><span><i class="confidence-dot baja"></i>Baja</span><small>Según el error real al predecir esa misma cantidad de días hacia adelante.</small></div>
-        </div>
-        <div id="prediction-map" class="prediction-map" role="application" aria-label="Mapa de calor de la actividad esperada"></div>
-        <div class="prediction-legend" id="prediction-legend-heat"><span>Menos actividad</span><i aria-hidden="true"></i><span>Más actividad</span><small>Es una predicción: no son posiciones reales de los camiones.</small></div>
-        <div class="prediction-legend routes" id="prediction-legend-routes" hidden><span class="level high">Más camiones esperados</span><span class="level medium">Medio</span><span class="level low">Menos camiones</span><small>Es una predicción: cada ruta se dibuja con su viaje real representativo; pasa el mouse para ver su nombre y cuántos camiones.</small></div>
-        <div class="prediction-charts">
-          <article class="dashboard-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">PRÓXIMOS DÍAS</span><h3>Actividad esperada por día</h3></div><span class="chart-unit" id="prediction-chart-unit">Reportes</span></div>
-            <p>Toca un día para verlo en el mapa. Los fines de semana suelen tener menos movimiento.</p>
-            <div id="prediction-daily-chart" class="prediction-columns" role="group" aria-label="Actividad esperada por día"></div>
-          </article>
-          <article class="dashboard-card">
-            <div class="dashboard-card-heading"><div><span class="eyebrow">EVALUACIÓN</span><h3>¿Qué método predice mejor?</h3></div><span class="chart-unit">Error · menor es mejor</span></div>
-            <p>Error promedio en días de prueba que ningún método vio. Se publica el de menor error.</p>
-            <div id="prediction-methods-chart" class="dashboard-bars prediction-methods" aria-label="Error de cada método"></div>
-          </article>
-        </div>
-        <details class="heatmap-method"><summary>¿Cómo se calcula la predicción?</summary><p id="prediction-method">Esperando la primera predicción…</p></details>
+        <details class="heatmap-method"><summary>¿Cuándo hay una alerta?</summary><p id="heatmap-method">Esperando el modelo…</p></details>
       </section>
     </div>
     <footer><span>ARTISA <span class="slash">/</span> Del origen al frontend</span><span>ETL · MariaDB · Machine Learning · Endpoints · Frontend</span></footer>

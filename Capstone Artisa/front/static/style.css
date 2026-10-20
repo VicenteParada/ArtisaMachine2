@@ -383,19 +383,6 @@
 .explorer-frame-wrap iframe{display:block;width:100%;height:680px;border:0}
 @media(max-width:690px){.explorer-frame-wrap iframe{height:580px}}
 
-/* Las dos fuentes comparten un único espacio visible; no se alteran sus mapas. */
-.map-view-selector{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 12px}
-.map-view-selector button{padding:8px 12px;border:1px solid #c8d4cd;border-radius:7px;background:#fff;color:#356254;font-size:10px;font-weight:700;cursor:pointer}
-.map-view-selector button[aria-pressed="true"]{border-color:#216447;background:#216447;color:#fff}
-.map-view-selector button:disabled{opacity:.48;cursor:default}
-.map-view-selector button:focus-visible{outline:3px solid #f97316;outline-offset:2px}
-.map-view-selector>span{flex-basis:100%;color:var(--muted);font-size:10px;line-height:1.4}
-.map-view-stage{min-width:0}
-.map-view-stage .explorer-frame-wrap{width:100%}
-.map-view-stage .explorer-frame-wrap iframe{height:650px}
-.map-view-stage .heatmap-map[hidden],#classified-map-legend[hidden]{display:none!important}
-.map-card.showing-history .map-title-actions,.map-card.showing-history #heatmap-zones{display:none!important}
-@media(max-width:690px){.map-view-stage .explorer-frame-wrap iframe{height:600px}}
 .telemetry-connection{margin:0 0 14px;padding:12px 14px;border-radius:7px;font-size:11px;line-height:1.6;border:1px solid #ebcfbc;background:#fff4ec;color:#7a3f22}.telemetry-connection.info{border-color:#bed2f1;background:#eef4ff;color:#23538f}.telemetry-table td small.age-recent{color:var(--green);font-weight:600}.telemetry-table td small.age-old{color:#a6532d}
 .history-month-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.history-month-actions input{padding:7px 9px;border:1px solid var(--line);border-radius:5px;font-size:11px}.history-month-actions .button{padding:8px 11px}.history-download-status{min-height:16px;margin:8px 0 0;color:var(--muted);font-size:9px;text-align:right}.history-download-status.is-error{color:#a6532d}.history-day-link{background:none;border:0;padding:0;color:var(--green);font-weight:600;cursor:pointer}
 @media(max-width:690px){.history-month-actions{justify-content:flex-start}.history-download-status{text-align:left}}
@@ -405,94 +392,10 @@
 /* Mapa de rutas: más alto para que la ficha del camión no quede tapada */
 #heatmap-map.leaflet-container{height:700px;min-height:700px}
 @media(max-width:690px){#heatmap-map.leaflet-container{height:520px;min-height:520px}}
-/* Explorador histórico a todo el ancho, sin listas de rutas y vehículos */
-.heatmap-layout.is-historical{grid-template-columns:minmax(0,1fr)}
-.heatmap-layout.is-historical .route-insights{display:none}
 .heatmap-method[hidden]{display:none}
 /* Capas del mapa clasificado */
 .route-filter-panel[hidden],.map-layer-panel[hidden]{display:none}
 
-/* Predicción de actividad (debajo del Mapa de rutas) */
-.prediction-panel{margin-top:0}
-.prediction-map{height:560px;border:1px solid var(--line);border-radius:8px;background:#e7eee8;z-index:0}
-.prediction-legend{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:11px;color:var(--muted);font-size:9px}
-.prediction-legend i{width:120px;height:8px;border-radius:4px;background:linear-gradient(90deg,#3b4cc0,#2ec4b6,#9be15d,#f9c74f,#e63946)}
-.prediction-legend small{margin-left:auto}
-@media(max-width:690px){.prediction-map{height:420px}.prediction-legend small{margin-left:0;width:100%}}
-.prediction-charts{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:14px;margin-top:16px}
-.prediction-charts .dashboard-card>p{margin:6px 0 16px;color:var(--muted);font-size:10px;line-height:1.6}
-.prediction-columns{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:end;gap:8px;height:190px;padding-top:6px}
-.prediction-column{display:grid;grid-template-rows:auto 1fr auto;align-items:end;gap:5px;height:100%;padding:0;border:0;background:none;color:var(--ink);font-size:9px;text-align:center}
-.prediction-column strong{font-size:9px;font-weight:600;color:var(--muted)}
-.prediction-column i{display:block;width:100%;min-height:3px;border-radius:5px 5px 2px 2px;background:#246c55;transition:height .35s ease,background .2s}
-.prediction-column.weekend i{background:#9fc3b0}
-.prediction-column span{white-space:nowrap}
-.prediction-column.is-today span{font-weight:700}
-.prediction-column:hover i{background:#174b35}
-.prediction-methods .dashboard-bar-row.winner>div:first-child span{font-weight:700;color:var(--green)}
-@media(max-width:940px){.prediction-charts{grid-template-columns:minmax(0,1fr)}}
-
-/* Ruleta de días de la predicción */
-.prediction-control{margin:18px 0 12px;padding:14px 14px 12px;border:1px solid var(--line);border-radius:10px;background:linear-gradient(180deg,#f7faf6,#fff)}
-.prediction-toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
-.prediction-modes{display:inline-flex;padding:3px;border-radius:8px;background:#e9efea}
-.prediction-modes button{padding:7px 12px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:10px;font-weight:700}
-.prediction-modes button[aria-pressed="true"]{background:#fff;color:var(--green);box-shadow:0 1px 4px rgba(20,45,40,.14)}
-.prediction-play{padding:8px 14px;border:1px solid var(--green);border-radius:20px;background:var(--green);color:#fff;font-size:10px;font-weight:700;letter-spacing:.3px}
-.prediction-play[aria-pressed="true"]{background:#fff;color:var(--green)}
-.prediction-wheel-wrap{position:relative;display:grid;grid-template-columns:34px minmax(0,1fr) 34px;align-items:center;gap:4px;margin-top:12px}
-.prediction-wheel-wrap:before{content:"";position:absolute;left:50%;top:-4px;bottom:-4px;width:96px;transform:translateX(-50%);border:2px solid var(--green);border-radius:14px;background:rgba(213,238,156,.22);pointer-events:none}
-.wheel-arrow{height:34px;border:1px solid var(--line);border-radius:50%;background:#fff;color:var(--green);font-size:20px;line-height:1}
-.wheel-arrow:hover{border-color:var(--green)}
-.prediction-wheel{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;padding:10px calc(50% - 44px);outline:none;cursor:grab}
-.prediction-wheel::-webkit-scrollbar{display:none}
-.prediction-wheel:focus-visible{box-shadow:0 0 0 3px rgba(249,115,22,.45);border-radius:12px}
-.wheel-day{position:relative;display:grid;justify-items:center;gap:1px;flex:0 0 88px;padding:9px 4px 10px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);scroll-snap-align:center;transition:transform .18s ease,opacity .18s ease,box-shadow .2s;transform-origin:center}
-.wheel-day small{color:var(--muted);font-size:9px;text-transform:capitalize}
-.wheel-day strong{font-size:26px;font-weight:650;line-height:1.05;letter-spacing:-1px}
-.wheel-day span{margin-top:3px;font-size:9px;font-weight:700;color:var(--green)}
-.wheel-day .confidence-dot{position:absolute;top:8px;right:8px}
-.wheel-day.is-today small:first-child{color:#c2410c;font-weight:800}
-.wheel-day.is-center{box-shadow:0 8px 22px rgba(23,63,53,.18)}
-.wheel-day.is-selected{border-color:var(--green);background:#edf5ee}
-.confidence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#b8c6bf}
-.confidence-dot.alta{background:#16a34a}.confidence-dot.media{background:#f59e0b}.confidence-dot.baja{background:#dc2626}
-.confidence-badge{display:inline-flex;padding:2px 8px;border-radius:20px;font-size:9px;font-weight:700;background:#edf0ee;color:#5f6f6c}
-.confidence-badge.alta{background:#dcfce7;color:#166534}.confidence-badge.media{background:#fef3c7;color:#92400e}.confidence-badge.baja{background:#fee2e2;color:#991b1b}
-.prediction-selection{min-height:18px;margin:12px 2px 6px;color:var(--muted);font-size:11px;text-align:center}
-.prediction-selection strong{color:var(--ink)}
-.confidence-legend{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 14px;color:var(--muted);font-size:9px}
-.confidence-legend span{display:inline-flex;align-items:center;gap:5px}
-.confidence-legend small{width:100%;text-align:center;font-size:8px}
-.prediction-range{position:relative;height:30px;margin:14px 46px 0}
-.prediction-range[hidden]{display:none}
-.range-track{position:absolute;left:0;right:0;top:13px;height:5px;border-radius:4px;background:#dfe7e2}
-.range-track i{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--green)}
-.prediction-range input{position:absolute;left:0;top:4px;width:100%;margin:0;background:none;pointer-events:none;-webkit-appearance:none;appearance:none}
-.prediction-range input::-webkit-slider-thumb{pointer-events:auto;-webkit-appearance:none;width:20px;height:20px;border:3px solid #fff;border-radius:50%;background:var(--green);box-shadow:0 1px 5px rgba(0,0,0,.3);cursor:pointer}
-.prediction-range input::-moz-range-thumb{pointer-events:auto;width:16px;height:16px;border:3px solid #fff;border-radius:50%;background:var(--green);box-shadow:0 1px 5px rgba(0,0,0,.3);cursor:pointer}
-.prediction-range input::-webkit-slider-runnable-track{background:none}
-.prediction-range input::-moz-range-track{background:none}
-.prediction-column.is-selected i{background:#f97316}
-.prediction-column.is-selected strong{color:#c2410c}
-.prediction-column.confidence-media i{opacity:.75}.prediction-column.confidence-baja i{opacity:.5}
-.prediction-columns{gap:5px}
-@media(max-width:690px){.wheel-day{flex-basis:74px}.prediction-wheel{padding:10px calc(50% - 37px)}.prediction-wheel-wrap:before{width:82px}.prediction-range{margin:14px 6px 0}}
-.prediction-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0 4px}
-.prediction-tab{display:flex;align-items:center;gap:12px;padding:12px 16px;border:1px solid var(--line);border-radius:10px;background:#f2f5f2;color:var(--muted);text-align:left}
-.prediction-tab>span:first-child{display:grid;place-items:center;width:34px;height:34px;flex:0 0 34px;border-radius:8px;background:#dce6df;color:var(--green);font-size:18px}
-.prediction-tab>span:last-child{display:grid;gap:3px}
-.prediction-tab strong{font-size:12px;color:var(--ink)}.prediction-tab small{font-size:9px}
-.prediction-tab:hover{border-color:#9db2a5;background:#fff}
-.prediction-tab.is-active{border-color:var(--green);background:#fff;box-shadow:inset 0 -3px 0 var(--green)}
-.prediction-tab.is-active>span:first-child{background:var(--lime);color:#254e40}
-.prediction-legend .level{display:inline-flex;align-items:center;gap:5px}
-.prediction-legend .level::before{content:"";width:18px;height:4px;border-radius:2px;background:currentColor}
-.prediction-legend .level.high::before{background:#14532d}
-.prediction-legend .level.medium::before{background:#f97316}
-.prediction-legend .level.low::before{background:#dc2626}
-.prediction-legend[hidden]{display:none}
-@media(max-width:690px){.prediction-tab small{display:none}}
 
 /* Camiones: tablero de la flota y ficha del día */
 .trucks-panel{--en-ruta:#1f8a5b;--detenido:#d98a1c;--sin-senal:#9aa8a6}
@@ -760,7 +663,6 @@
 
 
 
-.atlas .heatmap-layout.is-historical{grid-template-columns:minmax(0,1fr)}
 .atlas .map-view-stage .explorer-frame-wrap iframe{height:min(78vh,760px)}
 .atlas #heatmap-map .leaflet-control-layers{margin-top:10px}
 @media(max-width:1100px){.atlas .atlas-stage{grid-template-columns:minmax(0,1fr)}.atlas .atlas-side .monitor-panel{height:auto;max-height:640px}}
@@ -1040,7 +942,6 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .vg-bin{display:inline-flex;align-items:center;gap:5px}
 .vg-bin i{width:24px;border-radius:4px}
 .vg-bin small{font-size:9px;color:var(--muted)}
-.vg-bin.is-rare small{color:#b0281b;font-weight:700}
 .atlas-foot.vg-legend #map-last-update{margin-left:auto}
 .vg-alert-filter{display:flex;gap:4px;flex-wrap:wrap;margin:8px 0 0}
 .vg-alert-filter button{border:1px solid var(--line);border-radius:999px;background:#fff;padding:4px 9px;font-size:9px;font-weight:600;color:var(--ink)}
@@ -1074,8 +975,6 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .heatmap-map.is-far .truck-marker.is-alert{transform:scale(.6)}
 @media(max-width:690px){.atlas .map-layer-actions{flex-direction:row;flex-wrap:wrap;align-items:center}}
 /* Categorías A–D, ficha compacta de la selección y etiquetas del mapa */
-.vg-cat{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:5px;color:#fff;font-size:10px;font-weight:800}
-.vg-cat-A{background:#1f6b50}.vg-cat-B{background:#5e9f58}.vg-cat-C{background:#e3a33a}.vg-cat-D{background:#d7301f}
 .vg-bin{gap:6px}
 .vg-state.ok{background:#1f6b50}
 .map-selection-detail.vg-card{gap:8px;border-left-color:#d7301f;background:#fff;border:1px solid var(--line);border-left:4px solid #d7301f}
@@ -1098,8 +997,7 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .vg-hit{cursor:pointer}
 
 /* Dashboard: centro de control y planificación */
-.fd-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}
-.fd-live-summary,.fd-overview-activity,.fd-plan-days{margin-bottom:14px}
+.fd-live-summary,.fd-overview-activity{margin-bottom:14px}
 .fd-live-link{margin:0;padding:4px 0;white-space:nowrap}
 .fd-live-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:16px 0}
 .fd-live-kpis>div{position:relative;overflow:hidden;padding:13px 14px;border:1px solid #e2e9e5;border-radius:9px;background:#f7faf7}
@@ -1127,9 +1025,6 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .fd-activity-insights span{color:var(--muted)}.fd-activity-insights strong{font-size:13px}.fd-activity-insights small{grid-column:1/-1;color:var(--muted)}
 .fd-daily-kpis{grid-template-columns:repeat(6,minmax(0,1fr))}
 .fd-history-metrics{flex-wrap:wrap;margin:4px 0 2px}.fd-history-chart{margin-bottom:10px}
-.fd-plan-pair{align-items:stretch}.fd-plan-pair>.dashboard-card{margin-bottom:0}
-#dp-route-ranking .dashboard-bar-row{cursor:pointer;border-radius:7px;padding:5px}#dp-route-ranking .dashboard-bar-row:hover,#dp-route-ranking .dashboard-bar-row:focus-visible{background:#f2f7f3;outline:none}
-.fd-plan-chart{grid-auto-columns:minmax(48px,1fr)}
 
 /* Dashboard operativo: rendimiento por camión, detenciones y hallazgos */
 .fd-operations-pair{grid-template-columns:minmax(0,1.08fr) minmax(390px,.92fr);align-items:stretch}
@@ -1184,3 +1079,35 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .fd-level-how{display:block;margin-top:10px;font-size:9px;line-height:1.5;color:var(--muted)}
 th.fd-col-level,td.fd-col-level{width:44px;text-align:center;padding-left:4px;padding-right:4px}
 td.fd-col-level{color:#b8c3c0}
+
+/* Predicción: rutas aprendidas por nivel (N1 troncal … N5 mínima, N6 fuera de ruta) */
+.lr-badge{display:inline-grid;place-items:center;flex:0 0 auto;width:18px;height:18px;border-radius:5px;color:#fff;font-size:10px;font-weight:800;font-style:normal}
+.lr-n1{background:#14532d}.lr-n2{background:#3f9d4a}.lr-n3{background:#d9a021}.lr-n4{background:#ef7d22}.lr-n5{background:#d7301f}.lr-n6{background:#7b3fa0}
+.vg-bin i.is-off{height:0!important;border-top:3px dashed #7b3fa0;background:none!important}
+.vg-inspect-route{font-weight:600;color:var(--ink)}
+.vg-where{display:flex;align-items:center;gap:6px;margin:2px 0;font-size:10px;font-weight:600;color:var(--ink);line-height:1.35}
+.vehicle-live-state .lr-badge{width:15px;height:15px;font-size:9px;margin-right:4px;vertical-align:-3px}
+.lr-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;margin-top:16px}
+.lr-model{list-style:none;margin:10px 0 0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 22px}
+.lr-model li{display:grid;gap:2px;padding:0 0 10px 12px;border-left:3px solid #d8e5dc;border-bottom:1px solid #eef2ef}
+.lr-model strong{font-size:11px}
+.lr-model .lr-algo{font-size:10px;font-weight:700;color:var(--green)}
+.lr-model p{margin:2px 0 0;font-size:10px;line-height:1.55;color:var(--muted)}
+@media(max-width:940px){.lr-model{grid-template-columns:minmax(0,1fr)}}
+.lr-table-wrap{overflow-x:auto;margin-top:10px}
+.lr-table{width:100%;border-collapse:collapse;font-size:11px}
+.lr-table th{position:static;font-size:9px;text-transform:uppercase;letter-spacing:.6px;padding:8px 10px;background:#f6f9f6}
+.lr-table td{padding:10px;font-size:11px}
+.lr-table th:first-child,.lr-table td:first-child{padding-left:10px}
+.lr-level{display:flex;align-items:center;gap:8px;font-weight:650}
+.lr-num{text-align:right;font-variant-numeric:tabular-nums}
+.lr-table th:nth-child(n+3):nth-child(-n+5){text-align:right}
+.lr-alert{font-weight:700;color:var(--muted)}
+.lr-table tr.is-alert td{background:#fdf5f3}
+.lr-table tr.is-alert .lr-alert{color:#b0281b}
+.lr-table-foot{display:block;margin-top:10px;color:var(--muted);font-size:9px;line-height:1.5}
+.history-panel .explorer-frame-wrap{margin-top:14px}
+.history-panel .explorer-frame-wrap iframe{height:760px}
+.history-live-link{text-decoration:none;white-space:nowrap}
+@media(max-width:690px){.history-panel .explorer-frame-wrap iframe{height:620px}}
+@media(max-width:690px){.atlas .atlas-head{flex-direction:column;align-items:flex-start;gap:8px}}

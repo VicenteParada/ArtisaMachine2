@@ -77,7 +77,7 @@ y, al volver a la red, recupera lo que faltaba sin duplicar nada.
 |---|---|---|
 | Telemetría | cada 30 s | Trae los reportes nuevos de la API. Si se corta la red, reintenta y recupera lo pendiente. |
 | Resumen de hoy | cada 10 min | Actualiza el día en curso en **Reportes**. |
-| Cierre diario | 00:30 (`DIARIO_HORA`) | Cierra el día anterior (00:00 a 00:00 hora de Chile), recalcula días con reportes atrasados, reclasifica las rutas y actualiza la predicción de 15 días. |
+| Cierre diario | 00:30 (`DIARIO_HORA`) | Cierra el día anterior (00:00 a 00:00 hora de Chile), recalcula días con reportes atrasados y reentrena el modelo de rutas cuando hay una semana de datos nuevos. |
 | Respaldo | 03:00 (`RESPALDO_HORA`) | Guarda la base en `respaldos/` y conserva los últimos 3 días (`RESPALDO_DIAS`). |
 
 Si el equipo se reinicia, Docker vuelve a levantar todo.
@@ -90,8 +90,7 @@ Las horas se cambian en `.env` y se aplican con `python3 scripts/artisa.py inici
 | Levantar o actualizar (después de `git pull`) | `python3 scripts/artisa.py iniciar` |
 | Ver estado y conexión con la API | `python3 scripts/artisa.py estado` |
 | Cerrar días ahora | `python3 scripts/artisa.py cierre` |
-| Reclasificar rutas ahora | `python3 scripts/artisa.py rutas` |
-| Recalcular la predicción ahora | `python3 scripts/artisa.py prediccion` |
+| Reentrenar el modelo de rutas ahora | `python3 scripts/artisa.py rutas` |
 | Respaldar ahora | `python3 scripts/artisa.py respaldo` |
 | Ver registros en vivo | `python3 scripts/artisa.py logs [servicio]` |
 | Cambiar la contraseña de la web | `python3 scripts/artisa.py contrasena` |

@@ -1,27 +1,25 @@
-"""Respuesta de /api/vigilancia: cómo se movió la flota en los últimos 7 días y alertas.
+"""Respuestas de /api/rutas-aprendidas y /api/vigilancia: las rutas que aprendió el modelo
+y los camiones en vivo sobre ellas, con alertas.
 
-Sin rutas predefinidas: el mapa se divide en celdas de ~500 m y para cada una se cuenta
-cuántos camiones distintos pasaron por ella en los últimos 7 días (hasta este minuto). El
-porcentaje de la flota que pasó por una zona dice qué tan habitual es.
+Rutas aprendidas (machine_learning/modelo_rutas.py, versión activa): el modelo agrupa los viajes
+reales en rutas y las clasifica por cuántos camiones distintos las usaron, de N1 (troncal)
+a N5 (mínima: 1 o 2 camiones). Se reaprende con cada semana de datos nuevos.
 
-- Huella: entre dos reportes seguidos de un camión (5 min o menos y bajo 150 km/h) se
-  marcan también las celdas intermedias, así una carretera queda continua aunque cada
-  camión reporte en puntos distintos. Los saltos de GPS (más de 150 km/h) se descartan.
-- Categorías de las rutas según el % de la flota que pasó (celda y vecinas, ~1,5 km):
-  A (VIGILANCIA_CAT_A % o más, la más transitada), B (VIGILANCIA_CAT_B %), C
-  (VIGILANCIA_UMBRAL_PCT %) y D (menos de eso, poco transitada).
-- Alerta: un camión en movimiento, fuera de las faenas, que anda fuera de las rutas A–C (en
-  zonas D o sin uso) durante al menos VIGILANCIA_REPORTES reportes, VIGILANCIA_MIN_MINUTOS
-  minutos y alejándose VIGILANCIA_MIN_KM km o más de una ruta A–C. Las condiciones de tiempo
-  y distancia evitan alertas por desvíos cortos (entrar a un cliente cerca de la carretera).
-  La alerta termina cuando vuelve a una ruta A–C o entra a una faena. Es un comportamiento
-  inusual para revisar, no una falta comprobada.
+En vivo: cada posición toma el nivel de la ruta aprendida que pasa por su celda de ~500 m o
+una vecina (~1 km). Si ninguna pasa cerca, el camión está "fuera de ruta" (nivel 6).
 
-Solo camiones del catálogo. Se calcula con los reportes del histórico (raw_gps) y de la API
-de la empresa (telemetria_api); no escribe nada en la base.
+Alerta: un camión en movimiento, fuera de las faenas, que anda por una ruta mínima (N5) o
+fuera de ruta (N6) durante al menos VIGILANCIA_REPORTES reportes y VIGILANCIA_MIN_MINUTOS
+minutos, alejándose VIGILANCIA_MIN_KM km o más de una ruta N1–N4. Las condiciones de tiempo
+y distancia evitan alertas por desvíos cortos (entrar a un cliente cerca de la carretera).
+La alerta termina cuando vuelve a una ruta N1–N4 o entra a una faena. Es un comportamiento
+inusual para revisar, no una falta comprobada.
+
+Solo camiones del catálogo. Los reportes salen del histórico (raw_gps) y de la API de la
+empresa (telemetria_api); no escribe nada en la base.
 """
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 import json
 import math
@@ -31,30 +29,21 @@ import pymysql
 
 from endpoints import rutas_api
 
-VENTANA_DIAS = 7
+VENTANA_DIAS = 7             # alertas de la semana
 ESCALA = 200                 # celda de 0,005° (~500 m): celda = floor(lat * 200)
-PASO = 0.5 / ESCALA          # muestreo de los tramos: media celda
-MAX_TRAMO_MIN = 5            # tramos de la huella: reportes seguidos a 5 min o menos
+PASO = 0.5 / ESCALA          # muestreo de las líneas de las rutas: media celda
 VEL_MAX_KMH = 150            # más rápido es un salto de GPS
 VEL_MOVIMIENTO = 5           # km/h
-UMBRAL_PCT = float(os.environ.get("VIGILANCIA_UMBRAL_PCT", "5"))
 REPORTES = int(os.environ.get("VIGILANCIA_REPORTES", "3"))
 MIN_MINUTOS = float(os.environ.get("VIGILANCIA_MIN_MINUTOS", "10"))
 MIN_KM = float(os.environ.get("VIGILANCIA_MIN_KM", "2"))
-# (letra, % mínimo de la flota): de la más transitada a la menos.
-CATEGORIAS = (("A", float(os.environ.get("VIGILANCIA_CAT_A", "30"))),
-              ("B", float(os.environ.get("VIGILANCIA_CAT_B", "15"))),
-              ("C", UMBRAL_PCT), ("D", 0.0))
+HABITUAL = 4                 # N1–N4: rutas por donde anda la operación
+FUERA = 6                    # nivel de un camión que no está en ninguna ruta aprendida
 ACTIVA_MIN = 30              # una alerta sin reportes nuevos en 30 min queda "sin señal"
 CORTE_HORAS = 6              # más de 6 h sin reportes separa dos episodios
 RADIO_BUSQUEDA = 12          # celdas de 0,1° alrededor para la distancia (~130 km)
 MAX_ALERTAS = 200
-MAX_NODOS = 120_000          # más puntos que esto se dibujan con celdas el doble de grandes
 MAX_ESTELA = 160
-
-
-def categoria(pct):
-    return next(letra for letra, desde in CATEGORIAS if pct >= desde)
 
 
 def _gps_valido(lat, lon):
@@ -79,6 +68,10 @@ def _centro(i):
 
 def _iso(value):
     return value.isoformat() + "Z" if isinstance(value, datetime) else value
+
+
+def _numero(nivel):
+    return int(str(nivel)[1:]) if str(nivel).startswith("N") else FUERA
 
 
 # --- Lectura ---------------------------------------------------------------------------------
@@ -167,84 +160,56 @@ def en_faena(faenas, lat, lon):
     return None
 
 
-# --- Huella de 7 días -----------------------------------------------------------------------
+# --- Rutas aprendidas -------------------------------------------------------------------------
 
 def muestras_tramo(la0, lo0, la1, lo1):
     pasos = max(1, math.ceil(max(abs(la1 - la0), abs(lo1 - lo0)) / PASO))
     return [(la0 + (la1 - la0) * k / pasos, lo0 + (lo1 - lo0) * k / pasos) for k in range(pasos + 1)]
 
 
-class Red:
-    """Lo que se dibuja: por cada celda recorrida, la posición promedio de los puntos que
-    cayeron en ella (queda sobre el camino, no en el centro del cuadro), y qué celdas se
-    recorrieron una a continuación de la otra (las líneas)."""
-
-    def __init__(self):
-        self.sumas = defaultdict(lambda: [0.0, 0.0, 0])
-        self.aristas = set()
-
-    def recorrer(self, muestras):
-        anterior = None
-        for lat, lon in muestras:
-            c = celda(lat, lon)
-            suma = self.sumas[c]
-            suma[0] += lat
-            suma[1] += lon
-            suma[2] += 1
-            if anterior is not None and c != anterior:
-                self.aristas.add((anterior, c) if anterior < c else (c, anterior))
-            anterior = c
+def _lineas(geometria):
+    coordenadas = geometria["coordinates"]
+    if geometria["type"] == "LineString":
+        coordenadas = [coordenadas]
+    return [[[round(lat, 5), round(lon, 5)] for lon, lat in linea] for linea in coordenadas if len(linea) >= 2]
 
 
-def huella(por_camion):
-    """({celda: camiones distintos que pasaron por ella}, {camión: sus celdas}, Red)."""
-    conteo, propias, red = defaultdict(int), {}, Red()
-    for asset_id, puntos in por_camion.items():
-        vistas = {celda(p[1], p[2]) for p in puntos}
-        for (t0, la0, lo0, _), (t1, la1, lo1, _) in zip(puntos, puntos[1:]):
-            if (t1 - t0).total_seconds() <= MAX_TRAMO_MIN * 60:
-                muestras = muestras_tramo(la0, lo0, la1, lo1)
-                vistas.update(celda(la, lo) for la, lo in muestras)
-                red.recorrer(muestras)
-        for c in vistas:
-            conteo[c] += 1
-        propias[asset_id] = vistas
-    return conteo, propias, red
+class MapaRutas:
+    """Dónde pasa cada ruta aprendida: por celda, el mejor nivel (el número más bajo) y su ruta."""
 
-
-class Zonas:
-    """Qué tan habitual es cada lugar: % de la flota en la celda y sus vecinas. Al revisar un
-    camión se le pasan sus propias celdas para compararlo solo con el resto de la flota."""
-
-    def __init__(self, conteo, camiones):
-        self.conteo = conteo
-        self.camiones = max(1, camiones)
-        self.minimo = UMBRAL_PCT / 100 * self.camiones
-        # Celdas habituales agrupadas en cuadros de 0,1° para medir distancias rápido.
+    def __init__(self, rutas):
+        self.celdas = {}
+        for ruta in rutas:
+            numero = _numero(ruta["nivel"])
+            for linea in ruta["lineas"]:
+                for (la0, lo0), (la1, lo1) in zip(linea, linea[1:]):
+                    for lat, lon in muestras_tramo(la0, lo0, la1, lo1):
+                        c = celda(lat, lon)
+                        if c not in self.celdas or numero < self.celdas[c][0]:
+                            self.celdas[c] = (numero, ruta["id"])
+        # Celdas de rutas N1–N4 agrupadas en cuadros de 0,1° para medir distancias rápido.
         self.indice = defaultdict(list)
-        for (i, j), n in conteo.items():
-            if n >= self.minimo:
+        for (i, j), (numero, _) in self.celdas.items():
+            if numero <= HABITUAL:
                 lat, lon = _centro(i), _centro(j)
-                self.indice[(math.floor(lat * 10), math.floor(lon * 10))].append((lat, lon, (i, j)))
+                self.indice[(math.floor(lat * 10), math.floor(lon * 10))].append((lat, lon))
 
-    def pct(self, lat, lon, propias=frozenset()):
+    def en(self, lat, lon):
+        """(nivel 1..6, route_id) de la mejor ruta en la celda o sus vecinas (~1 km)."""
         i, j = celda(lat, lon)
-        vecinas = [(i + di, j + dj) for di in (-1, 0, 1) for dj in (-1, 0, 1)]
-        n = max(self.conteo.get(c, 0) - (c in propias) for c in vecinas)
-        otros = self.camiones - 1 if propias else self.camiones
-        return n / max(1, otros) * 100
+        mejor = (FUERA, None)
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                encontrado = self.celdas.get((i + di, j + dj))
+                if encontrado and encontrado[0] < mejor[0]:
+                    mejor = encontrado
+        return mejor
 
-    def habitual(self, lat, lon, propias=frozenset()):
-        return self.pct(lat, lon, propias) >= UMBRAL_PCT
+    def habitual(self, lat, lon):
+        return self.en(lat, lon)[0] <= HABITUAL
 
-    def distancia(self, lat, lon, propias=frozenset()):
-        """Km a la zona habitual (para el resto de la flota) más cercana; None si no hay
-        ninguna a ~130 km."""
-        return (self.cercana(lat, lon, propias) or (None, None))[0]
-
-    def cercana(self, lat, lon, propias=frozenset()):
-        """(km, [lat, lon]) de la zona habitual más cercana; None si no hay a ~130 km."""
-        otros = max(1, self.camiones - 1 if propias else self.camiones)
+    def cercana(self, lat, lon):
+        """(km, [lat, lon]) de la ruta N1–N4 más cercana; None si no hay a ~130 km."""
         bi, bj = math.floor(lat * 10), math.floor(lon * 10)
         mejor, punto = None, None
         for radio in range(RADIO_BUSQUEDA + 1):
@@ -254,13 +219,70 @@ class Zonas:
                 for dj in range(-radio, radio + 1):
                     if max(abs(di), abs(dj)) != radio:
                         continue
-                    for la, lo, c in self.indice.get((bi + di, bj + dj), ()):
-                        if c in propias and (self.conteo[c] - 1) / otros * 100 < UMBRAL_PCT:
-                            continue  # solo la usó este camión
+                    for la, lo in self.indice.get((bi + di, bj + dj), ()):
                         d = distancia_km(lat, lon, la, lo)
                         if mejor is None or d < mejor:
                             mejor, punto = d, [round(la, 5), round(lo, 5)]
         return None if mejor is None else (mejor, punto)
+
+    def distancia(self, lat, lon):
+        return (self.cercana(lat, lon) or (None, None))[0]
+
+
+_CACHE = {"version": None, "modelo": None, "mapa": None}
+
+
+def leer_modelo(cursor):
+    """Versión activa del modelo de rutas, sus rutas y el índice por celdas (se guarda en
+    memoria mientras la versión no cambie). None si todavía no hay ninguna."""
+    version = rutas_api.active_version(cursor)
+    if not version:
+        return None, None
+    if _CACHE["version"] == (version["id"], version["creado_en"]):
+        return _CACHE["modelo"], _CACHE["mapa"]
+    cursor.execute(
+        """SELECT route_id, label, usage_level, usage_count, unique_vehicle_count, km_mediana, geometria,
+                  primer_viaje, ultimo_viaje FROM rutas_clasificadas WHERE version_id=%s
+           ORDER BY unique_vehicle_count DESC, usage_count DESC, route_id""",
+        (version["id"],),
+    )
+    rutas = [{"id": f["route_id"], "label": f["label"], "nivel": f["usage_level"],
+              "camiones": int(f["unique_vehicle_count"]), "recorridos": int(f["usage_count"]),
+              "km": f["km_mediana"], "ultimo_viaje": _iso(f["ultimo_viaje"]),
+              "lineas": _lineas(json.loads(f["geometria"]))} for f in cursor.fetchall()]
+    metricas = version["metricas"]
+    cortes = (metricas.get("umbrales") or {}).get("cortes") or []
+    por_nivel = Counter(r["nivel"] for r in rutas)
+    niveles = []
+    for nivel, (nombre, color) in rutas_api.NIVELES.items():
+        corte = next((c for c in cortes if c["nivel"] == nivel), None)
+        if nivel != "N6" and corte is None:
+            continue  # pocos datos: el modelo aprendió menos grupos
+        niveles.append({"nivel": nivel, "nombre": nombre, "color": color,
+                        "desde": corte and corte["desde"], "hasta": corte and corte["hasta"],
+                        "rutas": por_nivel.get(nivel, 0),
+                        "recorridos": sum(r["recorridos"] for r in rutas if r["nivel"] == nivel),
+                        "alerta": _numero(nivel) > HABITUAL})
+    parametros = metricas.get("parametros") or {}
+    cada = int(os.environ.get("RUTAS_CADA_DIAS", "7"))
+    modelo = {
+        "version": version["id"], "creado_en": _iso(version["creado_en"]),
+        "datos_desde": version["desde"].isoformat(), "datos_hasta": version["hasta"].isoformat(),
+        "proxima_con_datos_hasta": (version["hasta"] + timedelta(days=cada)).isoformat(),
+        "cada_dias": cada,
+        "viajes": metricas.get("viajes_clasificados", 0), "camiones": metricas.get("camiones", 0),
+        "lugares": metricas.get("lugares", 0), "total_rutas": len(rutas),
+        "parametros": parametros, "niveles": niveles,
+    }
+    mapa = MapaRutas(rutas)
+    _CACHE.update(version=(version["id"], version["creado_en"]), modelo=dict(modelo, rutas=rutas), mapa=mapa)
+    return _CACHE["modelo"], mapa
+
+
+def rutas_aprendidas(cursor):
+    """Las rutas del modelo con su nivel y línea (cambia una vez por semana). None: pendiente."""
+    modelo, _ = leer_modelo(cursor)
+    return None if modelo is None else dict(modelo, status="ok")
 
 
 # --- Alertas ----------------------------------------------------------------------------------
@@ -274,8 +296,8 @@ def _en_movimiento(punto, anterior):
     return horas > 0 and distancia_km(anterior[1], anterior[2], punto[1], punto[2]) / horas >= VEL_MOVIMIENTO
 
 
-def episodios(puntos, zonas, faenas, propias=frozenset()):
-    """Tramos del camión fuera de las zonas habituales: [(puntos, cerrado, movimientos)]."""
+def episodios(puntos, mapa, faenas):
+    """Tramos del camión fuera de las rutas N1–N4: [(puntos, cerrado, movimientos)]."""
     resultado, actual, movimientos = [], None, 0
     anterior = None
     for punto in puntos:
@@ -283,7 +305,7 @@ def episodios(puntos, zonas, faenas, propias=frozenset()):
             resultado.append((actual, True, movimientos))
             actual, movimientos = None, 0
         _, lat, lon, _ = punto
-        if en_faena(faenas, lat, lon) or zonas.habitual(lat, lon, propias):
+        if en_faena(faenas, lat, lon) or mapa.habitual(lat, lon):
             if actual:
                 resultado.append((actual, True, movimientos))
             actual, movimientos = None, 0
@@ -326,10 +348,10 @@ def _estela(puntos):
     return [[round(p[1], 5), round(p[2], 5)] for p in elegidos]
 
 
-def alertas(cursor, por_camion, propias, zonas, faenas, ahora):
+def alertas(cursor, por_camion, mapa, etiquetas, faenas, ahora):
     lista = []
     for asset_id, puntos in por_camion.items():
-        for episodio, cerrado, movimientos in episodios(puntos, zonas, faenas, propias[asset_id]):
+        for episodio, cerrado, movimientos in episodios(puntos, mapa, faenas):
             inicio, fin = episodio[0][0], episodio[-1][0]
             if cerrado:
                 estado = "terminada"
@@ -339,14 +361,18 @@ def alertas(cursor, por_camion, propias, zonas, faenas, ahora):
             if minutos < MIN_MINUTOS:
                 continue  # desvío corto: no alcanza a ser alerta
             muestra = episodio[::max(1, len(episodio) // 40)] + [episodio[-1]]
-            distancias = [zonas.distancia(p[1], p[2], propias[asset_id]) for p in muestra]
+            distancias = [mapa.distancia(p[1], p[2]) for p in muestra]
             lejos = None if any(d is None for d in distancias) else max(distancias)
             if lejos is not None and lejos < MIN_KM:
-                continue  # anduvo a menos de MIN_KM de una ruta A–C: no es un desvío real
+                continue  # anduvo a menos de MIN_KM de una ruta N1–N4: no es un desvío real
             recorrido = sum(distancia_km(a[1], a[2], b[1], b[2]) for a, b in zip(episodio, episodio[1:]))
             ultimo = episodio[-1]
-            # Desde la última posición hasta el corredor habitual más cercano (para dibujarlo).
-            cercana = zonas.cercana(ultimo[1], ultimo[2], propias[asset_id])
+            donde = [mapa.en(p[1], p[2]) for p in episodio]
+            minimas = Counter(ruta for numero, ruta in donde if numero == 5)
+            nivel = FUERA if any(numero == FUERA for numero, _ in donde) else 5
+            ruta = minimas.most_common(1)[0][0] if minimas else None
+            # Desde la última posición hasta la ruta N1–N4 más cercana (para dibujarlo).
+            cercana = mapa.cercana(ultimo[1], ultimo[2])
             lista.append({
                 "patente": asset_id, "estado": estado,
                 "inicio": _iso(inicio), "fin": _iso(fin),
@@ -354,8 +380,7 @@ def alertas(cursor, por_camion, propias, zonas, faenas, ahora):
                 "reportes": len(episodio), "reportes_en_movimiento": movimientos,
                 "km_recorridos": round(recorrido, 1),
                 "km_al_corredor": None if lejos is None else round(lejos, 1),
-                "pct_zona": round(min(zonas.pct(p[1], p[2], propias[asset_id]) for p in episodio), 1),
-                "categoria_zona": "D" if any(zonas.pct(p[1], p[2], propias[asset_id]) > 0 for p in episodio) else "sin uso",
+                "nivel": f"N{nivel}", "ruta": ruta, "ruta_label": etiquetas.get(ruta),
                 "posicion": [round(ultimo[1], 5), round(ultimo[2], 5)],
                 "velocidad": ultimo[3], "estela": _estela(episodio),
                 "corredor": None if cercana is None else {"km": round(cercana[0], 1), "punto": cercana[1]},
@@ -371,70 +396,45 @@ def alertas(cursor, por_camion, propias, zonas, faenas, ahora):
 
 # --- Respuesta ------------------------------------------------------------------------------
 
-def red_mapa(conteo, red):
-    """(escala, nodos [[lat, lon, camiones]], aristas [a, b, a, b, …]) para dibujar las rutas.
-
-    Los camiones de cada nodo son los de su celda y sus vecinas (~1,5 km), igual que la regla
-    de las alertas, para que una misma carretera no cambie de color por cómo cayeron los
-    reportes en sus bordes. Si hay demasiados nodos se agrupan en celdas el doble de grandes
-    (solo el dibujo; las alertas usan siempre las celdas finas)."""
-    escala, sumas, aristas = ESCALA, red.sumas, red.aristas
-    vecinos = {c: max(conteo.get((c[0] + di, c[1] + dj), 0) for di in (-1, 0, 1) for dj in (-1, 0, 1))
-               for c in sumas}
-    while len(sumas) > MAX_NODOS and escala > 25:
-        escala //= 2
-        gruesas, juntos = defaultdict(lambda: [0.0, 0.0, 0]), defaultdict(int)
-        for (i, j), (la, lo, n) in sumas.items():
-            g = gruesas[(i // 2, j // 2)]
-            g[0] += la
-            g[1] += lo
-            g[2] += n
-            juntos[(i // 2, j // 2)] = max(juntos[(i // 2, j // 2)], vecinos[(i, j)])
-        aristas = {(min(a, b), max(a, b)) for a, b in (((x[0] // 2, x[1] // 2), (y[0] // 2, y[1] // 2)) for x, y in aristas)
-                   if a != b}
-        sumas, vecinos = gruesas, juntos
-    indice, nodos = {}, []
-    for c, (la, lo, n) in sumas.items():
-        indice[c] = len(nodos)
-        nodos.append([round(la / n, 5), round(lo / n, 5), vecinos[c]])
-    planas = []
-    for a, b in aristas:
-        planas += (indice[a], indice[b])
-    return escala, nodos, planas
-
-
 def vigilancia(cursor, ahora=None):
-    """None si no hay reportes de camiones en los últimos 7 días (la API responde "pendiente")."""
+    """Camiones en vivo sobre las rutas aprendidas y alertas de la semana. None mientras el
+    modelo no haya aprendido ninguna ruta (la API responde "pendiente")."""
     ahora = ahora or datetime.now(timezone.utc).replace(tzinfo=None)
+    modelo, mapa = leer_modelo(cursor)
+    if modelo is None:
+        return None
     desde = ahora - timedelta(days=VENTANA_DIAS)
     catalogo = _catalogo(cursor)
     por_camion = leer_reportes(cursor, desde, ahora, catalogo)
-    if not por_camion:
-        return None
-    conteo, propias, red = huella(por_camion)
-    zonas = Zonas(conteo, len(por_camion))
-    faenas = leer_faenas(cursor)
-    lista = alertas(cursor, por_camion, propias, zonas, faenas, ahora)
+    etiquetas = {r["id"]: r["label"] for r in modelo["rutas"]}
+    lista = alertas(cursor, por_camion, mapa, etiquetas, leer_faenas(cursor), ahora)
     en_alerta = {a["patente"] for a in lista if a["estado"] == "activa"}
     vehiculos = rutas_api.latest_positions(cursor, {})
-    escala, nodos, aristas = red_mapa(conteo, red)
+    ahora_por_nivel = Counter()
     for vehiculo in vehiculos:
         vehiculo["en_alerta"] = vehiculo["vehicle_id"] in en_alerta
+        vehiculo["nivel"] = vehiculo["ruta"] = vehiculo["ruta_label"] = None
+        lat, lon = vehiculo.get("latitude"), vehiculo.get("longitude")
+        momento = vehiculo.get("timestamp")
+        reciente = momento and (ahora - datetime.fromisoformat(str(momento).rstrip("Z"))).total_seconds() <= ACTIVA_MIN * 60
+        if reciente and _gps_valido(lat, lon):
+            numero, ruta = mapa.en(float(lat), float(lon))
+            vehiculo.update(nivel=f"N{numero}", ruta=ruta, ruta_label=etiquetas.get(ruta))
+            ahora_por_nivel[f"N{numero}"] += 1
     return {
         "status": "ok", "generado_en": _iso(ahora), "desde": _iso(desde), "hasta": _iso(ahora),
-        "escala": escala, "camiones": len(por_camion), "catalogo": len(catalogo),
+        "modelo": {k: v for k, v in modelo.items() if k != "rutas"},
+        "camiones": len(por_camion), "catalogo": len(catalogo),
         "reportes": sum(len(p) for p in por_camion.values()),
-        "umbral_pct": UMBRAL_PCT, "reportes_alerta": REPORTES, "refresh_seconds": rutas_api.REFRESH_SECONDS,
+        "reportes_alerta": REPORTES, "refresh_seconds": rutas_api.REFRESH_SECONDS,
         "min_minutos": MIN_MINUTOS, "min_km": MIN_KM,
-        "categorias": [{"letra": letra, "desde": desde} for letra, desde in CATEGORIAS],
-        # Rutas: cada arista une dos nodos (índices en "nodos": [lat, lon, camiones de la zona]).
-        "nodos": nodos, "aristas": aristas,
         "alertas": lista,
         "resumen": {
             "activas": sum(a["estado"] == "activa" for a in lista),
             "sin_senal": sum(a["estado"] == "sin_senal" for a in lista),
             "terminadas": sum(a["estado"] == "terminada" for a in lista),
             "camiones_con_alertas": len({a["patente"] for a in lista}),
+            "camiones_por_nivel": dict(ahora_por_nivel),
         },
         "vehiculos": vehiculos,
     }

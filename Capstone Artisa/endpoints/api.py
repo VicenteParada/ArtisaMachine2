@@ -14,7 +14,7 @@ import pymysql
 from common import dias
 from common.db import connect_db
 from common.http import JsonHandler, serve
-from endpoints import camiones_api, dashboard_api, prediccion_api, rutas_api, vigilancia_api
+from endpoints import camiones_api, dashboard_api, rutas_api, vigilancia_api
 
 
 STARTED_AT = time.monotonic()
@@ -37,26 +37,19 @@ PENDING_RESPONSES = {
             "data_retention": "Sin resultados Machine disponibles.",
         },
     },
-    "/api/vigilancia": {"status": "pending", "celdas": [], "alertas": [], "vehiculos": [],
-                        "message": "Sin reportes de camiones en los últimos 7 días."},
+    "/api/vigilancia": {"status": "pending", "alertas": [], "vehiculos": [],
+                        "message": "El modelo todavía no aprende las rutas: se calcula con los días cerrados "
+                                   "del cierre diario y se actualiza solo."},
+    "/api/rutas-aprendidas": {"status": "pending", "rutas": [], "niveles": [],
+                              "message": "El modelo todavía no aprende las rutas: se calcula con los días "
+                                         "cerrados del cierre diario y se actualiza solo."},
     "/api/dashboard": {"status": "pending", "meses": [], "flota": [], "camiones": [],
                        "totales": None},
-    "/api/prediccion": {
-        "status": "pending", "dias": [],
-        "message": "La predicción se está calculando (o faltan días cerrados: necesita al menos 21). "
-                   "Se actualiza sola en unos minutos.",
-    },
     "/api/camiones": {"status": "pending", "camiones": [], "resumen": None},
-    "/api/prediccion-rutas": {
-        "status": "pending", "dias": [],
-        "message": "La predicción por ruta se está calculando (o faltan días cerrados: necesita al menos 21). "
-                   "Se actualiza sola en unos minutos.",
-    },
 }
 BUILDERS = {"/api/mapa": rutas_api.classified_map, "/api/dashboard": dashboard_api.fleet_dashboard,
-            "/api/prediccion": prediccion_api.prediction,
-            "/api/prediccion-rutas": lambda cursor: prediccion_api.prediction(cursor, "rutas"),
-            "/api/camiones": camiones_api.fleet, "/api/vigilancia": vigilancia_api.vigilancia}
+            "/api/camiones": camiones_api.fleet, "/api/vigilancia": vigilancia_api.vigilancia,
+            "/api/rutas-aprendidas": vigilancia_api.rutas_aprendidas}
 
 
 # Telemetría actual (servicio telemetria). Mientras la API de la empresa no esté

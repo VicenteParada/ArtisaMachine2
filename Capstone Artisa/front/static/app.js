@@ -77,9 +77,7 @@ function logout(message = "") {
   clearSessionWork();
   if (typeof historyState !== "undefined") Object.assign(historyState,
     {month: null, detail: null, data: null, fullRows: null});
-  activeMapMode = "live";
   for (const wrapper of document.querySelectorAll(".explorer-frame-wrap")) {
-    wrapper.hidden = true;
     const frame = wrapper.querySelector("iframe");
     if (frame) frame.removeAttribute("src");
   }
@@ -168,10 +166,6 @@ $("toggle-password").addEventListener("click", () => {
 
 $("logout").addEventListener("click", () => logout());
 
-function openExplorer() {
-  if (token()) setMapMode(activeMapMode);
-}
-
 async function api(path, options = {}) {
   const currentToken = token();
   if (!currentToken) throw new Error(EXPIRED_MESSAGE);
@@ -227,7 +221,7 @@ function syncDatasetView() {
   }
   $("overview-link").classList.toggle("active", overview);
   document.querySelector(".topbar strong").textContent = overview ? "Arquitectura"
-    : {trucks: "Camiones en vivo", heatmap: "Mapa de rutas", prediction: "Predicción", dashboard: "Dashboard"}[view];
+    : {trucks: "Camiones en vivo", heatmap: "Datos históricos", prediction: "Predicción", dashboard: "Dashboard"}[view];
   for (const link of document.querySelectorAll(".sidebar [data-dataset-link]")) {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
   }
@@ -237,41 +231,35 @@ function syncDatasetView() {
     window.setTimeout(openExplorer, 50);
   }
   if (view === "prediction") {
-    window.setTimeout(() => { loadPrediction(); if (predictionState.map) predictionState.map.invalidateSize(); }, 50);
+    if (!vg.data) loadVigilance(false);
+    if (fleetMap) window.setTimeout(() => { fleetMap.invalidateSize(); vgFit(false); }, 0);
   }
   if (view === "dashboard") {
-    window.setTimeout(() => {
-      loadFleet();
-      if (dashState.tab === "plan") loadDashPlan();
-    }, 50);
-  }
-  if (view === "heatmap" && activeMapMode === "live" && fleetMap) {
-    window.setTimeout(() => { fleetMap.invalidateSize(); vgFit(false); }, 0);
+    window.setTimeout(loadFleet, 50);
   }
 }
 
-// --- Mapa de rutas: últimos 7 días en vivo y alertas (/api/vigilancia) -------------------------
-// Sin rutas predefinidas: los caminos de la semana se clasifican A–D según el % de la flota que
-// pasó por ellos (hasta este minuto). Las alertas marcan camiones que anduvieron fuera de las
-// rutas A–C. Si dejan de llegar datos, la ventana sigue
-// terminando en la hora actual y las alertas abiertas pasan a "sin señal".
-// Colores de la clasificación de rutas: los usan Predicción y la ficha de cada camión.
-const ROUTE_COLORS = Object.freeze({HIGH: "#14532d", MEDIUM: "#f97316", LOW: "#dc2626"});
-// Categorías de las rutas (los % vienen del servidor): A la más transitada, D la menos. Las más
-// transitadas se dibujan más gruesas, así de un vistazo se ve por dónde anda la flota.
-const VG_CATS = {
-  A: {color: "#1f6b50", weight: 7, label: "Ruta troncal: la usa gran parte de la flota"},
-  B: {color: "#5e9f58", weight: 5, label: "Ruta frecuente"},
-  C: {color: "#e3a33a", weight: 3.5, label: "Ruta ocasional"},
-  D: {color: "#d7301f", weight: 2, label: "Poco transitada: andar por aquí puede generar una alerta"}
+// --- Predicción: rutas aprendidas por el modelo, camiones en vivo y alertas ---------------------
+// El modelo (machine_learning/modelo_rutas.py) aprende las rutas de los viajes reales y las clasifica
+// por cuántos camiones distintos las usan: N1 troncal … N5 mínima (1 o 2 camiones). Se reaprende
+// con cada semana de datos nuevos. Las líneas llegan de /api/rutas-aprendidas (solo cambian con
+// una versión nueva); camiones y alertas de /api/vigilancia cada minuto. Un camión que no está en
+// ninguna ruta aprendida queda "fuera de ruta" (N6). Hay alerta en N5 y N6.
+const ROUTE_LEVELS = {
+  N1: {color: "#14532d", weight: 7, short: "Troncal", label: "Troncal: la usa gran parte de la flota"},
+  N2: {color: "#3f9d4a", weight: 5.5, short: "Muy usada", label: "Muy usada"},
+  N3: {color: "#d9a021", weight: 4.5, short: "Uso medio", label: "Uso medio"},
+  N4: {color: "#ef7d22", weight: 3.5, short: "Poco usada", label: "Poco usada"},
+  N5: {color: "#d7301f", weight: 2.5, short: "Mínima", label: "Mínima: la usaron 1 o 2 camiones · genera alerta"},
+  N6: {color: "#7b3fa0", weight: 0, short: "Fuera de ruta", label: "Fuera de ruta: camino que el modelo no conoce · genera alerta"}
 };
+const levelNumber = (level) => Number(String(level || "N6").slice(1));
 const VG_STATES = {
   activa: {label: "Activa", className: "active"},
   sin_senal: {label: "Sin señal", className: "nosignal"},
   terminada: {label: "Terminada", className: "done"}
 };
 const VG_REFRESH_MS = 60000;
-let activeMapMode = "live";
 let fleetMap = null;
 let usageLayer = null;
 let usageRenderer = null;
@@ -281,7 +269,7 @@ let trailLayer = null;
 let truckLayer = null;
 let selectionLayer = null;
 const truckMarkers = new Map();
-var vg = {data: null, cells: new Map(), alerts: new Map(), vehicles: [],
+var vg = {data: null, model: null, modelLoading: false, alerts: new Map(), vehicles: [],
   tab: "alerts", alertFilter: "activa", zone: "all", layers: {usage: true, vehicles: true, trails: true},
   selected: null, fitted: false, loading: false, openPopup: null};
 
@@ -291,29 +279,24 @@ const vgLocalDay = (iso) => new Intl.DateTimeFormat("en-CA", {timeZone: HISTORY_
 const vgDuration = (minutes) => minutes < 60 ? `${format(minutes)} min`
   : `${format(Math.floor(minutes / 60))} h ${String(Math.round(minutes % 60)).padStart(2, "0")} min`;
 
-function setMapMode(mode) {
-  activeMapMode = mode === "historical" ? "historical" : "live";
-  const historical = activeMapMode === "historical";
-  const explorer = $("explorer-routes");
-  explorer.closest(".map-card").classList.toggle("showing-history", historical);
-  explorer.closest(".heatmap-layout").classList.toggle("is-historical", historical);
-  document.querySelector(".heatmap-method").hidden = historical;
-  document.querySelector(".atlas-side").hidden = historical;
-  for (const panel of document.querySelectorAll(".route-filter-panel, .map-layer-panel")) panel.hidden = historical;
-  explorer.hidden = !historical;
-  $("heatmap-map").hidden = historical;
-  $("classified-map-legend").hidden = historical;
-  $("atlas-stats").hidden = historical;
-  for (const button of document.querySelectorAll("[data-map-mode]")) {
-    button.setAttribute("aria-pressed", String(button.dataset.mapMode === activeMapMode));
-  }
-  if (historical) {
-    const frame = explorer.querySelector("iframe[data-explorer-frame]");
-    if (frame && !frame.hasAttribute("src") && token()) frame.src = frame.dataset.explorerFrame;
-    frame?.contentWindow?.postMessage("artisa:show-map", location.origin);
-  } else if (fleetMap) {
-    requestAnimationFrame(() => { fleetMap.invalidateSize(); vgFit(false); });
-  }
+function levelBadge(level) {
+  const badge = el("b", "lr-badge lr-" + String(level || "N6").toLowerCase(), String(levelNumber(level)));
+  badge.title = (ROUTE_LEVELS[level] || ROUTE_LEVELS.N6).label;
+  return badge;
+}
+
+function levelRange(level) {
+  const row = vg.model?.niveles.find((item) => item.nivel === level);
+  if (!row || row.desde === null || row.desde === undefined) return "";
+  return row.desde === row.hasta ? `${format(row.desde)} ${row.desde === 1 ? "camión" : "camiones"}`
+    : `${format(row.desde)}–${format(row.hasta)} camiones`;
+}
+
+function openExplorer() {
+  if (!token()) return;
+  const frame = $("explorer-routes").querySelector("iframe[data-explorer-frame]");
+  if (frame && !frame.hasAttribute("src")) frame.src = frame.dataset.explorerFrame;
+  frame?.contentWindow?.postMessage("artisa:show-map", location.origin);
 }
 
 function machinePending(data) {
@@ -396,76 +379,41 @@ function truckPopup(vehicle) {
   return wrapper;
 }
 
-// --- Rutas de la semana por categoría (A más transitada … D menos), en canvas ---
-function vgPct(count) {
-  return count / Math.max(1, vg.data.camiones) * 100;
-}
-
-function vgCategory(pct) {
-  return vg.data.categorias.find((cat) => pct >= cat.desde).letra;
-}
-
-function vgCategoryRange(letter) {
-  const cats = vg.data.categorias;
-  const k = cats.findIndex((cat) => cat.letra === letter);
-  return k === 0 ? `${format(cats[0].desde)} % o más de la flota`
-    : k === cats.length - 1 ? `menos del ${format(cats[k - 1].desde)} %`
-      : `${format(cats[k].desde)}–${format(cats[k - 1].desde)} %`;
-}
-
-// Cada arista une dos puntos por donde pasó la flota y toma la categoría del más transitado de
-// sus extremos, así una carretera no se corta por el ruido de los reportes. Se dibuja de D a A.
+// --- Rutas aprendidas en el mapa: cada ruta con el color y grosor de su nivel ---
 function vgDrawUsage() {
   usageLayer.clearLayers();
-  if (!vg.data) return;
-  const nodes = vg.data.nodos, edges = vg.data.aristas;
-  const groups = {A: [], B: [], C: [], D: []};
-  for (let k = 0; k < edges.length; k += 2) {
-    const a = nodes[edges[k]], b = nodes[edges[k + 1]];
-    groups[vgCategory(vgPct(Math.max(a[2], b[2])))].push([[a[0], a[1]], [b[0], b[1]]]);
-  }
-  const onlyD = vg.zone === "rare";
-  for (const letter of ["D", "C", "B", "A"]) {
-    if (!groups[letter].length) continue;
-    const cat = VG_CATS[letter];
-    const muted = onlyD && letter !== "D";
-    L.polyline(groups[letter], {renderer: usageRenderer, lineCap: "round", lineJoin: "round", interactive: false,
-      color: muted ? "#9aa8a5" : cat.color, weight: muted ? 2 : (onlyD ? 4 : cat.weight),
-      opacity: muted ? 0.45 : (letter === "D" ? 0.85 : 0.92)}).addTo(usageLayer);
-    // Franja invisible más ancha encima: tocar una ruta (aunque sea fina) dice qué % de la flota pasó.
-    L.polyline(groups[letter], {renderer: usageRenderer, weight: 14, opacity: 0, lineCap: "round", className: "vg-hit"})
-      .on("click", (event) => { L.DomEvent.stopPropagation(event); vgInspect(event.latlng); })
-      .addTo(usageLayer);
-  }
-}
-
-function vgIndexCells(data) {
-  vg.cells = new Map();
-  for (const [lat, lon, count] of data.nodos) {
-    vg.cells.set(Math.floor(lat * data.escala) + "|" + Math.floor(lon * data.escala), count);
+  if (!vg.model) return;
+  const groups = {};
+  for (const route of vg.model.rutas) (groups[route.nivel] ||= []).push(route);
+  const onlyMinimal = vg.zone === "rare";
+  // De la menos usada a la troncal: las troncales quedan encima.
+  for (const level of ["N5", "N4", "N3", "N2", "N1"]) {
+    const routes = groups[level];
+    if (!routes) continue;
+    const style = ROUTE_LEVELS[level];
+    const muted = onlyMinimal && level !== "N5";
+    const lines = routes.flatMap((route) => route.lineas);
+    L.polyline(lines, {renderer: usageRenderer, lineCap: "round", lineJoin: "round", interactive: false,
+      color: muted ? "#9aa8a5" : style.color, weight: muted ? 2 : (onlyMinimal ? 4.5 : style.weight),
+      opacity: muted ? 0.4 : 0.9}).addTo(usageLayer);
+    // Franja invisible más ancha encima de cada ruta: tocarla muestra su ficha.
+    for (const route of routes) {
+      L.polyline(route.lineas, {renderer: usageRenderer, weight: 14, opacity: 0, lineCap: "round", className: "vg-hit"})
+        .on("click", (event) => { L.DomEvent.stopPropagation(event); vgInspect(route, event.latlng); })
+        .addTo(usageLayer);
+    }
   }
 }
 
-// La celda y sus vecinas (~1,5 km), igual que el servidor.
-function vgPctAt(lat, lng) {
-  const scale = vg.data.escala;
-  const i = Math.floor(lat * scale), j = Math.floor(lng * scale);
-  let count = 0;
-  for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) count = Math.max(count, vg.cells.get((i + di) + "|" + (j + dj)) || 0);
-  return count;
-}
-
-function vgInspect(latlng) {
-  const count = vgPctAt(latlng.lat, latlng.lng);
-  const pct = vgPct(count);
-  const letter = vgCategory(pct);
+function vgInspect(route, latlng) {
+  const style = ROUTE_LEVELS[route.nivel];
   const box = el("div", "vg-inspect-box");
-  const badge = el("b", "vg-cat vg-cat-" + letter, letter);
-  const title = el("strong", "", `Ruta categoría ${letter}`);
   const head = el("span", "vg-inspect-head");
-  head.append(badge, title);
-  box.append(head, el("span", "", `${format(pct, pct < 10 ? 1 : 0)} % de la flota pasó por aquí en 7 días ` +
-    `(${format(count)} de ${format(vg.data.camiones)} camiones)`), el("small", "", VG_CATS[letter].label));
+  head.append(levelBadge(route.nivel), el("strong", "", `Nivel ${levelNumber(route.nivel)} · ${style.short}`));
+  box.append(head, el("span", "vg-inspect-route", route.label),
+    el("span", "", `${format(route.camiones)} ${route.camiones === 1 ? "camión distinto" : "camiones distintos"} · ` +
+      `${format(route.recorridos)} ${route.recorridos === 1 ? "recorrido" : "recorridos"} · ~${format(route.km, 1)} km`),
+    el("small", "", style.label));
   L.popup({className: "vg-inspect"}).setLatLng(latlng).setContent(box).openOn(fleetMap);
 }
 
@@ -534,6 +482,9 @@ async function loadVigilance(quiet = true) {
   try {
     const data = await api("/api/vigilancia", {timeoutMs: 90000});
     if (version !== sessionVersion) return;
+    // Las líneas de las rutas solo se piden cuando hay una versión nueva del modelo.
+    if (data.status === "ok" && vg.model?.version !== data.modelo.version) await loadLearnedRoutes();
+    if (version !== sessionVersion) return;
     renderVigilance(data);
   } catch (error) {
     if (version !== sessionVersion) return;
@@ -546,75 +497,157 @@ async function loadVigilance(quiet = true) {
   }
 }
 
+async function loadLearnedRoutes() {
+  const model = await api("/api/rutas-aprendidas", {timeoutMs: 90000});
+  vg.model = model.status === "ok" ? model : null;
+  vg.fitted = false;
+  if (fleetMap) vgDrawUsage();
+}
+
 function renderVigilance(data) {
   initializeFleetMap();
-  if (data.status !== "ok") {
+  if (data.status !== "ok" || !vg.model) {
     vg.data = null;
     vg.alerts = new Map();
     vg.vehicles = [];
-    $("heatmap-source-status").textContent = "Sin datos en 7 días";
+    const message = data.message || "El modelo todavía no aprende las rutas.";
+    $("heatmap-source-status").textContent = "Modelo pendiente";
     $("heatmap-source-status").className = "status neutral";
-    for (const id of ["vg-window", "vg-trucks", "vg-moving", "vg-last", "vg-alerts"]) $(id).textContent = "—";
-    $("map-last-update").textContent = data.message || "Sin reportes de camiones en los últimos 7 días.";
-    $("alert-list").replaceChildren(el("li", "monitor-empty", data.message || "Sin reportes de camiones en los últimos 7 días."));
+    for (const id of ["vg-model", "vg-routes", "vg-moving", "vg-last", "vg-alerts"]) $(id).textContent = "—";
+    $("map-last-update").textContent = message;
+    $("alert-list").replaceChildren(el("li", "monitor-empty", message));
     $("vehicle-live-list").replaceChildren();
+    $("lr-table").replaceChildren();
+    $("lr-table-foot").textContent = message;
+    $("lr-model").replaceChildren(el("li", "chart-empty", message));
     if (fleetMap) { usageLayer.clearLayers(); trailLayer.clearLayers(); truckLayer.clearLayers(); truckMarkers.clear(); vgApplyLayers(); }
     return;
   }
   vg.data = data;
-  vgIndexCells(data);
   vg.alerts = new Map(data.alertas.map((alert) => [alert.patente + "|" + alert.inicio, alert]));
   vg.vehicles = data.vehiculos;
-  vgRenderScale(data);
+  vgRenderScale();
   vgRenderStats(data);
+  vgRenderModel();
+  vgRenderTable(data);
   if (fleetMap) {
-    vgDrawUsage();
+    if (!usageLayer.getLayers().length) vgDrawUsage();
     vgRenderTrails();
     vgRenderTrucks();
   }
   vgRenderLists();
   vgRestoreSelection();
   vgApplyLayers();
-  const cats = data.categorias;
   $("heatmap-method").textContent =
-    `Las líneas son los caminos por donde anduvo la flota en los últimos 7 días, hasta este minuto (entre dos reportes seguidos ` +
-    `de 5 min o menos; los saltos de GPS se descartan). Cada tramo tiene una categoría según qué % de los ${format(data.camiones)} ` +
-    `camiones con reportes pasó por ahí (cuadros de ~500 m y sus vecinos): A ${vgCategoryRange("A")}, B ${vgCategoryRange("B")}, ` +
-    `C ${vgCategoryRange("C")} y D ${vgCategoryRange("D")}. Hay alerta cuando un camión en movimiento, fuera de las faenas, anda ` +
-    `fuera de las rutas A–C (en tramos D o donde no pasó nadie) durante ${format(data.min_minutos)} min o más y a ${format(data.min_km)} km ` +
-    `o más de una ruta A–C. Termina cuando vuelve a una ruta A–C o entra a una faena; si deja de reportar por 30 min queda "sin señal". ` +
-    "Es un comportamiento inusual para revisar, no una falta comprobada. Si no llegan datos nuevos, la ventana igual termina en la hora " +
-    `actual: lo antiguo va saliendo y lo último recibido se mantiene. (${cats.length} categorías)`;
+    `Cada camión que reportó en los últimos 30 minutos toma el nivel de la ruta aprendida que pasa a menos de ~1 km; ` +
+    `si no hay ninguna, está fuera de ruta (N6). Hay alerta cuando un camión en movimiento, fuera de las faenas, anda en ` +
+    `una ruta mínima (N5) o fuera de ruta durante ${format(data.min_minutos)} min o más (al menos ${format(data.reportes_alerta)} ` +
+    `reportes en movimiento) y a ${format(data.min_km)} km o más de una ruta habitual (N1–N4): así no salta por un desvío ` +
+    "corto ni por un salto del GPS. Termina cuando vuelve a una ruta N1–N4 o entra a una faena; si deja de reportar por " +
+    "30 min queda \"sin señal\". La lista \"En la semana\" guarda las de los últimos 7 días. Es un comportamiento inusual " +
+    "para revisar, no una falta comprobada.";
   if (!vg.fitted && $("heatmap-map").offsetParent !== null) requestAnimationFrame(() => vgFit(false));
 }
 
-function vgRenderScale(data) {
-  $("vg-scale").replaceChildren(...data.categorias.map(({letra}) => {
-    const cat = VG_CATS[letra];
+function vgRenderScale() {
+  $("vg-scale").replaceChildren(...vg.model.niveles.map(({nivel}) => {
+    const style = ROUTE_LEVELS[nivel];
     const item = el("span", "vg-bin");
     const swatch = el("i");
-    swatch.style.background = cat.color;
-    swatch.style.height = cat.weight + "px";
-    item.append(el("b", "vg-cat vg-cat-" + letra, letra), swatch, el("small", "", vgCategoryRange(letra)));
+    swatch.style.background = style.color;
+    swatch.style.height = Math.max(3, style.weight) + "px";
+    if (nivel === "N6") swatch.classList.add("is-off");
+    item.title = style.label;
+    item.append(levelBadge(nivel), swatch, el("small", "", nivel === "N6" ? "Fuera de ruta" : style.short));
     return item;
   }));
 }
 
+// Tabla de clasificación: los niveles que aprendió el modelo y cuántos camiones hay en cada uno ahora.
+function vgRenderTable(data) {
+  const now = data.resumen.camiones_por_nivel || {};
+  const head = el("thead");
+  const headRow = el("tr");
+  for (const label of ["Nivel", "Camiones distintos por ruta", "Rutas", "Recorridos", "Camiones ahora", "Alerta"]) {
+    headRow.append(el("th", "", label));
+  }
+  head.append(headRow);
+  const body = el("tbody");
+  for (const row of vg.model.niveles) {
+    const style = ROUTE_LEVELS[row.nivel];
+    const tr = el("tr", row.alerta ? "is-alert" : "");
+    const name = el("td", "lr-level");
+    name.append(levelBadge(row.nivel), el("span", "", style.short));
+    tr.append(name,
+      el("td", "", row.nivel === "N6" ? "Ninguna ruta aprendida a ~1 km" : levelRange(row.nivel)),
+      el("td", "lr-num", row.nivel === "N6" ? "—" : format(row.rutas)),
+      el("td", "lr-num", row.nivel === "N6" ? "—" : format(row.recorridos)),
+      el("td", "lr-num", format(now[row.nivel] || 0)),
+      el("td", "lr-alert", row.alerta ? "Sí" : "No"));
+    tr.title = style.label;
+    body.append(tr);
+  }
+  $("lr-table").replaceChildren(head, body);
+  const missing = 4 - vg.model.niveles.filter((row) => levelNumber(row.nivel) <= 4).length;
+  $("lr-table-foot").textContent = "Los rangos de N1 a N4 no se fijan a mano: los aprende el modelo con cortes naturales " +
+    "sobre los camiones de cada ruta, y cambian con cada versión. " + (missing > 0
+      ? `Con los datos actuales aprendió ${format(4 - missing)} ${4 - missing === 1 ? "grupo" : "grupos"} en vez de 4. ` : "") +
+    "\"Camiones ahora\" cuenta los que reportaron en los últimos 30 minutos.";
+}
+
+// Ficha del modelo: qué algoritmos usa, con qué datos aprendió y cuándo se reentrena.
+function vgRenderModel() {
+  const model = vg.model;
+  const params = model.parametros || {};
+  const step = (title, algorithm, text) => {
+    const item = el("li");
+    item.append(el("strong", "", title), el("span", "lr-algo", algorithm), el("p", "", text));
+    return item;
+  };
+  $("lr-model").replaceChildren(
+    step("Datos de entrenamiento", "Viajes reales del cierre diario",
+      `${format(model.viajes)} viajes de ${format(model.camiones)} camiones entre el ${formatDataDay(model.datos_desde)} ` +
+      `y el ${formatDataDay(model.datos_hasta)}. Un viaje va de una parada a la siguiente; no se inventan puntos.`),
+    step("1. Lugares de origen y destino", "DBSCAN (distancia haversine)",
+      `Las paradas dentro de una faena toman esa faena; las demás se agrupan si hay al menos ` +
+      `${format(params.lugar_min_viajes || 3)} paradas a menos de ${format(params.lugar_radio_m || 500)} m. ` +
+      `Resultado: ${format(model.lugares)} lugares.`),
+    step("2. Rutas", "Clustering jerárquico aglomerativo (enlace promedio)",
+      `Para cada par de lugares, cada viaje se resume en ${format(params.muestras || 32)} puntos a igual distancia y se ` +
+      `juntan los que siguen el mismo camino (a menos de ${format(params.ruta_distancia_m || 750)} m en promedio). ` +
+      `Un desvío real queda como otra ruta. Resultado: ${format(model.total_rutas)} rutas.`),
+    step("3. Línea de cada ruta", "Medoide",
+      "Se dibuja el viaje real más parecido a todos los de su ruta: es un camino recorrido, no un promedio."),
+    step("4. Nivel de uso", "Cortes naturales de Jenks (k-means exacto en 1D)",
+      `Con ${format(params.max_camiones_minima || 2)} camiones o menos la ruta es mínima (N5). El resto se reparte en ` +
+      "hasta 4 grupos que aprende el modelo sobre el logaritmo de los camiones de cada ruta (N1 a N4)."),
+    step("Reentrenamiento", `Versión ${format(model.version)} · ${vgTime(model.creado_en)}`,
+      `Se reaprende desde cero con cada ${format(model.cada_dias)} días de datos nuevos, con los últimos ` +
+      `${format((Date.parse(model.datos_hasta) - Date.parse(model.datos_desde)) / 86400000 + 1)} días: la ` +
+      `próxima versión usará datos hasta el ${formatDataDay(model.proxima_con_datos_hasta)}. Las rutas nuevas aparecen ` +
+      "y las que se dejan de usar bajan de nivel."),
+    step("Uso en vivo", "Clasificación de cada posición",
+      "Cada camión toma el nivel de la ruta aprendida que pasa a menos de ~1 km; si no hay ninguna está fuera de ruta (N6). " +
+      "En N5 y N6, con tiempo y distancia suficientes, se genera una alerta.")
+  );
+}
+
 function vgRenderStats(data) {
-  const desde = new Date(data.desde), hasta = new Date(data.hasta);
-  const short = (date) => new Intl.DateTimeFormat("es-CL", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-    timeZone: HISTORY_ZONE}).format(date);
-  $("vg-window").textContent = `${short(desde)} → ahora`;
-  $("vg-window-d").textContent = `Hasta ${short(hasta)} · se actualiza cada minuto`;
-  $("vg-trucks").textContent = `${format(data.camiones)} de ${format(data.catalogo)}`;
-  $("vg-trucks-d").textContent = `${format(data.reportes)} reportes en 7 días`;
+  const model = vg.model;
+  $("vg-model").textContent = "Versión " + format(model.version);
+  $("vg-model-d").textContent = `Aprendió con viajes del ${formatDataDay(model.datos_desde)} al ${formatDataDay(model.datos_hasta)} · ` +
+    `se reaprende con datos hasta el ${formatDataDay(model.proxima_con_datos_hasta)}`;
+  const alertRoutes = model.niveles.filter((row) => row.nivel === "N5").reduce((total, row) => total + row.rutas, 0);
+  $("vg-routes").textContent = format(model.total_rutas);
+  $("vg-routes-d").textContent = `${format(model.total_rutas - alertRoutes)} habituales (N1–N4) · ${format(alertRoutes)} mínimas (N5)`;
   vgRenderLive();
   const summary = data.resumen;
   $("vg-alerts").textContent = format(summary.activas);
   $("vg-alerts-card").classList.toggle("has-alerts", summary.activas > 0);
   $("vg-alerts-d").textContent = `${format(summary.sin_senal)} sin señal · ${format(summary.terminadas)} en la semana`;
   $("heatmap-source-status").textContent = summary.activas
-    ? `${format(summary.activas)} ${summary.activas === 1 ? "camión fuera de ruta" : "camiones fuera de ruta"}` : "En vivo · todos en rutas A–C";
+    ? `${format(summary.activas)} ${summary.activas === 1 ? "camión en ruta mínima o fuera de ruta" : "camiones en rutas mínimas o fuera de ruta"}`
+    : "En vivo · todos en rutas habituales";
   $("heatmap-source-status").className = "status " + (summary.activas ? "warning" : "info");
 }
 
@@ -630,8 +663,8 @@ function vgRenderLive() {
   const stale = last && Date.now() - new Date(last).getTime() > 15 * 60 * 1000;
   $("vg-last").closest(".atlas-stat").classList.toggle("is-stale", Boolean(stale));
   $("map-last-update").textContent = (stale
-    ? "No están llegando datos nuevos: se muestra lo último recibido y la ventana sigue avanzando con la hora actual"
-    : "Toca una ruta para ver qué % de la flota pasó") + " · actualizado " + new Intl.DateTimeFormat("es-CL", {
+    ? "No están llegando datos nuevos: se muestra la última posición recibida"
+    : "Toca una ruta para ver su nivel y cuántos camiones la usan") + " · actualizado " + new Intl.DateTimeFormat("es-CL", {
     hour: "2-digit", minute: "2-digit", timeZone: HISTORY_ZONE}).format(new Date());
 }
 
@@ -705,17 +738,17 @@ function vgRenderAlertList() {
     const who = el("span", "vg-alert-who");
     who.append(el("span", "plate-chip", alert.patente), el("strong", "", alert.nombre || "Sin nombre"));
     const facts = el("span", "vg-alert-facts", (alert.km_al_corredor === null ? "a más de 130 km" : `a ${format(alert.km_al_corredor, 1)} km`) +
-      " de una ruta A–C");
-    button.append(head, who, el("span", "vg-alert-driver", "Conductor: " + (alert.conductor || "no informado")), facts);
+      " de una ruta habitual (N1–N4)");
+    button.append(head, who, vgWhere(alert), el("span", "vg-alert-driver", "Conductor: " + (alert.conductor || "no informado")), facts);
     button.addEventListener("click", () => vgSelect({kind: "alert", id}));
     item.append(button);
     return item;
   }));
   if (!visible.length) {
     const empty = {
-      activa: "Ningún camión anda fuera de las rutas A–C en este momento.",
-      sin_senal: "Ningún camión dejó de reportar fuera de las rutas A–C.",
-      terminada: "Sin desvíos en los últimos 7 días."
+      activa: "Ningún camión anda por rutas mínimas ni fuera de ruta en este momento.",
+      sin_senal: "Ningún camión dejó de reportar en una ruta mínima o fuera de ruta.",
+      terminada: "Sin alertas en los últimos 7 días."
     }[vg.alertFilter];
     list.append(el("li", "monitor-empty", alerts.length && vgMatches("") ? empty : "No hay alertas para esta búsqueda."));
   }
@@ -741,8 +774,9 @@ function vgRenderVehicleList() {
     const driver = vehicleDriver(vehicle);
     identity.append(...truckIdentity(vehicle.vehicle_id, driver === "No informado" ? null : driver, null));
     copy.append(el("strong", "", vehicle.vehicle_name || vehicle.vehicle_id), identity);
-    const state = el("em", "vehicle-live-state", vehicle.en_alerta ? "Fuera de ruta"
+    const state = el("em", "vehicle-live-state", vehicle.en_alerta ? ROUTE_LEVELS[vehicle.nivel || "N6"].short
       : status.className === "moving" && Number(vehicle.speed_kmh) > 3 ? format(vehicle.speed_kmh, 0) + " km/h" : truckAgeText(vehicle));
+    if (vehicle.nivel) state.prepend(levelBadge(vehicle.nivel));
     button.append(icon, copy, state);
     button.addEventListener("click", () => vgSelect({kind: "vehicle", id: vehicle.vehicle_id}));
     item.append(button);
@@ -798,19 +832,34 @@ function vgCard(kind, state, title, extra) {
   detail.replaceChildren(head, title, ...extra);
 }
 
+// Dónde anda: en qué ruta mínima o si está fuera de toda ruta aprendida.
+function vgWhere(item) {
+  const where = el("span", "vg-where");
+  const level = item.nivel || "N6";
+  where.append(levelBadge(level), el("span", "", level === "N6" ? "Fuera de ruta: camino que el modelo no conoce"
+    : `${ROUTE_LEVELS[level].short}${item.ruta_label ? " · " + item.ruta_label : ""}`));
+  return where;
+}
+
 function vgShowAlert(alert, focus) {
   const state = VG_STATES[alert.estado];
+  // La ruta mínima por la que anduvo, resaltada debajo de su recorrido.
+  const minimal = alert.ruta && vg.model?.rutas.find((route) => route.id === alert.ruta);
+  if (minimal) {
+    L.polyline(minimal.lineas, {renderer: selectionRenderer, color: ROUTE_LEVELS.N5.color, weight: 9, opacity: 0.25,
+      lineCap: "round", interactive: false}).addTo(selectionLayer);
+  }
   // Recorrido fuera de ruta (con borde blanco), su inicio y la ruta habitual más cercana.
   L.polyline(alert.estela, {renderer: selectionRenderer, color: "#ffffff", weight: 8, opacity: 0.95, lineCap: "round", interactive: false}).addTo(selectionLayer);
   L.polyline(alert.estela, {renderer: selectionRenderer, color: "#d7301f", weight: 4, opacity: 1, lineCap: "round", interactive: false}).addTo(selectionLayer);
   L.circleMarker(alert.estela[0], {renderer: selectionRenderer, radius: 6, color: "#d7301f", weight: 3, fillColor: "#fff", fillOpacity: 1})
-    .bindTooltip("Salió de las rutas A–C · " + vgTime(alert.inicio), {direction: "top", className: "vg-tag"})
+    .bindTooltip("Salió de las rutas habituales · " + vgTime(alert.inicio), {direction: "top", className: "vg-tag"})
     .addTo(selectionLayer);
   if (alert.corredor) {
     L.polyline([alert.posicion, alert.corredor.punto], {renderer: selectionRenderer, color: "#173f35", weight: 2,
       dashArray: "3 6", opacity: 0.85, interactive: false}).addTo(selectionLayer);
     L.circleMarker(alert.corredor.punto, {renderer: selectionRenderer, radius: 6, color: "#fff", weight: 3, fillColor: "#1f6b50", fillOpacity: 1})
-      .bindTooltip(`Ruta A–C más cercana · ${format(alert.corredor.km, 1)} km`, {permanent: true, direction: "auto", className: "vg-tag"})
+      .bindTooltip(`Ruta habitual más cercana · ${format(alert.corredor.km, 1)} km`, {permanent: true, direction: "auto", className: "vg-tag"})
       .addTo(selectionLayer);
   }
   if (!truckMarkers.has(alert.patente)) {
@@ -821,11 +870,12 @@ function vgShowAlert(alert, focus) {
   title.append(el("span", "plate-chip", alert.patente), el("strong", "", alert.nombre || "Sin nombre"));
   const facts = el("div", "vg-facts-grid");
   facts.append(
-    vgFact(alert.km_al_corredor === null ? "+130 km" : format(alert.km_al_corredor, 1) + " km", "de una ruta A–C"),
-    vgFact(vgDuration(alert.minutos), alert.estado === "terminada" ? "fuera de ruta" : "fuera de ruta hasta ahora"),
-    vgFact(format(alert.km_recorridos, 1) + " km", "recorridos fuera"),
+    vgFact(alert.km_al_corredor === null ? "+130 km" : format(alert.km_al_corredor, 1) + " km", "de una ruta habitual"),
+    vgFact(vgDuration(alert.minutos), alert.estado === "terminada" ? "duró" : "hasta ahora"),
+    vgFact(format(alert.km_recorridos, 1) + " km", "recorridos así"),
     vgFact(alert.velocidad === null || alert.velocidad === undefined ? "—" : format(alert.velocidad, 0) + " km/h", "último dato " + vgTime(alert.fin).split(", ").pop()));
   const lines = [
+    vgWhere(alert),
     el("p", "vg-card-line", "Conductor: " + (alert.conductor || "no informado")),
     el("p", "vg-card-line", "Desde " + vgTime(alert.inicio) + (alert.estado === "terminada" ? " hasta " + vgTime(alert.fin) : "")),
     facts
@@ -853,7 +903,8 @@ function vgShowVehicle(vehicle, focus) {
   const link = el("a", "selection-link", "Ver su recorrido de hoy →");
   link.href = "#camiones/" + encodeURIComponent(vehicle.vehicle_id);
   vgCard("Camión", el("b", "vg-state " + (vehicle.en_alerta ? "active" : status.className === "moving" ? "ok" : "done"),
-    vehicle.en_alerta ? "Fuera de ruta" : status.label), title, [
+    vehicle.en_alerta ? "En alerta" : status.label), title, [
+    vehicle.nivel ? vgWhere(vehicle) : el("p", "vg-card-line", "Sin posición de los últimos 30 min: no se compara con las rutas"),
     el("p", "vg-card-line", "Conductor: " + vehicleDriver(vehicle)),
     el("p", "vg-card-line", "Último dato: " + formatLocal(vehicle.timestamp)),
     facts, link]);
@@ -887,7 +938,7 @@ function vgReset(fit = true) {
   if (fleetMap) fleetMap.closePopup();
   $("map-selection-detail").classList.remove("vg-card");
   setSelectionDetail("Selección", "Elige una alerta o un camión",
-    "El mapa muestra solo lo elegido. Toca una ruta para ver qué % de la flota pasó por ahí.");
+    "El mapa muestra solo lo elegido. Toca una ruta para ver su nivel y cuántos camiones la usan.");
   vgApplyLayers();
   vgMarkSelection();
   if (fit) vgFit(true);
@@ -898,18 +949,22 @@ function vgFit(force) {
   fleetMap.invalidateSize();
   const bounds = L.latLngBounds([]);
   for (const v of vg.vehicles) if (Number.isFinite(Number(v.latitude))) bounds.extend([v.latitude, v.longitude]);
-  for (const [lat, lon] of vg.data.nodos) bounds.extend([lat, lon]);
+  for (const route of vg.model?.rutas || []) {
+    if (levelNumber(route.nivel) > 4) continue;
+    for (const line of route.lineas) { bounds.extend(line[0]); bounds.extend(line[line.length - 1]); }
+  }
   if (bounds.isValid()) { fleetMap.fitBounds(bounds, {padding: [28, 28], maxZoom: 11}); vg.fitted = true; }
 }
 
-// Cada minuto llegan posiciones nuevas (/api/vehiculos/posiciones): se mueven los camiones sin
-// recalcular la semana; la semana y las alertas se recalculan con /api/vigilancia.
+// Cada minuto llegan posiciones nuevas (/api/vehiculos/posiciones): se mueven los camiones; el
+// nivel de cada uno y las alertas se recalculan con /api/vigilancia.
 function vgMergePositions(incoming) {
   const fresh = new Map(incoming.map((v) => [v.vehicle_id, v]));
   vg.vehicles = vg.vehicles.map((vehicle) => {
     const update = fresh.get(vehicle.vehicle_id);
     if (!update || Date.parse(update.timestamp) <= Date.parse(vehicle.timestamp)) return vehicle;
-    return {...vehicle, ...update, en_alerta: vehicle.en_alerta,
+    return {...vehicle, ...update, en_alerta: vehicle.en_alerta, nivel: vehicle.nivel, ruta: vehicle.ruta,
+      ruta_label: vehicle.ruta_label,
       driver_name: update.driver_name || vehicle.driver_name,
       driver_last_name: update.driver_name ? update.driver_last_name : vehicle.driver_last_name};
   });
@@ -976,7 +1031,6 @@ var dashState = {tab: "global", data: null, metric: "reportes", period: null, so
 var dashReportView = "daily";
 var dashOverviewState = {month: null, rows: null, metric: "km", rankMetric: "paradas",
   loading: false, error: null, loadedAt: 0};
-var dashPlanState = {heat: null, routes: null, loading: false, error: null, loadedAt: 0};
 
 const dashMonthLabel = (month, style = "short") => new Intl.DateTimeFormat("es-CL", style === "short"
   ? {month: "short", timeZone: "UTC"} : {month: "long", year: "numeric", timeZone: "UTC"})
@@ -1011,13 +1065,11 @@ function setDashTab(tab) {
   }
   $("dash-global").hidden = tab !== "global";
   $("dash-detail").hidden = tab !== "detalle";
-  $("dash-plan").hidden = tab !== "plan";
   if (tab === "detalle") setDashReportView(dashReportView);
   if (tab === "global") {
     loadFleet();
     if (dashState.data) loadDashboardOverview(dashState.data.mes_en_curso);
   }
-  if (tab === "plan") loadDashPlan();
   renderDashSnapshot();
 }
 
@@ -1041,10 +1093,7 @@ function setDashReportView(view) {
 
 function renderDashSnapshot() {
   const status = $("dashboard-snapshot");
-  if (dashState.tab === "plan") {
-    status.textContent = dashState.planLabel || (dashPlanState.loading ? "Calculando planificación…" : "Predicción pendiente");
-    status.className = "status " + (dashState.planLabel ? "info" : "neutral");
-  } else if (dashState.tab === "detalle") {
+  if (dashState.tab === "detalle") {
     const data = dashState.data;
     status.textContent = data ? `Desde ${dashDayLabel(data.desde)} · ${format(data.meses.length)} meses` : "Pendiente";
     status.className = "status " + (data ? "info" : "neutral");
@@ -1184,18 +1233,18 @@ function renderDailyActivityChart(containerId, days, metric, options = {}) {
     const column = el(options.clickable === false ? "div" : "button", "fd-overview-day");
     if (column.tagName === "BUTTON") column.type = "button";
     const value = Number(day[metric] || 0);
-    const weekday = predictionDate(day.fecha).getUTCDay();
+    const weekday = dayDate(day.fecha).getUTCDay();
     column.classList.toggle("is-weekend", weekday === 0 || weekday === 6);
     column.classList.toggle("is-today", day.fecha === localToday());
     if (day.confidence) column.classList.add("confidence-" + day.confidence);
-    column.title = `${predictionDayLabel(day.fecha, "long")}: ${activityValue(value, metric)} ${definition.short}`;
+    column.title = `${dayLabel(day.fecha, "long")}: ${activityValue(value, metric)} ${definition.short}`;
     const amount = el("b", "", activityValue(value, metric, true));
     const track = el("span", "fd-overview-track");
     const fill = el("i");
     fill.style.height = (value ? Math.max(3, value / maximum * 100) : 0) + "%";
     track.append(fill);
     const label = el("span", "fd-overview-axis");
-    label.append(el("small", "", predictionDayLabel(day.fecha, "weekday")),
+    label.append(el("small", "", dayLabel(day.fecha, "weekday")),
       el("strong", "", String(Number(day.fecha.slice(8)))));
     column.append(amount, track, label);
     if (column.tagName === "BUTTON") {
@@ -1268,7 +1317,7 @@ function renderDashboardOverview() {
   $("dg-activity-insights").replaceChildren(
     insight("Total del período", activityValue(total, metric), definition.short),
     insight("Promedio diario", activityValue(average, metric), `${format(days.length)} días procesados`),
-    insight("Día de mayor actividad", peak ? predictionDayLabel(peak.fecha, "short") : "—",
+    insight("Día de mayor actividad", peak ? dayLabel(peak.fecha, "short") : "—",
       peak ? `${activityValue(peak[metric], metric)} ${definition.short}` : "Sin datos")
   );
   renderOperationalDashboard(state.rows, state.month);
@@ -1434,99 +1483,6 @@ function renderOperationalDashboard(rows, month) {
   renderOperationalRanking(trucks);
   renderOperationalScatter(trucks);
   renderOperationalFindings(trucks);
-}
-
-async function loadDashPlan(force = false) {
-  if (dashPlanState.loading) return;
-  if (!force && dashPlanState.heat && Date.now() - dashPlanState.loadedAt < PREDICTION_REFRESH_MS) {
-    renderDashPlan();
-    return;
-  }
-  dashPlanState.loading = true;
-  dashPlanState.error = null;
-  renderDashSnapshot();
-  const [heat, routes] = await Promise.allSettled([
-    api("/api/prediccion", {timeoutMs: 120000}),
-    api("/api/prediccion-rutas", {timeoutMs: 120000})
-  ]);
-  dashPlanState.heat = heat.status === "fulfilled" ? heat.value : null;
-  dashPlanState.routes = routes.status === "fulfilled" ? routes.value : null;
-  dashPlanState.error = [heat, routes].find((result) => result.status === "rejected")?.reason?.message || null;
-  dashPlanState.loadedAt = Date.now();
-  dashPlanState.loading = false;
-  renderDashPlan();
-}
-
-function renderDashPlan() {
-  const heat = dashPlanState.heat;
-  const routes = dashPlanState.routes;
-  if (!heat || heat.status !== "ok" || !heat.dias?.length) {
-    for (const id of ["dp-total", "dp-peak", "dp-routes", "dp-error"]) $(id).textContent = "—";
-    $("dp-days").replaceChildren(el("span", "chart-empty", (heat && heat.message) || dashPlanState.error ||
-      "La planificación aparecerá cuando exista una predicción vigente."));
-    dashState.planLabel = "Predicción pendiente";
-    renderDashSnapshot();
-    return;
-  }
-  const days = heat.dias;
-  const total = sum(days.map((day) => Number(day.total || 0)));
-  const peak = days.reduce((best, day) => Number(day.total || 0) > Number(best.total || 0) ? day : best, days[0]);
-  const metrics = heat.metricas || {};
-  const error = metrics.mae_publicado ?? (metrics.errores || {})[metrics.metodo] ?? metrics.mae_referencia;
-  $("dp-total").textContent = format(total);
-  $("dp-total-d").textContent = `${format(days.length)} días · reportes esperados de camiones en movimiento`;
-  $("dp-peak").textContent = predictionDayLabel(peak.fecha, "short");
-  $("dp-peak-d").textContent = `${format(peak.total || 0)} reportes esperados`;
-  $("dp-error").textContent = error === undefined ? "—" : format(error, 2);
-  $("dp-error-d").textContent = "Reportes por zona y día · menor es mejor";
-  const forecastDays = days.map((day) => ({...day, reportes: Number(day.total || 0),
-    confidence: predictionConfidence(heat, day.fecha).level}));
-  renderDailyActivityChart("dp-days", forecastDays, "reportes", {
-    onClick: (_, index) => {
-      predictionState.tipo = "calor";
-      predictionState.index = index;
-      predictionState.mode = "day";
-      window.location.hash = "#prediccion";
-    }
-  });
-  const confidence = {alta: 0, media: 0, baja: 0, na: 0};
-  for (const day of days) confidence[predictionConfidence(heat, day.fecha).level] += 1;
-  renderDonut("dp-confidence", [
-    {label: "Confianza alta", value: confidence.alta, color: "#287a57"},
-    {label: "Confianza media", value: confidence.media, color: "#e69528"},
-    {label: "Confianza baja", value: confidence.baja, color: "#d64545"},
-    {label: "Sin evaluar", value: confidence.na, color: "#91a09a"}
-  ], "días");
-  $("dp-method").textContent = PREDICTION_METHODS[metrics.metodo] || "Modelo vigente";
-  const base = $("dp-quality-note");
-  base.querySelector("strong").textContent = "Base del modelo";
-  base.querySelector("span").textContent = `Datos hasta el ${formatDataDay(heat.base_hasta)} · ` +
-    `${format(metrics.dias_historia || 0)} días de historia · ${format(metrics.camiones || 0)} camiones`;
-
-  const routeDays = routes && routes.status === "ok" ? routes.dias || [] : [];
-  const routeTotals = new Map();
-  for (const day of routeDays) {
-    for (const [id, value] of day.celdas || []) routeTotals.set(id, (routeTotals.get(id) || 0) + Number(value || 0));
-  }
-  const divisor = Math.max(1, routeDays.length);
-  const ranking = [...routeTotals].map(([id, value]) => ({id, value: value / divisor,
-    label: routes.rutas?.[id]?.label || id})).sort((a, b) => b.value - a.value).slice(0, 8);
-  $("dp-routes").textContent = format(routeTotals.size);
-  $("dp-routes-d").textContent = routeDays.length ? `${format(routeDays.length)} días con rutas calculadas` : "Predicción de rutas pendiente";
-  renderDashboardBars("dp-route-ranking", ranking.map((route) => ({
-    label: route.label, value: route.value, display: format(route.value, 1), color: "#287a57",
-    detail: `~${format(route.value, 1)} camiones distintos por día · toca para abrir el mapa predictivo`
-  })), "#287a57");
-  for (const row of $("dp-route-ranking").children) {
-    row.tabIndex = 0;
-    row.setAttribute("role", "link");
-    row.addEventListener("click", () => { predictionState.tipo = "rutas"; window.location.hash = "#prediccion"; });
-    row.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); row.click(); }
-    });
-  }
-  dashState.planLabel = `${formatDataDay(days[0].fecha)} – ${formatDataDay(days[days.length - 1].fecha)}`;
-  renderDashSnapshot();
 }
 
 // --- Informes históricos ---
@@ -2367,7 +2323,7 @@ function updateOverviewTexts(state) {
   const machine = components.machine === "ok";
   $("overview-summary").textContent = [
     company ? "Telemetría en vivo desde la API de la empresa" : "Telemetría pendiente de la API de la empresa",
-    machine ? "rutas clasificadas por Machine" : "Machine preparando la primera clasificación de rutas",
+    machine ? "rutas aprendidas por Machine" : "Machine preparando el primer modelo de rutas",
     "cierre diario a las 00:00 (hora de Chile)"
   ].join(" · ") + ".";
   $("origin-source").textContent = state.etl_historico === false ? "API de la empresa" : "API de la empresa + histórico MongoDB";
@@ -2388,7 +2344,7 @@ function renderState(state) {
     const okay = components[node.dataset.service] === "ok";
     const label = node.querySelector(".node-status");
     const pending = components[node.dataset.service] === "pending";
-    const pendingText = node.dataset.service === "machine" ? "Esperando la primera clasificación" : "Pendiente de configuración";
+    const pendingText = node.dataset.service === "machine" ? "Esperando el primer modelo de rutas" : "Pendiente de configuración";
     label.textContent = okay ? "En funcionamiento" : pending ? pendingText : "Sin respuesta reciente";
     label.className = "node-status " + (okay ? "ok" : pending ? "neutral" : "bad");
   }
@@ -2512,7 +2468,7 @@ function cell(text, small) {
 async function loadTruckDetail(assetId, assetName, day, after = null) {
   const detail = after ? historyState.detail : {assetId, assetName, day, next: null, hasIgnition: false};
   historyState.detail = detail;
-  $("history-detail-title").textContent = `${assetName || assetId} · ${predictionDayLabel(day, "long")} · hora de Chile`;
+  $("history-detail-title").textContent = `${assetName || assetId} · ${dayLabel(day, "long")} · hora de Chile`;
   const body = $("history-detail-rows");
   if (!after) { body.replaceChildren(); emptyRow(body, 4, "Cargando reportes…"); }
   $("history-detail-more").hidden = true;
@@ -2719,20 +2675,16 @@ async function refreshAll() {
   telemetryRefreshing = false;
   liveVehiclesRefreshing = false;
   vg.loading = false;
-  predictionState.loading = false;
-  predictionState.cache = {};
   try {
     const onTruck = Boolean(truckHash()) && truckView.id && !$("truck-view").hidden;
     await Promise.allSettled([
       refresh(), refreshTelemetry(), loadFleet(), loadVigilance(false),
       onTruck ? loadTruckDay(truckView.id, truckView.day, true) : null,
       truckView.boardDay ? setBoardDay(truckView.boardDay) : null,
-      window.location.hash === "#prediccion" ? loadPrediction(true) : null,
       window.location.hash === "#dashboard" && dashState.tab === "global" && dashState.data
         ? loadDashboardOverview(dashState.data.mes_en_curso, true) : null,
       window.location.hash === "#dashboard" && dashState.tab === "detalle" && dashReportView === "daily"
-        ? loadHistoryMonth($("history-month").value || historyState.month || localToday().slice(0, 7)) : null,
-      window.location.hash === "#dashboard" && dashState.tab === "plan" ? loadDashPlan(true) : null
+        ? loadHistoryMonth($("history-month").value || historyState.month || localToday().slice(0, 7)) : null
     ]);
     button.title = "Actualizado a las " + new Intl.DateTimeFormat("es-CL", {timeStyle: "short", timeZone: HISTORY_ZONE}).format(new Date());
   } finally {
@@ -2741,9 +2693,6 @@ async function refreshAll() {
   }
 }
 $("refresh-all").addEventListener("click", refreshAll);
-for (const button of document.querySelectorAll("[data-map-mode]")) {
-  button.addEventListener("click", () => setMapMode(button.dataset.mapMode));
-}
 for (const button of document.querySelectorAll("[data-zone-filter]")) {
   button.addEventListener("click", () => {
     vg.zone = button.dataset.zoneFilter;
@@ -2783,563 +2732,17 @@ window.addEventListener("storage", (event) => {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) restoreSession();
 });
-// --- Predicción de actividad (/api/prediccion) ----------------------------------------------
-// Ruleta de días: un día, un rango o todos; recorrido animado; confianza por día según el
-// error real que tuvo el método al predecir 1, 2, … días hacia adelante en la prueba.
-const PREDICTION_REFRESH_MS = 15 * 60 * 1000;
-const PREDICTION_PLAY_MS = 1600;
-const PREDICTION_GRADIENT = {0.2: "#3b4cc0", 0.45: "#2ec4b6", 0.65: "#9be15d", 0.82: "#f9c74f", 1: "#e63946"};
-const PREDICTION_METHODS = {
-  lightgbm: "Modelo LightGBM",
-  promedio_dia_semana: "Promedio por día de la semana",
-  promedio_historico: "Promedio histórico"
-};
-const CONFIDENCE_LABELS = {alta: "Confianza alta", media: "Confianza media", baja: "Confianza baja", na: "Sin evaluar"};
-// Dos modelos en pestañas: mapa de calor (zonas) y rutas completas.
-const PREDICTION_TYPES = {
-  calor: {
-    endpoint: "/api/prediccion", unit: "reportes", totalLabel: "Reportes esperados",
-    chartUnit: "Reportes", errorUnit: "reportes por zona y día",
-    value: (item) => item.total, cardText: (item) => format(item.total),
-    intro: "Zonas donde se espera más movimiento de camiones",
-    method: "Cada zona es un cuadro de ~1 km. Para cada día se predice cuántos reportes de camiones en movimiento " +
-      "(sobre 2 km/h) habrá en cada zona"
-  },
-  rutas: {
-    endpoint: "/api/prediccion-rutas", unit: "rutas", totalLabel: "Rutas con camiones esperados",
-    chartUnit: "Rutas", errorUnit: "camiones por tramo y día",
-    value: (item) => item.elementos, cardText: (item) => format(item.elementos) + " rutas",
-    intro: "Rutas por las que se espera que pasen camiones",
-    method: "El modelo predice cuántos camiones distintos pasarán por cada tramo de ~1 km. Cada ruta completa " +
-      "(de la clasificación de rutas) recibe un solo valor: la mediana de lo predicho en los tramos que recorre"
-  }
-};
-const predictionState = {
-  tipo: "calor", cache: {}, data: null, loadedAt: 0, loading: false, map: null, layer: null, fitted: false,
-  mode: "day", index: 0, from: 0, to: 0, timer: null, scrollTimer: null, wheelBound: false, renderer: null
-};
+// --- Fechas de un día (YYYY-MM-DD) como etiqueta ---
+function dayDate(iso) { return new Date(iso + "T12:00:00Z"); }
 
-function predictionConfig() { return PREDICTION_TYPES[predictionState.tipo]; }
-
-// Nivel de cada ruta predicha con la misma regla que la clasificación de rutas:
-// verde sobre el percentil 67, rojo en el percentil 33 o menos, naranja entre ambos.
-function predictionRouteLevels(cells) {
-  const values = cells.map((cell) => cell[1]).sort((a, b) => a - b);
-  const percentile = (q) => {
-    if (!values.length) return 0;
-    const position = (values.length - 1) * q;
-    const low = Math.floor(position);
-    return values[low] + (values[Math.min(low + 1, values.length - 1)] - values[low]) * (position - low);
-  };
-  const p33 = percentile(1 / 3), p67 = percentile(2 / 3);
-  const levels = new Map();
-  for (const [id, value] of cells) {
-    levels.set(id, values[0] === values[values.length - 1] ? "MEDIUM" : value > p67 ? "HIGH" : value <= p33 ? "LOW" : "MEDIUM");
-  }
-  return levels;
-}
-
-function predictionDate(iso) { return new Date(iso + "T12:00:00Z"); }
-
-function predictionDayLabel(iso, style = "short") {
+function dayLabel(iso, style = "short") {
   const options = style === "short" ? {weekday: "short", day: "numeric"}
     : style === "weekday" ? {weekday: "short"}
       : style === "month" ? {month: "short"}
         : {weekday: "long", day: "numeric", month: "long"};
-  return new Intl.DateTimeFormat("es-CL", {...options, timeZone: "UTC"}).format(predictionDate(iso));
+  return new Intl.DateTimeFormat("es-CL", {...options, timeZone: "UTC"}).format(dayDate(iso));
 }
 
-function predictionConfidence(data, iso) {
-  const errors = (data.metricas || {}).error_por_dia || [];
-  const ahead = Math.round((predictionDate(iso) - predictionDate(data.base_hasta)) / 86400000) - 1;
-  const error = errors[ahead];
-  if (error === null || error === undefined || !errors[0]) return {level: "na", error: null};
-  const ratio = error / errors[0];
-  return {level: ratio <= 1.1 ? "alta" : ratio <= 1.3 ? "media" : "baja", error};
-}
-
-function predictionSelected() {
-  const days = predictionState.data ? predictionState.data.dias : [];
-  if (predictionState.mode === "all") return days;
-  if (predictionState.mode === "range") {
-    const [a, b] = [predictionState.from, predictionState.to].sort((x, y) => x - y);
-    return days.slice(a, b + 1);
-  }
-  return days.slice(predictionState.index, predictionState.index + 1);
-}
-
-function predictionCells(days) {
-  // Calor: suma de los días. Rutas: promedio de camiones por día en cada tramo.
-  if (days.length === 1) return days[0].celdas;
-  const routes = predictionState.tipo === "rutas";
-  const sum = new Map();
-  for (const item of days) {
-    for (const cell of item.celdas) {
-      const key = cell.slice(0, -1).join(",");
-      const previous = sum.get(key);
-      sum.set(key, [...cell.slice(0, -1), (previous ? previous[previous.length - 1] : 0) + cell[cell.length - 1]]);
-    }
-  }
-  const result = [...sum.values()];
-  if (routes) for (const cell of result) cell[cell.length - 1] /= days.length;
-  return result;
-}
-
-function predictionRouteTip(label, value, dayCount) {
-  const tip = document.createElement("div");
-  const name = document.createElement("strong");
-  name.textContent = label;
-  tip.append(name, document.createElement("br"),
-    `~${format(value, 1)} camiones ${dayCount > 1 ? "por día (promedio)" : "esperados"}`);
-  return tip;
-}
-
-function ensurePredictionMap() {
-  if (predictionState.map || !window.L) return predictionState.map;
-  predictionState.map = ArtisaMapaBase.crear($("prediction-map"),
-    {pedir: mapPedir, centro: [-24.5, -70], zoom: 6, preferCanvas: false}).mapa;
-  return predictionState.map;
-}
-
-function drawPrediction() {
-  const data = predictionState.data;
-  if (!data?.dias?.length) return;
-  const days = predictionSelected();
-  const config = predictionConfig();
-  const routes = predictionState.tipo === "rutas";
-  const cells = predictionCells(days);
-  const total = routes ? cells.length : days.reduce((sum, item) => sum + item.total, 0);
-  // Resumen de la selección
-  $("prediction-total").textContent = format(total);
-  $("prediction-total-detail").textContent = days.length === 1
-    ? predictionDayLabel(days[0].fecha, "long") : `En ${days.length} días · camiones en movimiento`;
-  const text = $("prediction-selection");
-  if (days.length === 1) {
-    const confidence = predictionConfidence(data, days[0].fecha);
-    text.innerHTML = "";
-    const strong = document.createElement("strong");
-    const label = predictionDayLabel(days[0].fecha, "long");
-    strong.textContent = label.charAt(0).toUpperCase() + label.slice(1);
-    const badge = document.createElement("span");
-    badge.className = "confidence-badge " + confidence.level;
-    badge.textContent = CONFIDENCE_LABELS[confidence.level];
-    const amount = routes ? `${format(days[0].elementos)} rutas con camiones esperados `
-      : `${format(days[0].total)} reportes esperados `;
-    text.append(strong, " · " + amount, badge,
-      confidence.error === null ? "" : ` · se equivoca ~${format(confidence.error, 2)} ${routes ? "camiones por tramo" : "por zona"}`);
-  } else {
-    text.textContent = `${predictionDayLabel(days[0].fecha, "long")} → ${predictionDayLabel(days[days.length - 1].fecha, "long")}` +
-      (routes ? ` · ${format(total)} rutas con camiones (promedio de camiones por día en cada ruta)`
-        : ` · ${format(total)} reportes esperados en ${days.length} días`);
-  }
-  // Mapa de calor
-  const map = ensurePredictionMap();
-  if (map) {
-    map.invalidateSize();
-    if (predictionState.layer) map.removeLayer(predictionState.layer);
-    if (routes) {
-      // Una línea por ruta completa, de un solo color (su nivel). Primero las rojas, así
-      // donde dos rutas comparten camino queda encima la de más camiones.
-      predictionState.renderer = predictionState.renderer || L.canvas({padding: 0.5});
-      const layer = L.layerGroup();
-      const levels = predictionRouteLevels(cells);
-      const order = {LOW: 0, MEDIUM: 1, HIGH: 2};
-      const sorted = cells.filter(([id]) => data.rutas && data.rutas[id])
-        .sort((a, b) => order[levels.get(a[0])] - order[levels.get(b[0])] || a[1] - b[1]);
-      for (const [id, value] of sorted) {
-        const level = levels.get(id);
-        L.polyline(data.rutas[id].lineas, {
-          renderer: predictionState.renderer, color: ROUTE_COLORS[level],
-          weight: level === "HIGH" ? 5 : level === "MEDIUM" ? 4 : 3, opacity: 0.9, lineCap: "round", lineJoin: "round"
-        }).bindTooltip(predictionRouteTip(data.rutas[id].label, value, days.length), {sticky: true}).addTo(layer);
-      }
-      predictionState.layer = layer;
-    } else {
-      // Escala logarítmica, igual que el mapa de calor del cuaderno (np.log1p).
-      const max = cells.reduce((top, cell) => Math.max(top, cell[cell.length - 1]), 0);
-      const points = cells.map(([lat, lon, value]) => [lat, lon, max ? Math.log1p(value) / Math.log1p(max) : 0]);
-      predictionState.layer = L.heatLayer
-        ? L.heatLayer(points, {radius: 9, blur: 11, minOpacity: 0.3, max: 1, maxZoom: 18, gradient: PREDICTION_GRADIENT})
-        : L.layerGroup();
-    }
-    predictionState.layer.addTo(map);
-    const points = routes ? cells.flatMap(([id]) => (data.rutas && data.rutas[id] ? data.rutas[id].lineas.flat() : []))
-      : cells.map((cell) => [cell[0], cell[1]]);
-    if (!predictionState.fitted && points.length) {
-      map.fitBounds(L.latLngBounds(points), {padding: [30, 30], maxZoom: 9});
-      predictionState.fitted = true;
-    }
-  }
-  // Marcar la selección en la ruleta y en las columnas
-  const selected = new Set(days.map((item) => item.fecha));
-  for (const node of document.querySelectorAll("[data-prediction-fecha]")) {
-    node.classList.toggle("is-selected", selected.has(node.dataset.predictionFecha));
-  }
-  for (const button of document.querySelectorAll("[data-prediction-mode]")) {
-    button.setAttribute("aria-pressed", String(button.dataset.predictionMode === predictionState.mode));
-  }
-  $("prediction-range").hidden = predictionState.mode !== "range";
-  updatePredictionRange();
-}
-
-// --- Ruleta ---
-function buildPredictionWheel(data, today) {
-  const wheel = $("prediction-wheel");
-  wheel.replaceChildren(...data.dias.map((item, index) => {
-    const confidence = predictionConfidence(data, item.fecha);
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "wheel-day" + (item.fecha === today ? " is-today" : "");
-    card.dataset.predictionFecha = item.fecha;
-    card.dataset.index = String(index);
-    card.setAttribute("role", "option");
-    const weekday = document.createElement("small");
-    weekday.textContent = item.fecha === today ? "Hoy" : predictionDayLabel(item.fecha, "weekday");
-    const day = document.createElement("strong");
-    day.textContent = String(predictionDate(item.fecha).getUTCDate());
-    const month = document.createElement("small");
-    month.textContent = predictionDayLabel(item.fecha, "month");
-    const total = document.createElement("span");
-    total.textContent = predictionConfig().cardText(item);
-    const dot = document.createElement("i");
-    dot.className = "confidence-dot " + confidence.level;
-    dot.title = CONFIDENCE_LABELS[confidence.level];
-    card.append(weekday, day, month, total, dot);
-    card.addEventListener("click", () => selectPredictionIndex(index, true));
-    return card;
-  }));
-  if (!predictionState.wheelBound) {
-    predictionState.wheelBound = true;
-    wheel.addEventListener("scroll", () => {
-      paintPredictionWheel();
-      clearTimeout(predictionState.scrollTimer);
-      predictionState.scrollTimer = setTimeout(() => {
-        if (predictionState.mode !== "day" || predictionState.timer) return;
-        const index = centeredPredictionIndex();
-        if (index !== predictionState.index) { predictionState.index = index; drawPrediction(); }
-      }, 140);
-    }, {passive: true});
-    // Rueda del mouse: avanza un día por movimiento, como una ruleta. Solo cuando la ruleta
-    // está activa (después de tocarla), para no robarle el desplazamiento a la página.
-    wheel.addEventListener("pointerdown", () => wheel.focus({preventScroll: true}));
-    wheel.addEventListener("wheel", (event) => {
-      if (!wheel.contains(document.activeElement) || Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
-      event.preventDefault();
-      stopPredictionPlay();
-      selectPredictionIndex(predictionState.index + (event.deltaY > 0 ? 1 : -1), true);
-    }, {passive: false});
-    wheel.addEventListener("keydown", (event) => {
-      if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-        event.preventDefault();
-        selectPredictionIndex(predictionState.index + (event.key === "ArrowRight" ? 1 : -1), true);
-      }
-    });
-    window.addEventListener("resize", () => centerPredictionWheel(false));
-  }
-  requestAnimationFrame(() => centerPredictionWheel(false));
-}
-
-function centeredPredictionIndex() {
-  const wheel = $("prediction-wheel");
-  if (!wheel.clientWidth) return predictionState.index;  // oculta: no cambiar la selección
-  const middle = wheel.scrollLeft + wheel.clientWidth / 2;
-  let best = 0, distance = Infinity;
-  for (const card of wheel.children) {
-    const gap = Math.abs(card.offsetLeft + card.offsetWidth / 2 - middle);
-    if (gap < distance) { distance = gap; best = Number(card.dataset.index); }
-  }
-  return best;
-}
-
-function paintPredictionWheel() {
-  // Efecto de ruleta: las tarjetas giran y se achican al alejarse del centro.
-  const wheel = $("prediction-wheel");
-  const middle = wheel.scrollLeft + wheel.clientWidth / 2;
-  for (const card of wheel.children) {
-    const offset = (card.offsetLeft + card.offsetWidth / 2 - middle) / (card.offsetWidth + 10);
-    const reach = Math.min(Math.abs(offset), 4);
-    card.style.transform = `perspective(700px) rotateY(${Math.max(-55, Math.min(55, -offset * 16))}deg) scale(${1 - reach * 0.07})`;
-    card.style.opacity = String(1 - reach * 0.16);
-    card.classList.toggle("is-center", reach < 0.5);
-  }
-}
-
-function centerPredictionWheel(smooth = true) {
-  const wheel = $("prediction-wheel");
-  const index = predictionState.mode === "range" ? predictionState.to : predictionState.index;
-  const card = wheel.children[index];
-  if (!card) return;
-  wheel.scrollTo({left: card.offsetLeft + card.offsetWidth / 2 - wheel.clientWidth / 2, behavior: smooth ? "smooth" : "auto"});
-  paintPredictionWheel();
-}
-
-function selectPredictionIndex(index, smooth) {
-  const days = predictionState.data ? predictionState.data.dias : [];
-  if (!days.length) return;
-  index = Math.max(0, Math.min(days.length - 1, index));
-  if (predictionState.mode === "range") {
-    // En modo rango, tocar un día mueve el extremo más cercano.
-    if (Math.abs(index - predictionState.from) <= Math.abs(index - predictionState.to)) predictionState.from = index;
-    else predictionState.to = index;
-  } else {
-    predictionState.mode = "day";
-    predictionState.index = index;
-  }
-  drawPrediction();
-  centerPredictionWheelTo(index, smooth);
-}
-
-function centerPredictionWheelTo(index, smooth) {
-  const wheel = $("prediction-wheel");
-  const card = wheel.children[index];
-  if (card) wheel.scrollTo({left: card.offsetLeft + card.offsetWidth / 2 - wheel.clientWidth / 2, behavior: smooth ? "smooth" : "auto"});
-}
-
-// --- Rango ---
-function updatePredictionRange() {
-  const days = predictionState.data ? predictionState.data.dias.length : 0;
-  const from = $("prediction-range-from"), to = $("prediction-range-to");
-  for (const input of [from, to]) input.max = String(Math.max(0, days - 1));
-  from.value = String(predictionState.from);
-  to.value = String(predictionState.to);
-  const [a, b] = [predictionState.from, predictionState.to].sort((x, y) => x - y);
-  const span = Math.max(1, days - 1);
-  const fill = $("prediction-range-fill");
-  fill.style.left = (a / span * 100) + "%";
-  fill.style.width = ((b - a) / span * 100) + "%";
-}
-
-function setPredictionMode(mode) {
-  stopPredictionPlay();
-  const days = predictionState.data ? predictionState.data.dias.length : 0;
-  if (mode === "range" && predictionState.mode !== "range") {
-    predictionState.from = predictionState.index;
-    predictionState.to = Math.min(days - 1, predictionState.index + 6);
-  }
-  predictionState.mode = mode;
-  drawPrediction();
-}
-
-// --- Recorrido animado ---
-function stopPredictionPlay() {
-  clearInterval(predictionState.timer);
-  predictionState.timer = null;
-  const button = $("prediction-play");
-  button.setAttribute("aria-pressed", "false");
-  button.textContent = "▶ Recorrer días";
-}
-
-function togglePredictionPlay() {
-  if (predictionState.timer) { stopPredictionPlay(); return; }
-  const days = predictionState.data ? predictionState.data.dias.length : 0;
-  if (!days) return;
-  predictionState.mode = "day";
-  const button = $("prediction-play");
-  button.setAttribute("aria-pressed", "true");
-  button.textContent = "❚❚ Pausar";
-  const step = () => {
-    predictionState.index = (predictionState.index + 1) % days;
-    drawPrediction();
-    centerPredictionWheelTo(predictionState.index, true);
-  };
-  if (predictionState.index >= days - 1) predictionState.index = -1;
-  step();
-  predictionState.timer = setInterval(step, PREDICTION_PLAY_MS);
-}
-
-function renderPrediction(data) {
-  predictionState.data = data;
-  const status = $("prediction-status");
-  const config = predictionConfig();
-  // La pestaña elegida se marca siempre, aunque su modelo aún no tenga resultados.
-  for (const tab of document.querySelectorAll("[data-prediction-tab]")) {
-    const selected = tab.dataset.predictionTab === predictionState.tipo;
-    tab.classList.toggle("is-active", selected);
-    tab.setAttribute("aria-selected", String(selected));
-  }
-  $("prediction-legend-heat").hidden = predictionState.tipo !== "calor";
-  $("prediction-legend-routes").hidden = predictionState.tipo !== "rutas";
-  $("prediction-chart-unit").textContent = config.chartUnit;
-  $("prediction-total-label").textContent = config.totalLabel;
-  if (!data || data.status !== "ok" || !data.dias?.length) {
-    status.textContent = "Pendiente";
-    status.className = "status neutral";
-    $("prediction-intro").textContent = (data && data.message) ||
-      "La predicción se calcula sola cuando hay al menos 21 días cerrados.";
-    // No dejar a la vista los datos del otro modelo.
-    for (const id of ["prediction-total", "prediction-peak", "prediction-error", "prediction-base"]) $(id).textContent = "—";
-    for (const id of ["prediction-total-detail", "prediction-peak-detail", "prediction-error-detail", "prediction-base-detail",
-      "prediction-selection"]) $(id).textContent = "";
-    for (const id of ["prediction-wheel", "prediction-daily-chart", "prediction-methods-chart"]) $(id).replaceChildren();
-    if (predictionState.layer && predictionState.map) predictionState.map.removeLayer(predictionState.layer);
-    predictionState.layer = null;
-    return;
-  }
-  const m = data.metricas || {};
-  const usesModel = m.metodo === "lightgbm";
-  const errors = m.errores || {};
-  status.textContent = PREDICTION_METHODS[m.metodo] || "Predicción";
-  status.className = "status " + (usesModel ? "" : "neutral");
-  const today = localToday();
-  const first = data.dias[0].fecha, last = data.dias[data.dias.length - 1].fecha;
-  $("prediction-intro").textContent =
-    `${config.intro} entre el ${predictionDayLabel(first, "long")} y el ` +
-    `${predictionDayLabel(last, "long")} (${data.dias.length} días). Gira la ruleta para elegir un día, ` +
-    "elige un rango o recorre los días con ▶. Se recalcula sola cada noche." +
-    ((data.metricas || {}).dias_descartados
-      ? ` Se muestran solo los días en que el modelo se equivoca poco; ${data.metricas.dias_descartados} días ` +
-        "más allá se descartaron por tener demasiado error." : "");
-  const peak = data.dias.reduce((top, item) => config.value(item) > config.value(top) ? item : top, data.dias[0]);
-  $("prediction-peak").textContent = predictionDayLabel(peak.fecha);
-  $("prediction-peak-detail").textContent = format(config.value(peak)) + " " + config.unit + " esperados";
-  const error = m.mae_publicado ?? errors[m.metodo] ?? m.mae_referencia;
-  $("prediction-error").textContent = error === undefined ? "—" : format(error, 2);
-  const others = Object.entries(errors).filter(([method]) => method !== m.metodo)
-    .map(([method, value]) => `${PREDICTION_METHODS[method] || method}: ${format(value, 2)}`);
-  // Error real: lo que la versión anterior predijo para el último día cerrado contra lo que pasó.
-  const real = m.error_real;
-  const realText = real
-    ? `Real el ${predictionDayLabel(real.fecha, "short")}: ${format(real.mae, 2)}` +
-      (predictionState.tipo === "calor" ? ` (se esperaban ${format(real.esperado)}, hubo ${format(real.real)})` : "")
-    : "";
-  $("prediction-error-detail").textContent = [realText,
-    others.length ? others.join(" · ") + " · menor es mejor" : `En ${config.errorUnit} · menor es mejor`]
-    .filter(Boolean).join(" · ");
-  $("prediction-base").textContent = new Intl.DateTimeFormat("es-CL", {
-    day: "numeric", month: "short", timeZone: "UTC"}).format(predictionDate(data.base_hasta));
-  $("prediction-base-detail").textContent = m.dias_historia
-    ? `${format(m.dias_historia)} días de historia · ${format(m.camiones || 0)} camiones` : "—";
-  $("prediction-method").textContent =
-    config.method + ", usando los días anteriores, el mismo día de las semanas pasadas, la tendencia y los " +
-    "promedios recientes. Los días siguientes se apoyan en la predicción del día anterior, por eso cada día " +
-    "muestra su confianza: es el error real que tuvo el método al predecir esa misma distancia hacia " +
-    "adelante en los días de prueba (alta: hasta 10 % más que el primer día; media: hasta 30 %; baja: más). " +
-    `Compiten tres métodos en ${format(m.dias_prueba || 0)} días de prueba que ninguno vio: el modelo LightGBM, ` +
-    "el promedio del mismo día de la semana y el promedio de todo el período. " +
-    `Se publica el de menor error: ${PREDICTION_METHODS[m.metodo] || m.metodo}` +
-    (error === undefined ? "." : ` (${format(error, 2)} ${config.errorUnit} de error).`) +
-    (!usesModel && m.motivo ? ` ${m.motivo}.` : "");
-  // Mantener la selección si sigue existiendo; si no, hoy (o el primer día).
-  const count = data.dias.length;
-  const todayIndex = Math.max(0, data.dias.findIndex((item) => item.fecha === today));
-  if (predictionState.index >= count || !predictionState.loadedAt) predictionState.index = todayIndex;
-  predictionState.from = Math.min(predictionState.from, count - 1);
-  predictionState.to = Math.min(predictionState.to || count - 1, count - 1);
-  buildPredictionWheel(data, today);
-  renderPredictionCharts(data, today);
-  drawPrediction();
-}
-
-function renderPredictionCharts(data, today) {
-  // Columnas: total esperado por día (clic = ver ese día). La transparencia indica la confianza.
-  const chart = $("prediction-daily-chart");
-  const config = predictionConfig();
-  const peak = Math.max(1, ...data.dias.map((item) => config.value(item)));
-  chart.replaceChildren(...data.dias.map((item, index) => {
-    const weekday = predictionDate(item.fecha).getUTCDay();
-    const confidence = predictionConfidence(data, item.fecha);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "prediction-column confidence-" + confidence.level +
-      (weekday === 0 || weekday === 6 ? " weekend" : "") + (item.fecha === today ? " is-today" : "");
-    button.dataset.predictionFecha = item.fecha;
-    button.title = `${predictionDayLabel(item.fecha, "long")}: ${format(config.value(item))} ${config.unit} esperados · ` +
-      CONFIDENCE_LABELS[confidence.level];
-    const value = document.createElement("strong");
-    value.textContent = format(config.value(item));
-    const bar = document.createElement("i");
-    bar.style.height = Math.max(2, config.value(item) / peak * 100) + "%";
-    const label = document.createElement("span");
-    label.textContent = item.fecha === today ? "Hoy" : predictionDayLabel(item.fecha);
-    button.append(value, bar, label);
-    button.addEventListener("click", () => { stopPredictionPlay(); selectPredictionIndex(index, true); });
-    return button;
-  }));
-  // Barras: error de cada método; el publicado en verde.
-  const m = data.metricas || {};
-  const errors = m.errores || (m.mae_referencia !== undefined ? {promedio_historico: m.mae_referencia} : {});
-  const order = ["lightgbm", "promedio_dia_semana", "promedio_historico"].filter((key) => key in errors);
-  renderDashboardBars("prediction-methods-chart", order.map((key) => ({
-    label: (PREDICTION_METHODS[key] || key) + (key === m.metodo ? " · publicado" : ""),
-    value: errors[key],
-    color: key === m.metodo ? "#246c55" : "#b8c6bf",
-    detail: key === m.metodo ? "El de menor error: es el que se ve en el mapa"
-      : `${format((errors[key] / errors[m.metodo] - 1) * 100, 1)} % más error que el publicado`
-  })), "#246c55");
-  for (const [index, row] of [...$("prediction-methods-chart").children].entries()) {
-    row.classList.toggle("winner", order[index] === m.metodo);
-    const strong = row.querySelector("strong");
-    if (strong) strong.textContent = format(errors[order[index]], 3);
-  }
-}
-
-async function loadPrediction(force = false) {
-  if (!token() || predictionState.loading) return;
-  const tipo = predictionState.tipo;
-  const cached = predictionState.cache[tipo];
-  if (!force && cached && Date.now() - cached.loadedAt < PREDICTION_REFRESH_MS) {
-    if (predictionState.data !== cached.data) renderPrediction(cached.data);
-    else { drawPrediction(); centerPredictionWheel(false); }
-    return;
-  }
-  predictionState.loading = true;
-  if (!cached) {
-    $("prediction-status").textContent = "Cargando…";
-    $("prediction-intro").textContent = "Cargando la predicción…";
-  }
-  try {
-    const data = await api(PREDICTION_TYPES[tipo].endpoint, {timeoutMs: 120000});
-    predictionState.cache[tipo] = {data, loadedAt: Date.now()};
-    predictionState.loadedAt = Date.now();
-    predictionState.retries = 0;
-    if (predictionState.tipo === tipo) renderPrediction(data);
-  } catch (error) {
-    if (!cached) {
-      $("prediction-status").textContent = "Reintentando…";
-      $("prediction-status").className = "status warning";
-      $("prediction-intro").textContent = "No se pudo consultar la predicción (" + error.message + "). Se reintentará sola.";
-      // Reintento automático mientras se esté mirando la sección (máx. 5 veces).
-      predictionState.retries = (predictionState.retries || 0) + 1;
-      if (predictionState.retries <= 5) {
-        setTimeout(() => { if (window.location.hash === "#prediccion") loadPrediction(); }, 8000);
-      }
-    }
-  } finally {
-    predictionState.loading = false;
-  }
-}
-
-function setPredictionType(tipo) {
-  if (tipo === predictionState.tipo) return;
-  stopPredictionPlay();
-  predictionState.tipo = tipo;
-  loadPrediction();
-}
-
-for (const tab of document.querySelectorAll("[data-prediction-tab]")) {
-  tab.addEventListener("click", () => setPredictionType(tab.dataset.predictionTab));
-}
-
-for (const button of document.querySelectorAll("[data-prediction-mode]")) {
-  button.addEventListener("click", () => setPredictionMode(button.dataset.predictionMode));
-}
-$("prediction-play").addEventListener("click", togglePredictionPlay);
-$("prediction-prev").addEventListener("click", () => { stopPredictionPlay(); selectPredictionIndex((predictionState.mode === "range" ? predictionState.to : predictionState.index) - 1, true); });
-$("prediction-next").addEventListener("click", () => { stopPredictionPlay(); selectPredictionIndex((predictionState.mode === "range" ? predictionState.to : predictionState.index) + 1, true); });
-for (const id of ["prediction-range-from", "prediction-range-to"]) {
-  $(id).addEventListener("input", () => {
-    predictionState.from = Number($("prediction-range-from").value);
-    predictionState.to = Number($("prediction-range-to").value);
-    drawPrediction();
-  });
-}
-document.addEventListener("visibilitychange", () => { if (document.hidden) stopPredictionPlay(); });
-window.addEventListener("hashchange", () => { if (window.location.hash !== "#prediccion") stopPredictionPlay(); });
-setInterval(() => { if (window.location.hash === "#prediccion") loadPrediction(); }, PREDICTION_REFRESH_MS);
-
-// --- Camiones: flota en vivo y ficha de cada camión por día (/api/camiones) ----------------
-// La flota se lee de la última posición de cada camión; la ficha, del cierre diario
-// (resumen, viajes y paradas) y de los reportes GPS del día. No se inventan recorridos.
 const TRUCK_STATES = {
   en_ruta: "En ruta", detenido: "Detenido", sin_senal: "Sin señal reciente", sin_datos: "Sin datos"
 };
@@ -3539,7 +2942,7 @@ function renderBoardDay() {
     note = label + (state && state.estado === "esperando_datos" ? ": cifras provisorias hasta que la API confirme los reportes hasta las 00:00." : "") +
       (state && state.recalculos ? ` · recalculado ${format(state.recalculos)} ${state.recalculos === 1 ? "vez" : "veces"} por reportes atrasados` : "");
   }
-  $("board-day-note").textContent = `${predictionDayLabel(day, "long")} · ${note}`;
+  $("board-day-note").textContent = `${dayLabel(day, "long")} · ${note}`;
 }
 
 async function setBoardDay(day) {
@@ -3607,7 +3010,7 @@ function renderFleet() {
   trucks.sort(sorters[truckView.sort] || byName);
   $("fleet-tab-flota-note").textContent = boardIsToday()
     ? `${format(summary.total)} camiones · ${format(summary.en_ruta)} en ruta ahora`
-    : `${format(truckView.dayRows ? truckView.dayRows.size : 0)} con actividad el ${predictionDayLabel(boardDay())}`;
+    : `${format(truckView.dayRows ? truckView.dayRows.size : 0)} con actividad el ${dayLabel(boardDay())}`;
   // En un día anterior, primero los que tuvieron actividad.
   if (!boardIsToday()) trucks.sort((a, b) => Number(Boolean(truckDay(b))) - Number(Boolean(truckDay(a))));
   $("fleet-board").replaceChildren(...(trucks.length ? trucks.map(fleetRow)
@@ -3665,8 +3068,8 @@ function truckIdentity(plate, driver, route) {
   if (route) {
     const routeNode = document.createElement("span");
     routeNode.className = "last-route";
-    routeNode.style.setProperty("--route", ROUTE_COLORS[route.usage_level] || "#718785");
-    routeNode.title = "Última ruta clasificada";
+    routeNode.style.setProperty("--route", (ROUTE_LEVELS[route.usage_level] || {}).color || "#718785");
+    routeNode.title = "Última ruta aprendida";
     routeNode.textContent = route.label;
     nodes.push(routeNode);
   }
@@ -3698,7 +3101,7 @@ function renderTruckDay(keepView = false) {
   renderTruckHead();
   const summary = data.resumen;
   const pin = activePin(data);
-  $("truck-day-note").textContent = `${predictionDayLabel(data.fecha, "long")} · ${dayStatusNote(data)}` +
+  $("truck-day-note").textContent = `${dayLabel(data.fecha, "long")} · ${dayStatusNote(data)}` +
     (pin ? ` · El punto rojo marca dónde estaba a las ${pin.time} (${pin.event}).` : "");
   $("truck-km").textContent = summary ? format(summary.km, 1) : "—";
   const average = (data.historial || []).filter((item) => item.fecha !== data.fecha && item.km > 0);
@@ -3919,9 +3322,9 @@ function renderTruckHistory(data) {
     const item = byDay.get(day);
     const button = document.createElement("button");
     button.type = "button";
-    const weekday = predictionDate(day).getUTCDay();
+    const weekday = dayDate(day).getUTCDay();
     button.className = "history-bar" + (day === data.fecha ? " is-selected" : "") + (weekday === 0 || weekday === 6 ? " weekend" : "");
-    button.title = `${predictionDayLabel(day, "long")}: ` + (item ? `${format(item.km, 1)} km · ${format(item.viajes)} viajes` : "sin reportes");
+    button.title = `${dayLabel(day, "long")}: ` + (item ? `${format(item.km, 1)} km · ${format(item.viajes)} viajes` : "sin reportes");
     button.setAttribute("aria-pressed", String(day === data.fecha));
     const bar = document.createElement("i");
     bar.style.height = item && item.km ? Math.max(3, (item.km / max) * 100) + "%" : "2px";
@@ -4417,7 +3820,7 @@ async function drawTruckImage(data, withTiles) {
   ctx.fillStyle = "#d5ee9c"; ctx.font = font(600, 19);
   ctx.fillText("Artisa · recorrido del día", pad, 44);
   ctx.fillStyle = "#ffffff"; ctx.font = font(700, 40);
-  const label = predictionDayLabel(data.fecha, "long");
+  const label = dayLabel(data.fecha, "long");
   ctx.fillText(`Camión ${data.nombre}  ·  ${label.charAt(0).toUpperCase() + label.slice(1)}`, pad, 94);
   const summary = data.resumen;
   ctx.fillStyle = "#b8c9c4"; ctx.font = font(400, 20);
