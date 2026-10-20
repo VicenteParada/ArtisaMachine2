@@ -1163,3 +1163,24 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 @media(max-width:1150px){.fd-finding-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:940px){.fd-live-lower,.fd-operations-pair{grid-template-columns:minmax(0,1fr)}.fd-live-attention{padding:16px 0 0;border-left:0;border-top:1px solid var(--line)}.fd-overview-chart{grid-auto-columns:34px;justify-content:start}.fd-activity-heading{display:grid}.fd-overview-metrics,.fd-ops-metrics{justify-content:flex-start;margin-top:10px}}
 @media(max-width:690px){.fd-tabs{grid-template-columns:minmax(0,1fr)}.fd-live-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.fd-live-lower .fd-donut-wrap{grid-template-columns:minmax(0,1fr);justify-items:center}.fd-live-lower .fd-donut-legend{width:100%}.fd-activity-insights,.fd-finding-grid{grid-template-columns:minmax(0,1fr)}.fd-daily-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.fd-overview-day{grid-template-rows:18px 105px 28px}.fd-overview-track{height:105px}.fd-overview-chart{min-height:165px}.fd-scatter{min-height:255px}}
+
+/* Nivel de reporte (Dashboard → Comparación por camión): A reporta más, D menos. */
+.fd-levels p{margin:0 0 10px;font-size:10px;line-height:1.5;color:var(--muted)}
+.fd-level-list{display:grid;gap:6px}
+.fd-level{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto auto;column-gap:10px;align-items:center;text-align:left;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:#fbfcfa;color:var(--ink)}
+.fd-level:hover{border-color:#9fb3ad}
+.fd-level.is-active{border-color:var(--ink);background:#eef3ef;box-shadow:inset 3px 0 0 var(--ink)}
+.fd-level .fd-level-badge{grid-row:1/3}
+.fd-level-text{font-size:10px;font-weight:600}
+.fd-level small{grid-column:2;font-size:9px;color:var(--muted)}
+.fd-level strong{grid-column:3;grid-row:1/3;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.fd-level-badge{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;font-size:11px;font-weight:800;color:#fff;background:#8a9a97}
+.fd-level-badge.fd-level-a,.fd-level-a .fd-level-badge{background:#1f6b50}
+.fd-level-badge.fd-level-b,.fd-level-b .fd-level-badge{background:#5e9f58}
+.fd-level-badge.fd-level-c,.fd-level-c .fd-level-badge{background:#d08f22}
+.fd-level-badge.fd-level-d,.fd-level-d .fd-level-badge{background:#c0412b}
+.fd-level-failure{margin-top:10px;padding:9px 10px;border-radius:7px;background:#fff0e6;border:1px solid #ebcfbc;display:grid;gap:3px;font-size:9px;line-height:1.5;color:#7a3d22}
+.fd-level-failure strong{font-size:10px;color:#a6532d}
+.fd-level-how{display:block;margin-top:10px;font-size:9px;line-height:1.5;color:var(--muted)}
+th.fd-col-level,td.fd-col-level{width:44px;text-align:center;padding-left:4px;padding-right:4px}
+td.fd-col-level{color:#b8c3c0}

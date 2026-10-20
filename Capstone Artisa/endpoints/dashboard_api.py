@@ -14,7 +14,7 @@ import pymysql
 
 from common import dias
 
-# Un camión "sin reportar" no tiene reportes ni ayer ni hoy.
+# Un camión sin reportes ni ayer ni hoy se marca en la columna "Última señal".
 SIN_REPORTES_DIAS = 2
 
 
@@ -102,16 +102,10 @@ def fleet_dashboard(cursor, hoy=None):
             "dias_cerrados": int(fila.get("cerrados") or 0),
             "descartados": int(fila.get("descartados") or 0),
         })
-    sin_reportar = sorted(
-        ({"patente": c["patente"], "nombre": c["nombre"], "ultimo_dia": c["ultimo_dia"],
-          "dias_sin_reportes": c["dias_sin_reportes"]}
-         for c in lista if c["dias_sin_reportes"] is None or c["dias_sin_reportes"] >= SIN_REPORTES_DIAS),
-        key=lambda c: (c["dias_sin_reportes"] is not None, -(c["dias_sin_reportes"] or 0), c["patente"]),
-    )
     return {
         "status": "ok", "zona": dias.ZONA, "hoy": hoy.isoformat(),
         "desde": desde.isoformat(), "meses": meses, "mes_en_curso": _mes(hoy),
-        "flota": flota, "camiones": lista, "sin_reportar": sin_reportar,
+        "flota": flota, "camiones": lista,
         "sin_reportes_dias": SIN_REPORTES_DIAS,
         "totales": {
             "reportes": sum(m["reportes"] for m in flota), "km": round(sum(m["km"] for m in flota), 1),
@@ -134,3 +128,71 @@ def truck_days(cursor, asset_id):
     return {"patente": asset_id,
             "dias": [[f["fecha"].isoformat(), int(f["reportes"]), round(float(f["km_observados"]), 1)]
                      for f in cursor.fetchall()]}
+
+
+# --- Nivel de reporte (cuaderno procesamientodatos.ipynb) ---------------------------
+# Cada camión del catálogo queda en un nivel según cuántos reportes GPS válidos envió en
+# el rango, comparado con el resto de la flota (cuartiles): A el 25 % que más reporta,
+# D el 25 % que menos. Es relativo: siempre hay camiones en D aunque toda la flota reporte
+# bien. Un día con falla es un día cerrado en que la flota envió menos de la mitad de la
+# mediana diaria (caída de la plataforma GPS): no se descarta, solo se avisa.
+NIVELES = "DCBA"
+FALLA_FRACCION = 0.5
+
+
+def _cuantil(valores, q):
+    """Igual que numpy.quantile (interpolación lineal)."""
+    orden = sorted(valores)
+    posicion = (len(orden) - 1) * q
+    abajo = int(posicion)
+    arriba = min(abajo + 1, len(orden) - 1)
+    return orden[abajo] + (orden[arriba] - orden[abajo]) * (posicion - abajo)
+
+
+def nivel(reportes, cortes):
+    """Igual que numpy.searchsorted(cortes, reportes, side="left"): un empate baja de nivel."""
+    return NIVELES[sum(1 for corte in cortes if corte < reportes)]
+
+
+def report_levels(cursor, desde, hasta, hoy=None):
+    """Nivel A–D de cada camión entre desde y hasta (ambos incluidos). None si no hay cierres."""
+    hoy = hoy or dias.hoy()
+    try:
+        cursor.execute("SELECT fecha, estado, reportes FROM reporte_diario_estado ORDER BY fecha")
+    except pymysql.err.ProgrammingError:
+        return None
+    estados = cursor.fetchall()
+    if not estados:
+        return None
+    cerrados = [int(fila["reportes"]) for fila in estados if fila["estado"] == "cerrado"]
+    mediana = _cuantil(cerrados, 0.5) if cerrados else 0
+    dias_falla = [{"fecha": fila["fecha"].isoformat(), "reportes": int(fila["reportes"])}
+                  for fila in estados
+                  if fila["estado"] == "cerrado" and desde <= fila["fecha"] <= hasta
+                  and fila["reportes"] < FALLA_FRACCION * mediana]
+
+    catalogo = _catalogo(cursor)
+    cursor.execute(
+        """SELECT asset_id, MAX(asset_name) AS asset_name, SUM(reportes) AS reportes
+           FROM reporte_diario WHERE fecha BETWEEN %s AND %s GROUP BY asset_id""",
+        (desde, hasta),
+    )
+    filas = {fila["asset_id"]: fila for fila in cursor.fetchall()}
+    camiones = [{"patente": asset_id,
+                 "nombre": (filas.get(asset_id) or {}).get("asset_name"),
+                 "reportes": int((filas.get(asset_id) or {}).get("reportes") or 0)}
+                for asset_id in catalogo]
+    if not camiones:
+        return None
+    cortes = [round(_cuantil([c["reportes"] for c in camiones], q), 2) for q in (0.25, 0.5, 0.75)]
+    for camion in camiones:
+        camion["nivel"] = nivel(camion["reportes"], cortes)
+    camiones.sort(key=lambda c: (-c["reportes"], c["patente"]))
+    return {
+        "status": "ok", "zona": dias.ZONA, "desde": desde.isoformat(), "hasta": hasta.isoformat(),
+        "incluye_hoy": desde <= hoy <= hasta,
+        "cortes": {"d_hasta": cortes[0], "c_hasta": cortes[1], "b_hasta": cortes[2]},
+        "conteo": {letra: sum(1 for c in camiones if c["nivel"] == letra) for letra in "ABCD"},
+        "dias_falla": dias_falla, "mediana_diaria": round(mediana),
+        "camiones": camiones,
+    }

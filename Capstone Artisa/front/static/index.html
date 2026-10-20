@@ -6,13 +6,13 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/mapa-base.css?v=20261020-integracion">
-  <link rel="stylesheet" href="/style.css?v=20261020-integracion">
+  <link rel="stylesheet" href="/mapa-base.css?v=20261020-niveles">
+  <link rel="stylesheet" href="/style.css?v=20261020-niveles">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
-  <script src="/mapa-base.js?v=20261020-integracion" defer></script>
-  <script src="/map-data.js?v=20261020-integracion" defer></script>
-  <script src="/app.js?v=20261020-integracion" defer></script>
+  <script src="/mapa-base.js?v=20261020-niveles" defer></script>
+  <script src="/map-data.js?v=20261020-niveles" defer></script>
+  <script src="/app.js?v=20261020-niveles" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -388,10 +388,12 @@
               <small class="fd-foot" id="dash-table-foot">Toca un camión para ver su calendario día por día.</small>
             </article>
             <aside class="fd-side">
-              <article class="dashboard-card fd-silent">
-                <div class="dashboard-card-heading"><div><span class="eyebrow">ATENCIÓN</span><h3>Camiones sin reportar</h3></div><b id="dash-silent-count" class="fd-count">—</b></div>
-                <p id="dash-silent-note">Sin reportes ni ayer ni hoy.</p>
-                <ul id="dash-silent" class="fd-silent-list"></ul>
+              <article class="dashboard-card fd-levels">
+                <div class="dashboard-card-heading"><div><span class="eyebrow">NIVEL DE REPORTE</span><h3>Cuánto reporta cada camión</h3></div></div>
+                <p id="dash-levels-note">Compara los reportes GPS de cada camión con el resto de la flota en el período.</p>
+                <div id="dash-levels" class="fd-level-list" role="group" aria-label="Filtrar por nivel de reporte"></div>
+                <div id="dash-levels-failure" class="fd-level-failure" hidden></div>
+                <small class="fd-level-how">Por cuartiles: A es el 25 % que más reporta y D el 25 % que menos. Es relativo a la flota, no indica una falla por sí solo.</small>
               </article>
               <article class="dashboard-card fd-quality">
                 <div class="dashboard-card-heading"><div><span class="eyebrow">CALIDAD DE DATOS</span><h3>Días procesados</h3></div></div>

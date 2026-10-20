@@ -972,7 +972,7 @@ const DAILY_ACTIVITY_METRICS = {
   detenido: {label: "Tiempo detenido", short: "min detenidos", decimals: 0}
 };
 var dashState = {tab: "global", data: null, metric: "reportes", period: null, sort: "total", query: "",
-  open: null, days: {}, months: {}};
+  open: null, days: {}, months: {}, levels: {}, level: null};
 var dashReportView = "daily";
 var dashOverviewState = {month: null, rows: null, metric: "km", rankMetric: "paradas",
   loading: false, error: null, loadedAt: 0};
@@ -1536,7 +1536,7 @@ function renderDashboard(data) {
     for (const id of ["dash-k-reportes", "dash-k-km", "dash-k-activos"]) $(id).textContent = "—";
     for (const id of ["dash-k-reportes-d", "dash-k-km-d", "dash-k-activos-d"]) $(id).textContent = "Se calcula con el cierre diario";
     $("dash-months").replaceChildren(el("span", "chart-empty", "Aún no hay días procesados."));
-    for (const id of ["dash-table", "dash-silent", "dash-quality", "dash-periods"]) $(id).replaceChildren();
+    for (const id of ["dash-table", "dash-levels", "dash-quality", "dash-periods"]) $(id).replaceChildren();
     renderDashSnapshot();
     return;
   }
@@ -1545,7 +1545,7 @@ function renderDashboard(data) {
     dashState.period = data.mes_en_curso;
   }
   dashState.months = {};  // el mes en curso cambió: se vuelve a pedir al mostrarlo
-  renderDashSilent(data);
+  dashState.levels = {};
   renderDashQuality(data);
   if (truckView.fleet) renderDashboardLive(truckView.fleet);
   loadDashboardOverview(data.mes_en_curso);
@@ -1587,6 +1587,7 @@ function renderDashView() {
   }
   renderDashPeriods(data);
   renderDashSortOptions();
+  renderDashLevels();
   if (dashState.period === "todos") {
     renderDashAll(data);
     return;
@@ -1742,6 +1743,86 @@ function renderDashBars(items, daily) {
   requestAnimationFrame(() => { chart.scrollLeft = chart.scrollWidth; });  // lo reciente a la vista
 }
 
+// --- Nivel de reporte: cuartiles de reportes GPS del período (A más, D menos) ---
+const DASH_LEVELS = {
+  A: "El 25 % que más reporta", B: "Sobre la mitad de la flota",
+  C: "Bajo la mitad de la flota", D: "El 25 % que menos reporta"
+};
+
+function dashRange() {
+  const data = dashState.data;
+  if (dashState.period === "todos") return {key: "todos", desde: data.desde, hasta: data.hoy};
+  const [year, number] = dashState.period.split("-").map(Number);
+  const last = `${dashState.period}-${String(new Date(Date.UTC(year, number, 0)).getUTCDate()).padStart(2, "0")}`;
+  const first = `${dashState.period}-01`;
+  return {key: dashState.period, desde: first < data.desde ? data.desde : first, hasta: last > data.hoy ? data.hoy : last};
+}
+
+function dashLevelOf(patente) {
+  const levels = dashState.levels[dashRange().key];
+  return levels && levels.porPatente ? levels.porPatente[patente] : null;
+}
+
+async function loadDashLevels(range) {
+  dashState.levels[range.key] = {loading: true};
+  try {
+    const result = await api(`/api/dashboard/niveles?desde=${range.desde}&hasta=${range.hasta}`, {timeoutMs: 30000});
+    if (result.status !== "ok") throw new Error("todavía no hay días procesados");
+    result.porPatente = Object.fromEntries(result.camiones.map((truck) => [truck.patente, truck.nivel]));
+    dashState.levels[range.key] = result;
+  } catch (error) {
+    dashState.levels[range.key] = {error: error.message};
+  }
+  if (dashRange().key === range.key) renderDashView();
+}
+
+function setDashLevel(level) {
+  dashState.level = dashState.level === level ? null : level;
+  dashState.open = null;
+  renderDashView();
+}
+
+function renderDashLevels() {
+  const range = dashRange();
+  const levels = dashState.levels[range.key];
+  const box = $("dash-levels");
+  const failure = $("dash-levels-failure");
+  failure.hidden = true;
+  if (!levels) loadDashLevels(range);
+  if (!levels || levels.loading || levels.error) {
+    $("dash-levels-note").textContent = levels && levels.error
+      ? "No se pudo calcular el nivel: " + levels.error : "Calculando el nivel de cada camión…";
+    box.replaceChildren();
+    return;
+  }
+  const cuts = levels.cortes;
+  const ranges = {
+    A: `Más de ${format(cuts.b_hasta)}`, B: `${format(cuts.c_hasta)} a ${format(cuts.b_hasta)}`,
+    C: `${format(cuts.d_hasta)} a ${format(cuts.c_hasta)}`, D: `${format(cuts.d_hasta)} o menos`
+  };
+  const period = range.key === "todos" ? "desde " + dashDayLabel(range.desde) : dashMonthLabel(range.key, "long");
+  $("dash-levels-note").textContent = `Reportes GPS de cada camión ${range.key === "todos" ? "" : "en "}${period}` +
+    (levels.incluye_hoy ? " (hoy sigue en curso)." : ".") + " Toca un nivel para filtrar la tabla.";
+  box.replaceChildren(...Object.keys(DASH_LEVELS).map((letter) => {
+    const button = el("button", `fd-level fd-level-${letter.toLowerCase()}`);
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(dashState.level === letter));
+    button.classList.toggle("is-active", dashState.level === letter);
+    button.append(el("b", "fd-level-badge", letter),
+      el("span", "fd-level-text", DASH_LEVELS[letter]),
+      el("small", "", `${ranges[letter]} reportes`),
+      el("strong", "", `${format(levels.conteo[letter])} cam.`));
+    button.addEventListener("click", () => setDashLevel(letter));
+    return button;
+  }));
+  if (levels.dias_falla.length) {
+    failure.hidden = false;
+    failure.replaceChildren(el("strong", "", "Ojo: días con falla de datos"),
+      el("span", "", `En ${levels.dias_falla.map((day) => dashDayLabel(day.fecha)).join(", ")} toda la flota envió menos ` +
+        `de la mitad de lo normal (${format(levels.mediana_diaria)} reportes por día). Ese período rinde menos para todos.`));
+  }
+}
+
 function renderDashSortOptions() {
   const options = [["total", "Mayor total"], ["menos", "Menor total"], ["silencio", "Más días sin reportar"],
     ["patente", "Patente (A–Z)"]];
@@ -1755,8 +1836,9 @@ function renderDashSortOptions() {
 
 function dashTrucks(month) {
   const query = dashState.query.trim().toLowerCase();
-  const trucks = dashState.data.camiones.filter((truck) => !query ||
-    truck.patente.toLowerCase().includes(query) || (truck.nombre || "").toLowerCase().includes(query));
+  const trucks = dashState.data.camiones.filter((truck) => (!query ||
+    truck.patente.toLowerCase().includes(query) || (truck.nombre || "").toLowerCase().includes(query)) &&
+    (!dashState.level || dashLevelOf(truck.patente) === dashState.level));
   const total = (truck) => sum(periodValues(truck, month));
   const compare = {
     total: (a, b) => total(b) - total(a),
@@ -1777,7 +1859,9 @@ function renderDashTable(columns, month) {
   const totalMax = Math.max(1, ...all.map(sum));
   const head = el("thead");
   const headRow = el("tr");
-  headRow.append(el("th", "fd-col-truck", "Camión"));
+  const levelHead = el("th", "fd-col-level", "Nivel");
+  levelHead.title = "Nivel de reporte del período (A más, D menos)";
+  headRow.append(el("th", "fd-col-truck", "Camión"), levelHead);
   if (columns) {
     for (const column of columns) {
       const th = el("th", "fd-col-month");
@@ -1800,7 +1884,7 @@ function renderDashTable(columns, month) {
   }
   headRow.append(el("th", "fd-col-last", "Última señal"));
   head.append(headRow);
-  const span = columns ? columns.length + 3 : 6;
+  const span = columns ? columns.length + 4 : 7;
   const body = el("tbody");
   for (const truck of trucks) {
     const values = periodValues(truck, month);
@@ -1810,7 +1894,14 @@ function renderDashTable(columns, month) {
     row.setAttribute("aria-expanded", String(dashState.open === truck.patente));
     const who = el("td", "fd-col-truck");
     who.append(el("span", "fd-plate", truck.patente), el("span", "fd-name", truck.nombre || "Sin nombre"));
-    row.append(who);
+    const letter = dashLevelOf(truck.patente);
+    const levelCell = el("td", "fd-col-level");
+    if (letter) {
+      const badge = el("b", `fd-level-badge fd-level-${letter.toLowerCase()}`, letter);
+      badge.title = DASH_LEVELS[letter];
+      levelCell.append(badge);
+    } else levelCell.textContent = "·";
+    row.append(who, levelCell);
     const totalCell = el("td", "fd-col-total");
     const bar = el("i");
     bar.style.width = Math.max(total ? 4 : 0, total / totalMax * 100) + "%";
@@ -1870,7 +1961,8 @@ function renderDashTable(columns, month) {
   }
   if (!trucks.length) {
     const row = el("tr");
-    const cell = el("td", "fd-none", "Ningún camión coincide con la búsqueda.");
+    const cell = el("td", "fd-none", dashState.level ? `Ningún camión de nivel ${dashState.level} coincide con la búsqueda.`
+      : "Ningún camión coincide con la búsqueda.");
     cell.colSpan = span;
     row.append(cell);
     body.append(row);
@@ -1880,7 +1972,8 @@ function renderDashTable(columns, month) {
   table.classList.toggle("is-month", !columns);
   // El detalle del camión ocupa solo el ancho visible, aunque la tabla se desplace de lado.
   table.style.setProperty("--fd-wrap", table.parentElement.clientWidth + "px");
-  $("dash-table-foot").textContent = `${format(trucks.length)} de ${format(data.camiones.length)} camiones · ` +
+  $("dash-table-foot").textContent = `${format(trucks.length)} de ${format(data.camiones.length)} camiones` +
+    (dashState.level ? ` de nivel ${dashState.level}` : "") + " · " +
     (columns ? "el color más intenso es el mes más alto de la tabla; toca un mes para verlo día a día. "
       : "en la franja, cada barra es un día; en salmón, los días sin reportes. ") +
     "Toca un camión para ver su calendario completo.";
@@ -2029,23 +2122,6 @@ function dashDailyBreakdown(truck, month) {
   return panel;
 }
 
-function renderDashSilent(data) {
-  $("dash-silent-count").textContent = format(data.sin_reportar.length);
-  $("dash-silent-note").textContent = data.sin_reportar.length
-    ? "Sin reportes ni ayer ni hoy. Toca uno para ver su último día con datos."
-    : "Todos los camiones del catálogo reportaron ayer u hoy.";
-  $("dash-silent").replaceChildren(...data.sin_reportar.map((truck) => {
-    const item = el("li");
-    const link = el("a");
-    link.href = truck.ultimo_dia ? `#camiones/${encodeURIComponent(truck.patente)}/${truck.ultimo_dia}`
-      : `#camiones/${encodeURIComponent(truck.patente)}`;
-    link.append(el("span", "fd-plate", truck.patente), el("span", "fd-name", truck.nombre || "Sin nombre"),
-      el("b", "", dashSilence(truck.dias_sin_reportes)));
-    item.append(link);
-    return item;
-  }));
-}
-
 function renderDashQuality(data) {
   const totals = data.totales;
   $("dash-q-bar").style.width = (totals.dias ? totals.dias_cerrados / totals.dias * 100 : 0).toFixed(1) + "%";
@@ -2055,8 +2131,7 @@ function renderDashQuality(data) {
     ["Días cerrados", `${format(totals.dias_cerrados)} de ${format(totals.dias)}`,
       totals.dias - totals.dias_cerrados > 1 ? "Los demás esperan datos o son hoy" : "Hoy sigue en curso"],
     ["Reportes descartados", format(totals.descartados),
-      `${format(discardedShare, 2)} % del total: GPS inválido (por ejemplo, 0,0)`],
-    ["Camiones en el catálogo", format(totals.camiones), "Solo se cuentan camiones"]
+      `${format(discardedShare, 2)} % del total: GPS inválido (por ejemplo, 0,0)`]
   ];
   $("dash-quality").replaceChildren(...rows.map(([label, value, note]) => {
     const item = el("li");
@@ -2073,10 +2148,10 @@ function downloadDashCsv() {
   const month = dashState.period === "todos" ? null : dashState.months[dashState.period];
   if (dashState.period !== "todos" && (!month || month.error)) return;
   const columns = month ? month.dias.map((iso) => iso) : data.meses.map((m) => dashMonthLabel(m, "long"));
-  const lines = [["Patente", "Camión", ...columns, "Total", "Último día con datos"].map(csvValue).join(";")];
+  const lines = [["Patente", "Camión", "Nivel de reporte", ...columns, "Total", "Último día con datos"].map(csvValue).join(";")];
   for (const truck of dashTrucks(month)) {
     const values = periodValues(truck, month);
-    lines.push([truck.patente, truck.nombre, ...values.map(number), number(sum(values)), truck.ultimo_dia || ""]
+    lines.push([truck.patente, truck.nombre, dashLevelOf(truck.patente) || "", ...values.map(number), number(sum(values)), truck.ultimo_dia || ""]
       .map(csvValue).join(";"));
   }
   saveCsv(lines, `artisa-${metric.unit}-por-patente-${month ? month.mes : data.desde + "-a-" + data.hoy}.csv`);

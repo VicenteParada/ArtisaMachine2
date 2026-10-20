@@ -39,7 +39,7 @@ PENDING_RESPONSES = {
     },
     "/api/vigilancia": {"status": "pending", "celdas": [], "alertas": [], "vehiculos": [],
                         "message": "Sin reportes de camiones en los últimos 7 días."},
-    "/api/dashboard": {"status": "pending", "meses": [], "flota": [], "camiones": [], "sin_reportar": [],
+    "/api/dashboard": {"status": "pending", "meses": [], "flota": [], "camiones": [],
                        "totales": None},
     "/api/prediccion": {
         "status": "pending", "dias": [],
@@ -515,6 +515,7 @@ class Handler(JsonHandler):
                                          "/api/reportes/mes-completo?mes=YYYY-MM",
                                          "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
                                          "/api/camiones/X?fecha=YYYY-MM-DD", "/api/dashboard/camion?patente=X",
+                                         "/api/dashboard/niveles?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
                                          *PENDING_RESPONSES]})
             return
         if path in BUILDERS:
@@ -547,6 +548,24 @@ class Handler(JsonHandler):
                 self.database_error(error)
                 return
             self.respond(200, result)
+            return
+        if path == "/api/dashboard/niveles":
+            try:
+                desde = date.fromisoformat(_param(parsed.query, "desde") or "")
+                hasta = date.fromisoformat(_param(parsed.query, "hasta") or "")
+            except ValueError:
+                self.respond(400, {"error": "Usa ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD"})
+                return
+            if desde > hasta or (hasta - desde).days > 400:
+                self.respond(400, {"error": "Rango inválido (máximo 400 días)"})
+                return
+            try:
+                with connect_db(read_timeout=30) as connection, connection.cursor() as cursor:
+                    result = dashboard_api.report_levels(cursor, desde, hasta)
+            except pymysql.MySQLError as error:
+                self.database_error(error)
+                return
+            self.respond(200, result or {"status": "pending", "camiones": []})
             return
         truck = TRUCK_RE.fullmatch(path)
         if truck:
