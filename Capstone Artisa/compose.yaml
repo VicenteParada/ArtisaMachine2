@@ -148,8 +148,9 @@ services:
       COMPANY_API_INTERVAL_SECONDS: ${COMPANY_API_INTERVAL_SECONDS:-30}
       ARTISA_TIMEZONE: ${ARTISA_TIMEZONE:-America/Santiago}
       ETL_HISTORICO: ${ETL_HISTORICO:-1}
-      # Asistente (Gemini). Sin clave, el chat avisa que no está configurado.
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Asistente (Gemini). Por defecto usa la clave gratuita de una cuenta creada solo para este
+      # proyecto; un GEMINI_API_KEY en .env tiene prioridad sobre ella.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-AQ.Ab8RN6J6a91ol9RGBNhxYbcozGUPvMevKw2xK0werahGDeS-xw}
       GEMINI_MODEL: ${GEMINI_MODEL:-}
     depends_on:
       mariadb:

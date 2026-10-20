@@ -60,8 +60,10 @@ sobre cómo funciona Artisa y sobre los datos de la flota, sin inventar cifras.
 
 - **Modelo:** Gemini, gratuito desde Google AI Studio. Pon la clave en `.env`
   (`GEMINI_API_KEY=...`; opcional `GEMINI_MODEL`, por defecto `gemini-flash-latest`) y
-  ejecuta `python3 scripts/artisa.py iniciar`. Sin clave, o si Gemini falla, el chat lo
-  avisa y el resto de la web sigue funcionando. El proveedor está aislado en
+  ejecuta `python3 scripts/artisa.py iniciar`. El repositorio trae por defecto (en
+  `compose.yaml`) la clave gratuita de una cuenta creada solo para este proyecto, así que
+  el chat funciona sin configurar nada; la de `.env` tiene prioridad. Si Gemini falla o se
+  agota su cuota gratuita, el chat lo avisa y el resto de la web sigue funcionando. El proveedor está aislado en
   `endpoints/llm.py` (se puede cambiar por Ollama local).
 - **Contexto:** las secciones *Servicios*, *Reglas clave* y *Web* de este README, más un
   resumen de los mismos resultados que ya muestra la web (camiones, reportes diarios,
