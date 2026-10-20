@@ -6,13 +6,13 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/mapa-base.css?v=20261020-rutas-aprendidas">
-  <link rel="stylesheet" href="/style.css?v=20261020-rutas-aprendidas">
+  <link rel="stylesheet" href="/mapa-base.css?v=20261020-menu">
+  <link rel="stylesheet" href="/style.css?v=20261020-menu">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
-  <script src="/mapa-base.js?v=20261020-rutas-aprendidas" defer></script>
-  <script src="/map-data.js?v=20261020-rutas-aprendidas" defer></script>
-  <script src="/app.js?v=20261020-rutas-aprendidas" defer></script>
+  <script src="/mapa-base.js?v=20261020-menu" defer></script>
+  <script src="/map-data.js?v=20261020-menu" defer></script>
+  <script src="/app.js?v=20261020-menu" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -60,8 +60,8 @@
     <div class="nav-label">ESPACIO DE TRABAJO</div>
     <nav aria-label="Navegación principal">
       <a data-dataset-link="trucks" href="#camiones"><span>⛟</span> Camiones en vivo</a>
-      <a data-dataset-link="heatmap" href="#mapa-calor"><span>◷</span> Datos históricos</a>
       <a data-dataset-link="prediction" href="#prediccion"><span>◈</span> Predicción</a>
+      <a data-dataset-link="heatmap" href="#mapa-calor"><span>◷</span> Datos históricos</a>
       <a data-dataset-link="dashboard" href="#dashboard"><span>▥</span> Dashboard</a>
       <a id="overview-link" href="#flujo"><span>▦</span> Arquitectura</a>
     </nav>
@@ -103,8 +103,8 @@
     </section>
     <nav class="dataset-tabs" aria-label="Espacios de análisis">
       <a class="dataset-tab" data-dataset-tab="trucks" href="#camiones"><span class="dataset-icon">⛟</span><span><strong>Camiones en vivo</strong><small>Dónde están y qué hicieron</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◷</span><span><strong>Datos históricos</strong><small>Mapas de telemetría guardados</small></span></a>
       <a class="dataset-tab" data-dataset-tab="prediction" href="#prediccion"><span class="dataset-icon">◈</span><span><strong>Predicción</strong><small>Rutas aprendidas y alertas en vivo</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◷</span><span><strong>Datos históricos</strong><small>Mapas de telemetría guardados</small></span></a>
       <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores e informes</small></span></a>
     </nav>
     <div id="camiones" class="dataset-space" data-dataset-view="trucks" hidden>
