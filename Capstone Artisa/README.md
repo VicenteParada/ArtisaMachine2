@@ -23,7 +23,7 @@ flowchart LR
 | `telemetria` | Trae los reportes de la API de la empresa cada 30 s. Sobrevive a cortes de red y recupera lo pendiente sin duplicar. |
 | `machine-diario` | Cierra cada día, extrae viajes, clasifica las rutas y predice la actividad de los próximos 15 días (00:30). |
 | `mariadb` | Base de datos (volumen persistente). |
-| `endpoints` | API de solo lectura para la web (`/api/*`). |
+| `endpoints` | API de solo lectura para la web (`/api/*`) y el asistente (`/api/chat`). |
 | `front` + `nginx` | Interfaz web; nginx es la única entrada (puerto 8080). |
 | `auth` | Inicio de sesión (contraseña con hash, sesiones JWT de 12 h). |
 | `respaldo` | Respaldo diario de MariaDB en `respaldos/` (03:00). |
@@ -50,7 +50,27 @@ flowchart LR
 | Dashboard | Dos pestañas. **Datos globales**: reportes disponibles, recorridos, rutas por nivel, uso de rutas por zona (zonas relativas), disponibilidad de la flota y ranking de rutas (cada una abre el mapa). **Informes históricos** reúne el resumen mensual por día y la comparación por camión. Permite descargar el informe operativo completo o la matriz de reportes/km por patente, además de buscar, ordenar, revisar calendarios, camiones sin reportar y calidad de los datos (`/api/dashboard`, cierre diario). |
 | Predicción | Pestañas **Mapa de calor** y **Rutas**: hasta 15 días con ruleta de días, rango, recorrido animado, confianza por día y comparación de métodos. |
 | Mapa de rutas | Estudio del histórico. **Rutas clasificadas**: rutas completas por nivel de uso (filtros y buscador), resumen del período y rutas más y menos usadas; los camiones se encienden aparte. **Mapas de telemetría**: calor, rutas por camión, uso de rutas y puntos para un rango de hasta 14 días. |
+| Asistente | Burbuja de chat abajo a la derecha, en todas las vistas: IA que responde sobre las reglas del sistema y los datos actuales de la flota (ver abajo). |
 | Arquitectura | Estado de cada servicio. |
+
+## Asistente (IA)
+
+Chat en la web (`POST /api/chat`, detrás del mismo inicio de sesión) que responde preguntas
+sobre cómo funciona Artisa y sobre los datos de la flota, sin inventar cifras.
+
+- **Modelo:** Gemini, gratuito desde Google AI Studio. Pon la clave en `.env`
+  (`GEMINI_API_KEY=...`; opcional `GEMINI_MODEL`, por defecto `gemini-flash-latest`) y
+  ejecuta `python3 scripts/artisa.py iniciar`. Sin clave, o si Gemini falla, el chat lo
+  avisa y el resto de la web sigue funcionando. El proveedor está aislado en
+  `endpoints/llm.py` (se puede cambiar por Ollama local).
+- **Contexto:** las secciones *Servicios*, *Reglas clave* y *Web* de este README, más un
+  resumen de los mismos resultados que ya muestra la web (camiones, reportes diarios,
+  rutas clasificadas y predicción).
+- **Solo lectura y privacidad:** no ejecuta SQL propio ni modifica datos. Al modelo solo
+  llegan datos agregados (totales, patentes y números internos, rutas por nombre); nunca
+  conductores, RUT ni coordenadas.
+- **Límites:** preguntas de hasta 500 caracteres; 6 por minuto por IP en Nginx, y 6 por
+  minuto y 200 por día en total.
 
 ## Estructura
 

@@ -7,12 +7,12 @@
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
   <link rel="stylesheet" href="/mapa-base.css?v=20261015-dashboard2">
-  <link rel="stylesheet" href="/style.css?v=20261019-dashboardops2">
+  <link rel="stylesheet" href="/style.css?v=20261020-asistente3">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
   <script src="/mapa-base.js?v=20261019-routehover1" defer></script>
   <script src="/map-data.js?v=20261015-dashboard2" defer></script>
-  <script src="/app.js?v=20261019-dashboardops2" defer></script>
+  <script src="/app.js?v=20261020-asistente3" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -552,6 +552,38 @@
     </div>
     <footer><span>ARTISA <span class="slash">/</span> Del origen al frontend</span><span>ETL · MariaDB · Machine Learning · Endpoints · Frontend</span></footer>
   </main>
+  <!-- Asistente flotante: visible en todas las vistas mientras hay sesión. -->
+  <div class="assistant-widget">
+    <section id="assistant-panel" class="assistant-panel" role="dialog" aria-labelledby="assistant-title" hidden>
+      <header class="assistant-head">
+        <span class="assistant-avatar" aria-hidden="true">✦</span>
+        <div class="assistant-head-text"><h2 id="assistant-title">Asistente Artisa</h2><span id="assistant-status" class="assistant-state">Listo</span></div>
+        <button type="button" id="assistant-clear" class="assistant-icon" title="Borrar conversación" aria-label="Borrar conversación">↺</button>
+        <button type="button" id="assistant-close" class="assistant-icon" title="Minimizar" aria-label="Minimizar asistente">✕</button>
+      </header>
+      <div id="assistant-log" class="assistant-log" role="log" aria-live="polite" aria-label="Conversación con el asistente">
+        <p class="assistant-empty">Hola. Pregúntame cómo funciona Artisa (días, viajes, paradas, rutas, niveles y predicción) o por los datos actuales de la flota. Solo veo resúmenes: no conductores, RUT ni ubicaciones exactas.</p>
+      </div>
+      <div class="assistant-suggestions" aria-label="Preguntas de ejemplo">
+        <button type="button" data-assistant-question="¿Cuántos camiones están en ruta ahora y cuántos km lleva la flota hoy?">Flota ahora</button>
+        <button type="button" data-assistant-question="¿Cuáles son las 3 rutas más usadas y cuántos viajes tiene cada una?">Rutas más usadas</button>
+        <button type="button" data-assistant-question="¿Qué significa que una ruta sea verde, naranja o roja?">Niveles de uso</button>
+        <button type="button" data-assistant-question="¿Qué día de los próximos se espera más actividad y qué método usa la predicción?">Predicción</button>
+        <button type="button" data-assistant-question="¿Qué camiones llevan días sin reportar?">Sin reportar</button>
+      </div>
+      <form id="assistant-form" class="assistant-form">
+        <label for="assistant-input" class="sr-only">Pregunta para el asistente</label>
+        <textarea id="assistant-input" rows="1" maxlength="500" placeholder="Escribe tu pregunta…" required></textarea>
+        <button type="submit" id="assistant-send" class="assistant-send" aria-label="Enviar pregunta">➤</button>
+      </form>
+      <p class="assistant-note"><span id="assistant-count">0 / 500</span> · IA (Gemini): puede equivocarse, confirma las cifras en su sección.</p>
+    </section>
+    <button type="button" id="assistant-toggle" class="assistant-bubble" aria-expanded="false" aria-controls="assistant-panel" title="Asistente Artisa">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path fill="currentColor" d="M12 3C6.5 3 2 6.9 2 11.7c0 2.6 1.3 4.9 3.4 6.5L5 22l4-2.2c.9.2 1.9.4 3 .4 5.5 0 10-3.9 10-8.6S17.5 3 12 3Zm-4 10a1.3 1.3 0 1 1 0-2.6A1.3 1.3 0 0 1 8 13Zm4 0a1.3 1.3 0 1 1 0-2.6 1.3 1.3 0 0 1 0 2.6Zm4 0a1.3 1.3 0 1 1 0-2.6 1.3 1.3 0 0 1 0 2.6Z"/></svg>
+      <span class="sr-only">Abrir asistente</span>
+      <i id="assistant-unread" class="assistant-unread" hidden></i>
+    </button>
+  </div>
   </div>
 </body>
 </html>

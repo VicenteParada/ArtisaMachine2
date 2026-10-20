@@ -39,7 +39,7 @@ def static_cache(raw_path):
 # si el proxy corta antes, una consulta lenta pero válida se ve como "endpoints no disponibles".
 # Nginx espera hasta 150 s.
 SLOW_PREFIXES = (("/api/gps", 120), ("/api/prediccion", 120), ("/api/mapa", 90),
-                 ("/api/camiones", 90), ("/api/dashboard", 60))
+                 ("/api/camiones", 90), ("/api/dashboard", 60), ("/api/chat", 140))
 
 
 def upstream_timeout(path):

@@ -148,6 +148,9 @@ services:
       COMPANY_API_INTERVAL_SECONDS: ${COMPANY_API_INTERVAL_SECONDS:-30}
       ARTISA_TIMEZONE: ${ARTISA_TIMEZONE:-America/Santiago}
       ETL_HISTORICO: ${ETL_HISTORICO:-1}
+      # Asistente (Gemini). Sin clave, el chat avisa que no está configurado.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
     depends_on:
       mariadb:
         condition: service_healthy

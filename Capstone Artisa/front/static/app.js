@@ -85,6 +85,7 @@ function logout(message = "") {
   }
   activeToken = null;
   try { localStorage.removeItem(TOKEN_KEY); } catch { /* Almacenamiento no disponible. */ }
+  clearAssistantLog();
   clearPassword();
   $("login-user").value = "";
   appShell.hidden = true;
@@ -195,6 +196,10 @@ async function api(path, options = {}) {
     if (response.status === 401) {
       logout(EXPIRED_MESSAGE);
       throw new Error(EXPIRED_MESSAGE);
+    }
+    // El límite de frecuencia de Nginx responde 429 en HTML.
+    if (response.status === 429 && !(response.headers.get("Content-Type") || "").includes("json")) {
+      throw new Error("Demasiadas consultas seguidas. Espera un momento e intenta de nuevo.");
     }
     const payload = await response.json();
     if (version !== sessionVersion || !token()) throw new Error(EXPIRED_MESSAGE);
@@ -4582,6 +4587,151 @@ setInterval(() => {
     loadTruckDay(truckView.id, truckView.day, true);
   }
 }, TRUCK_REFRESH_MS);
+
+// --- Asistente (/api/chat) ---
+// Ventana flotante en todas las vistas. El historial vive solo en esta página: se borra al
+// cerrar sesión o recargar.
+const ASSISTANT_MAX = 500;
+let assistantBusy = false;
+
+// Solo usa el DOM: logout() puede llamarla antes de que se ejecute esta parte del archivo.
+function clearAssistantLog() {
+  for (const message of document.querySelectorAll("#assistant-log .assistant-message")) message.remove();
+  document.querySelector("#assistant-log .assistant-empty").hidden = false;
+  document.getElementById("assistant-panel").hidden = true;
+  document.getElementById("assistant-toggle").setAttribute("aria-expanded", "false");
+  document.getElementById("assistant-toggle").classList.remove("is-open");
+  document.getElementById("assistant-unread").hidden = true;
+}
+
+function setAssistantOpen(open) {
+  $("assistant-panel").hidden = !open;
+  $("assistant-toggle").setAttribute("aria-expanded", String(open));
+  $("assistant-toggle").classList.toggle("is-open", open);
+  if (open) {
+    $("assistant-unread").hidden = true;
+    $("assistant-log").scrollTop = $("assistant-log").scrollHeight;
+    $("assistant-input").focus();
+  }
+}
+
+// Texto del modelo sin HTML: párrafos, listas con "-" o "*" y **negritas**.
+function assistantText(text) {
+  const container = document.createElement("div");
+  container.className = "assistant-text";
+  let list = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) { list = null; continue; }
+    const item = /^[-*•]\s+(.*)$/.exec(line);
+    const block = document.createElement(item ? "li" : "p");
+    (item ? item[1] : line).split(/\*\*(.+?)\*\*/).forEach((part, index) => {
+      if (!part) return;
+      if (index % 2) { const strong = document.createElement("strong"); strong.textContent = part; block.append(strong); }
+      else block.append(part.replace(/^#+\s*/, ""));
+    });
+    if (item) {
+      if (!list) { list = document.createElement("ul"); container.append(list); }
+      list.append(block);
+    } else {
+      list = null;
+      container.append(block);
+    }
+  }
+  return container;
+}
+
+function addAssistantMessage(kind, text, meta = "") {
+  const log = $("assistant-log");
+  log.querySelector(".assistant-empty").hidden = true;
+  const message = document.createElement("article");
+  message.className = `assistant-message ${kind}`;
+  const label = document.createElement("span");
+  label.className = "assistant-who";
+  label.textContent = kind === "user" ? "Tú" : "Asistente";
+  message.append(label);
+  if (kind === "bot") message.append(assistantText(text));
+  else { const body = document.createElement("p"); body.textContent = text; message.append(body); }
+  if (meta) { const small = document.createElement("small"); small.textContent = meta; message.append(small); }
+  log.append(message);
+  log.scrollTop = log.scrollHeight;
+  return message;
+}
+
+function setAssistantStatus(text, tone) {
+  const status = $("assistant-status");
+  status.textContent = text;
+  status.className = `assistant-state ${tone}`;
+}
+
+async function askAssistant(rawQuestion) {
+  const question = rawQuestion.replace(/\s+/g, " ").trim();
+  if (assistantBusy || !question) return;
+  if (question.length > ASSISTANT_MAX) {
+    setAssistantStatus(`Máximo ${ASSISTANT_MAX} caracteres`, "warning");
+    return;
+  }
+  assistantBusy = true;
+  $("assistant-send").disabled = true;
+  $("assistant-input").value = "";
+  updateAssistantCount();
+  setAssistantStatus("Pensando…", "info");
+  addAssistantMessage("user", question);
+  const waiting = addAssistantMessage("pending", "Revisando los datos de la flota…");
+  try {
+    const payload = await api("/api/chat", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({pregunta: question}), timeoutMs: 145000,
+    });
+    waiting.remove();
+    addAssistantMessage("bot", payload.respuesta, `Datos al ${payload.datos_al} · ${payload.modelo}`);
+    setAssistantStatus("Listo", "neutral");
+    if ($("assistant-panel").hidden) $("assistant-unread").hidden = false;  // llegó con la ventana minimizada
+  } catch (error) {
+    waiting.remove();
+    if (!activeToken) return;  // la sesión se cerró: logout() ya limpió la conversación
+    addAssistantMessage("error", error.message);
+    setAssistantStatus("No disponible", "warning");
+  } finally {
+    assistantBusy = false;
+    $("assistant-send").disabled = false;
+  }
+}
+
+function updateAssistantCount() {
+  const input = $("assistant-input");
+  $("assistant-count").textContent = `${input.value.length} / ${ASSISTANT_MAX}`;
+  // El cuadro crece con el texto hasta un tope (después aparece la barra de desplazamiento).
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+}
+
+$("assistant-toggle").addEventListener("click", () => setAssistantOpen($("assistant-panel").hidden));
+$("assistant-close").addEventListener("click", () => { setAssistantOpen(false); $("assistant-toggle").focus(); });
+$("assistant-panel").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") { setAssistantOpen(false); $("assistant-toggle").focus(); }
+});
+
+$("assistant-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  askAssistant($("assistant-input").value);
+});
+$("assistant-input").addEventListener("input", updateAssistantCount);
+$("assistant-input").addEventListener("keydown", (event) => {
+  // Enter envía; Shift+Enter agrega una línea.
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    $("assistant-form").requestSubmit();
+  }
+});
+$("assistant-clear").addEventListener("click", () => {
+  clearAssistantLog();
+  setAssistantStatus("Listo", "neutral");
+  setAssistantOpen(true);
+});
+for (const button of document.querySelectorAll("[data-assistant-question]")) {
+  button.addEventListener("click", () => askAssistant(button.dataset.assistantQuestion));
+}
 
 restoreSession();
 setInterval(refresh, 300000);
