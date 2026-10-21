@@ -1085,6 +1085,7 @@ a.db-cal-day:hover{outline:2px solid var(--ink);outline-offset:1px}
 /* Tabla arriba con sus filtros; anomalías de toda la flota abajo */
 .db-table-filters{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin:0 0 10px}
 .db-table-filters .db-filters{flex:1 1 420px}
-.db-section-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:26px 0 0;padding-top:18px;border-top:1px solid var(--line)}
+.db-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:26px 0 0;padding-top:18px;border-top:1px solid var(--line)}
 .db-section-head span{color:var(--muted);font-size:10px}
 .db-bars{max-height:440px;overflow-y:auto;padding-right:4px;scrollbar-width:thin}
+.db-section-head>div{display:grid;gap:3px}

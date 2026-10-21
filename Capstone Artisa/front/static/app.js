@@ -1271,7 +1271,7 @@ function dbColumns() {
 
 var dbState = {data: null, period: null, periods: {}, requests: {}, query: "", filter: "todos", sort: "reportes",
   dir: -1, open: null, days: {}, rank: "paradas", minDays: 0, minKm: 0,
-  rankOrder: "desc", rankLimit: 8, lowLimit: 8, view: "periodo", monthMetric: "reportes", dayMetric: "km"};
+  rankOrder: "desc", rankLimit: 8, lowLimit: 8, anomPeriod: null, view: "periodo", monthMetric: "reportes", dayMetric: "km"};
 const DB_RANKS = {
   paradas: {title: "Camiones con más paradas", color: "#d97941", value: (t) => t.paradas, show: (t) => `${format(t.paradas)} paradas`,
     detail: (t) => `${formatMinutes(t.detenido)} detenido · ${format(t.km, 1)} km`},
@@ -1304,22 +1304,27 @@ function renderDashboard(data) {
   }
   const first = !dbState.data;
   dbState.data = data;
-  if (!dbState.period || (dbState.period !== "todos" && !data.meses.includes(dbState.period))) dbState.period = data.mes_en_curso;
-  $("db-period").replaceChildren(...[...data.meses].reverse().map((month) => {
-    const option = el("option", "", capitalize(dashMonthLabel(month, "long")) + (month === data.mes_en_curso ? " (en curso)" : ""));
-    option.value = month;
-    return option;
-  }), Object.assign(el("option", "", `Todo el historial (desde el ${dbDay(data.desde)})`), {value: "todos"}));
-  $("db-period").value = dbState.period;
-  if (first || window.location.hash === "#dashboard") loadDashPeriod();
+  const valid = (period) => period === "todos" || data.meses.includes(period);
+  if (!valid(dbState.period)) dbState.period = data.mes_en_curso;
+  if (!valid(dbState.anomPeriod)) dbState.anomPeriod = data.mes_en_curso;
+  for (const [id, value] of [["db-period", dbState.period], ["db-anom-period", dbState.anomPeriod]]) {
+    $(id).replaceChildren(...[...data.meses].reverse().map((month) => {
+      const option = el("option", "", capitalize(dashMonthLabel(month, "long")) + (month === data.mes_en_curso ? " (en curso)" : ""));
+      option.value = month;
+      return option;
+    }), Object.assign(el("option", "", `Todo el historial (desde el ${dbDay(data.desde)})`), {value: "todos"}));
+    $(id).value = value;
+  }
+  if (first || window.location.hash === "#dashboard") { loadDashPeriod(); loadDashPeriod(dbState.anomPeriod); }
 }
 
 // Cada período se pide una vez y se renueva cada 5 min (el día en curso sigue sumando datos);
 // mientras se renueva se sigue mostrando lo anterior.
-async function loadDashPeriod() {
-  const period = dbState.period;
+// El período de la tabla y el de las anomalías se piden por separado (pueden ser distintos).
+async function loadDashPeriod(period = dbState.period) {
   const cached = dbState.periods[period];
-  renderDashTable();
+  if (period === dbState.period) renderDashTable();
+  if (period === dbState.anomPeriod) renderDashAnomalies();
   if (dbState.requests[period] || (cached?.camiones && Date.now() - cached.loadedAt < DB_REFRESH_MS)) return;
   const range = dbRange(period);
   dbState.requests[period] = true;
@@ -1332,6 +1337,18 @@ async function loadDashPeriod() {
     delete dbState.requests[period];
   }
   if (dbState.period === period) renderDashTable();
+  if (dbState.anomPeriod === period) renderDashAnomalies();
+}
+
+function renderDashAnomalies() {
+  const info = dbState.data && dbState.periods[dbState.anomPeriod];
+  $("db-anom-title").textContent = dbState.anomPeriod ? `Anomalías de ${dbPeriodLabel(dbState.anomPeriod)}` : "Anomalías";
+  if (!info || !info.camiones) {
+    for (const id of ["db-findings", "db-rank", "db-low"]) $(id).replaceChildren();
+    $("db-findings").append(el("p", "fd-loading", info?.error ? "No se pudo cargar: " + info.error : "Cargando las anomalías del período…"));
+    return;
+  }
+  renderDashHighlights(info);
 }
 
 function dbSilent(truck, info) {
@@ -1399,7 +1416,6 @@ function renderDashTable() {
     $("dashboard-snapshot").className = "status " + (info?.error ? "warning" : "neutral");
     table.replaceChildren();
     $("db-foot").textContent = info?.error ? "No se pudo cargar el período: " + info.error : "Cargando los camiones del período…";
-    for (const id of ["db-findings", "db-rank", "db-low"]) $(id).replaceChildren();
     return;
   }
   renderDashFilters(info);
@@ -1412,7 +1428,6 @@ function renderDashTable() {
   $("db-note").textContent = (info.incluye_hoy ? "Hoy sigue sumando datos. " : "") + (failures.length
     ? `Ojo: ${failures.length === 1 ? "el" : "los"} ${failures.map((day) => dbDay(day.fecha)).join(", ")} toda la flota envió menos de la mitad de lo normal (falla de la plataforma GPS), lo que baja las cifras de ese período.`
     : "");
-  renderDashHighlights(info);
   const trucks = dbTrucks(info);
   const columns = dbColumns();
   for (const button of document.querySelectorAll("[data-db-view]")) {
@@ -1517,6 +1532,11 @@ window.addEventListener("resize", dbFitDetail);
 // Quita los filtros de la tabla: lo que viene de las anomalías (toda la flota) debe verse en ella.
 function dbClearFilters() {
   Object.assign(dbState, {query: "", filter: "todos", minDays: 0, minKm: 0});
+  if (dbState.period !== dbState.anomPeriod) {  // la tabla muestra el mismo período que las anomalías
+    dbState.period = dbState.anomPeriod;
+    $("db-period").value = dbState.period;
+    loadDashPeriod();
+  }
   $("db-search").value = "";
   $("db-min-days").value = "0";
   $("db-min-km").value = "0";
@@ -1558,6 +1578,10 @@ function renderDashHighlights(info) {
   const silentAll = dbAll(info).filter((truck) => dbSilent(truck, info));
   const never = silentAll.filter((truck) => !truck.ultimo_dia).length;
   const silent = silentAll.filter((truck) => truck.ultimo_dia).sort((a, b) => b.dias_sin_reportes - a.dias_sin_reportes)[0];
+  const range = dbRange(dbState.anomPeriod);
+  const periodDays = Math.round((dayDate(range.hasta) - dayDate(range.desde)) / 86400000) + 1;
+  const fewest = dbAll(info).filter((truck) => truck.dias > 0)  // reportó en el mes (no cuenta los que aún no llegaban)
+    .sort((a, b) => a.dias - b.dias || a.reportes - b.reportes)[0];
   const cards = [
     {truck: top(trucks, "paradas"), label: "Más paradas", value: (t) => `${format(t.paradas)} paradas`,
       note: (t) => `${formatMinutes(t.detenido)} detenido en total`, color: "#d97941"},
@@ -1567,8 +1591,13 @@ function renderDashHighlights(info) {
       note: (t) => `${format(t.dias)} días con datos`, color: "#287a57"},
     {truck: top(withKm, "por100"), label: "Más detención por distancia", value: (t) => `${format(t.por100, 0)} min / 100 km`,
       note: (t) => `${format(t.km, 1)} km recorridos`, color: "#7b5c91"},
-    {truck: silent, label: "Más días sin reportes", value: (t) => `${format(t.dias_sin_reportes)} días`,
-      note: (t) => `último dato el ${dbDay(t.ultimo_dia)}` + (never ? ` · ${format(never)} del catálogo nunca reportaron` : ""), color: "#71817e"}
+    // En el mes en curso: quién lleva más días sin reportar hoy. En un mes pasado: quién tuvo
+    // menos días con datos ese mes (entre los que reportaron al menos un día).
+    dbState.anomPeriod === dbState.data.mes_en_curso
+      ? {truck: silent, label: "Más días sin reportes", value: (t) => `${format(t.dias_sin_reportes)} días`,
+        note: (t) => `último dato el ${dbDay(t.ultimo_dia)}` + (never ? ` · ${format(never)} del catálogo nunca reportaron` : ""), color: "#71817e"}
+      : {truck: fewest, label: "Menos días con datos", value: (t) => `${format(t.dias)} de ${format(periodDays)} días`,
+        note: (t) => `${format(t.reportes)} reportes en el período`, color: "#71817e"}
   ].filter((card) => card.truck);
   $("db-findings").replaceChildren(...cards.map((card) => {
     const box = el("button", "db-finding");
@@ -1601,7 +1630,7 @@ function renderDashHighlights(info) {
   const sortedReports = reporting.map((truck) => truck.reportes).sort((a, b) => a - b);
   const median = sortedReports.length ? sortedReports[Math.floor(sortedReports.length / 2)] : 0;
   const low = pick(reporting, (truck) => truck.reportes, "asc", dbState.lowLimit);
-  $("db-low-title").textContent = `Camiones que menos reportaron en ${dbPeriodLabel(dbState.period)}`;
+  $("db-low-title").textContent = `Camiones que menos reportaron en ${dbPeriodLabel(dbState.anomPeriod)}`;
   $("db-low-note").textContent = `Comparados con la mediana de la flota en el período (${format(median)} reportes): la barra completa es lo normal. En rojo, bajo la mitad.`;
   dbBars($("db-low"), low.map((truck) => {
     const share = median ? truck.reportes / median * 100 : 0;
@@ -1824,6 +1853,7 @@ async function downloadDashDays() {
 }
 
 $("db-period").addEventListener("change", (event) => { dbState.period = event.target.value; dbState.open = null; loadDashPeriod(); });
+$("db-anom-period").addEventListener("change", (event) => { dbState.anomPeriod = event.target.value; loadDashPeriod(dbState.anomPeriod); });
 $("db-search").addEventListener("input", (event) => { dbState.query = event.target.value; renderDashTable(); });
 $("db-csv").addEventListener("click", downloadDashCsv);
 for (const [id, key, number] of [["db-min-days", "minDays", true], ["db-min-km", "minKm", true],
