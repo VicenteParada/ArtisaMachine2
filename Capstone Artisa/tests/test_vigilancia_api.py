@@ -152,13 +152,26 @@ class EnVivoTests(unittest.TestCase):
         self.assertEqual(data["alertas"][0]["estado"], "sin_senal")
         self.assertFalse(data["vehiculos"][0]["en_alerta"])
 
-    def test_history_by_day_newest_first(self):
-        filas = [guardada(1, AHORA - timedelta(hours=5), AHORA - timedelta(hours=4), "terminada"),
-                 guardada(2, AHORA - timedelta(minutes=20), AHORA - timedelta(minutes=1), asset="T05", nivel="N5")]
-        data = v.alertas_rango(cursor_con(filas), date(2026, 10, 19), date(2026, 10, 19), AHORA)
+    def test_history_has_only_finished_alerts_newest_first(self):
+        cursor = cursor_con([guardada(2, AHORA - timedelta(hours=2), AHORA - timedelta(hours=1), "terminada", asset="T05"),
+                             guardada(1, AHORA - timedelta(hours=5), AHORA - timedelta(hours=4), "terminada")])
+        consultas = []
+        execute = cursor.execute
+        cursor.execute = lambda query, params=None: (consultas.append(query), execute(query, params))
+        data = v.alertas_rango(cursor, date(2026, 10, 19), date(2026, 10, 19), AHORA)
+        self.assertIn("estado = 'terminada'", consultas[-1])  # las abiertas no entran al historial
         self.assertEqual([a["id"] for a in data["alertas"]], [2, 1])
-        self.assertEqual((data["resumen"]["activas"], data["resumen"]["terminadas"]), (1, 1))
+        self.assertEqual(data["resumen"]["terminadas"], 2)
         self.assertEqual(data["desde"], "2026-10-19")
+
+    def test_cached_positions_get_the_latest_alerts(self):
+        # La respuesta guardada en caché no tenía alertas; Machine guardó una después.
+        vieja = v.vigilancia(cursor_con(), AHORA)
+        self.assertEqual(vieja["resumen"]["activas"], 0)
+        nueva = v.con_alertas(vieja, cursor_con([guardada(1, AHORA - timedelta(minutes=20), AHORA - timedelta(minutes=1))]), AHORA)
+        self.assertEqual((nueva["resumen"]["activas"], nueva["vehiculos"][0]["en_alerta"]), (1, True))
+        self.assertEqual(nueva["resumen"]["camiones_por_nivel"], vieja["resumen"]["camiones_por_nivel"])
+        self.assertEqual(vieja["resumen"]["activas"], 0)  # la caché no se modifica
 
     def test_without_the_table_yet_there_are_no_alerts(self):
         def sin_tabla(_):

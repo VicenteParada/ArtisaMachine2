@@ -68,7 +68,7 @@ seguido. Así quedan como registro aunque el camión vuelva a su ruta.
 | Sección | Para qué sirve |
 |---|---|
 | Camiones en vivo | Dónde está cada camión y qué hizo cada día: recorrido, viajes, paradas, reportes y últimos 30 días. |
-| Rutas y alertas | Rutas previstas para los próximos 7 días con su nivel (N1–N5), camiones en vivo encima, alertas y tabla de niveles. "Historial" muestra las alertas guardadas por día, 7 días o mes y las descarga en CSV (Excel). Al final, plegado, "¿Cómo funciona el modelo?". |
+| Rutas y alertas | Rutas previstas para los próximos 7 días con su nivel (N1–N5), camiones en vivo encima, alertas y tabla de niveles. "Historial" muestra las alertas ya terminadas por día, 7 días o mes y las descarga en CSV (Excel); las abiertas están en "Activas" y "Sin señal". Al final, plegado, "¿Cómo funciona el modelo?". |
 | Datos históricos | Mapas de días pasados (hasta 14 días): calor, rutas por camión, uso de rutas y puntos. |
 | Dashboard | Indicadores de la flota e informes por mes y por camión (con el nivel de reporte A–D). |
 | Asistente | Chat abajo a la derecha que responde sobre la flota, las rutas y las alertas. |

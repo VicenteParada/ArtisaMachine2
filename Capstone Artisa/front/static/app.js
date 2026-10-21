@@ -871,27 +871,30 @@ function vgRenderHistory() {
   const range = history.desde === history.hasta ? dayLabel(history.desde, "long")
     : `${dayLabel(history.desde, "short")} – ${dayLabel(history.hasta, "short")}`;
   $("vg-history-note").textContent = history.loading ? "Cargando…" : history.error ? "No se pudo cargar: " + history.error
-    : `${format(total)} ${total === 1 ? "alerta" : "alertas"} · ${range}`;
+    : `${format(total)} ${total === 1 ? "alerta terminada" : "alertas terminadas"} · ${range}`;
   if (history.loading || history.error) { list.replaceChildren(); return; }
   const visible = [...history.alerts.entries()].filter(([, a]) =>
     vgMatches(`${a.patente} ${a.nombre || ""} ${a.conductor || ""} ${a.ubicacion || ""}`));
   list.replaceChildren(...visible.map(([id, alert]) => vgAlertItem(id, alert, history.desde !== history.hasta)));
-  if (!visible.length) list.append(el("li", "monitor-empty", total ? "No hay alertas para esta búsqueda." : "Sin alertas en estas fechas."));
+  if (!visible.length) list.append(el("li", "monitor-empty", total ? "No hay alertas para esta búsqueda."
+    : "Ninguna alerta terminada en estas fechas. Las que siguen abiertas están en Activas y Sin señal."));
   vgMarkSelection();
 }
 
 // Una fila por alerta, para revisarlas en Excel.
 function downloadAlertHistory() {
   const history = vg.history;
-  const header = ["Patente", "Camión", "Conductor", "Estado", "Inicio (hora Chile)", "Fin (hora Chile)", "Duración (min)",
-    "Nivel", "Ruta", "Km recorridos", "Km máximos a una ruta habitual", "Última ubicación", "Versión del modelo"];
+  const header = ["Patente", "Camión", "Conductor", "Inicio (hora Chile)", "Fin (hora Chile)", "Duración (min)",
+    "Nivel", "Ruta", "Km recorridos", "Km máximos a una ruta habitual", "Zona", "Salió de la ruta en (lat, lon)",
+    "Terminó en (lat, lon)", "Versión del modelo"];
   const number = (value) => value === null || value === undefined ? "" : format(value, 1).replace(/\./g, "");
+  const point = (p) => p && Number.isFinite(Number(p[0])) ? `${Number(p[0]).toFixed(5)}, ${Number(p[1]).toFixed(5)}` : "";
   const lines = [header.map(csvValue).join(";")];
   for (const alert of history.alerts.values()) {
-    lines.push([alert.patente, alert.nombre, alert.conductor, VG_STATES[alert.estado].label,
+    lines.push([alert.patente, alert.nombre, alert.conductor,
       csvLocalDateTime(alert.inicio), csvLocalDateTime(alert.fin), alert.minutos,
       alert.nivel === "N6" ? "N6 · fuera de ruta" : "N5 · ruta mínima", alert.ruta_label, number(alert.km_recorridos),
-      number(alert.km_al_corredor), alert.ubicacion, alert.version_modelo].map(csvValue).join(";"));
+      number(alert.km_al_corredor), alert.ubicacion, point(alert.estela?.[0]), point(alert.posicion), alert.version_modelo].map(csvValue).join(";"));
   }
   saveCsv(lines, `artisa-alertas-${history.desde}${history.hasta !== history.desde ? "-a-" + history.hasta : ""}.csv`);
 }

@@ -523,13 +523,26 @@ def keep_warm():
         time.sleep(10)
 
 
+def builder_result(path, wait=True):
+    """Resultado guardado de la ruta. La vigilancia lleva además las alertas recién leídas del
+    registro (consulta liviana), para que nunca queden atrasadas respecto de la caché."""
+    result = cached_result(path, wait)
+    if path == "/api/vigilancia" and result and result.get("status") == "ok":
+        try:
+            with connect_db(read_timeout=15) as connection, connection.cursor() as cursor:
+                result = vigilancia_api.con_alertas(result, cursor)
+        except pymysql.MySQLError as error:
+            print(f"Endpoints: alertas sin refrescar ({type(error).__name__})", flush=True)
+    return result
+
+
 def chat_source(path):
     """Fuentes del asistente: /api/estado (liviano) o el último resultado guardado, sin esperar
     un recálculo: el asistente responde al tiempo con lo que ya ve la web."""
     if path == "/api/estado":
         with connect_db(autocommit=False, read_timeout=15) as connection, connection.cursor() as cursor:
             return pipeline_state(cursor)
-    return cached_result(path, wait=False)
+    return builder_result(path, wait=False)
 
 
 class Handler(JsonHandler):
@@ -584,7 +597,7 @@ class Handler(JsonHandler):
             return
         if path in BUILDERS:
             # Resultados de Machine si existe una clasificación activa; si no, "pendiente".
-            result = cached_result(path)
+            result = builder_result(path)
             if result is None:
                 self.respond(503, {"status": "error", "error": "No se pudo calcular el mapa; se reintentará."})
                 return

@@ -5,7 +5,8 @@
   dibujar (una sola línea por camino). Cambia con cada versión (una por día).
 - /api/vigilancia: cada camión en vivo con el nivel de la ruta que pasa a menos de ~1 km
   (N6 si no hay ninguna) y las alertas abiertas y de hoy.
-- /api/alertas?desde=&hasta=: el registro de alertas por día, para el historial y la descarga.
+- /api/alertas?desde=&hasta=: el registro de alertas TERMINADAS por día, para el historial y
+  la descarga (las que siguen abiertas están en /api/vigilancia).
 
 Las alertas las detecta y guarda Machine cada minuto en la tabla alertas_ruta (Parte 8 del
 modelo); esta API solo las lee. Solo lectura.
@@ -121,11 +122,12 @@ def _resumen(lista):
 
 
 def alertas_rango(cursor, desde, hasta, ahora=None):
-    """Alertas que empezaron entre los días locales desde y hasta (ambos incluidos)."""
+    """Alertas terminadas que empezaron entre los días locales desde y hasta (ambos incluidos).
+    Una alerta entra al historial cuando termina: así sus datos (duración, km, camino) ya no cambian."""
     ahora = ahora or datetime.now(timezone.utc).replace(tzinfo=None)
     inicio, _ = dias.limites_utc(desde)
     _, fin = dias.limites_utc(hasta)
-    lista = _leer_alertas(cursor, "inicio >= %s AND inicio < %s", (inicio, fin), ahora)
+    lista = _leer_alertas(cursor, "estado = 'terminada' AND inicio >= %s AND inicio < %s", (inicio, fin), ahora)
     lista.sort(key=lambda a: a["inicio"], reverse=True)
     return {"status": "ok", "desde": desde.isoformat(), "hasta": hasta.isoformat(), "zona": dias.ZONA,
             "min_minutos": MIN_MINUTOS, "min_km": MIN_KM, "alertas": lista, "resumen": _resumen(lista)}
@@ -140,14 +142,10 @@ def vigilancia(cursor, ahora=None):
     modelo, mapa = leer_modelo(cursor)
     if modelo is None:
         return None
-    hoy, _ = dias.limites_utc(dias.hoy(ahora))
-    lista = _leer_alertas(cursor, "estado IN ('activa', 'sin_senal') OR fin >= %s", (hoy,), ahora)
-    en_alerta = {a["patente"] for a in lista if a["estado"] == "activa"}
     etiquetas = {r["id"]: r["label"] for r in modelo["rutas"]}
     vehiculos = rutas_api.latest_positions(cursor, {})
     ahora_por_nivel = Counter()
     for vehiculo in vehiculos:
-        vehiculo["en_alerta"] = vehiculo["vehicle_id"] in en_alerta
         vehiculo["nivel"] = vehiculo["ruta"] = vehiculo["ruta_label"] = None
         lat, lon = vehiculo.get("latitude"), vehiculo.get("longitude")
         momento = vehiculo.get("timestamp")
@@ -156,11 +154,23 @@ def vigilancia(cursor, ahora=None):
             numero, ruta = mapa.en(float(lat), float(lon))
             vehiculo.update(nivel=f"N{numero}", ruta=ruta, ruta_label=etiquetas.get(ruta))
             ahora_por_nivel[f"N{numero}"] += 1
-    resumen = _resumen(lista)
-    resumen["camiones_por_nivel"] = dict(ahora_por_nivel)
-    return {
+    data = {
         "status": "ok", "generado_en": rm.iso(ahora), "hoy": dias.hoy(ahora).isoformat(),
         "modelo": {k: v for k, v in modelo.items() if k not in ("rutas", "red")},
         "refresh_seconds": rutas_api.REFRESH_SECONDS, "min_minutos": MIN_MINUTOS, "min_km": MIN_KM,
-        "alertas": lista, "resumen": resumen, "vehiculos": vehiculos,
+        "vehiculos": vehiculos, "resumen": {"camiones_por_nivel": dict(ahora_por_nivel)},
     }
+    return con_alertas(data, cursor, ahora)
+
+
+def con_alertas(data, cursor, ahora=None):
+    """Copia de la respuesta en vivo con las alertas recién leídas de alertas_ruta (abiertas y
+    terminadas hoy). Es una consulta liviana: se hace en cada petición, así las alertas y sus
+    conteos nunca quedan atrasados respecto del registro aunque las posiciones vengan de la caché."""
+    ahora = ahora or datetime.now(timezone.utc).replace(tzinfo=None)
+    hoy, _ = dias.limites_utc(dias.hoy(ahora))
+    lista = _leer_alertas(cursor, "estado IN ('activa', 'sin_senal') OR fin >= %s", (hoy,), ahora)
+    en_alerta = {a["patente"] for a in lista if a["estado"] == "activa"}
+    vehiculos = [dict(v, en_alerta=v["vehicle_id"] in en_alerta) for v in data["vehiculos"]]
+    resumen = dict(_resumen(lista), camiones_por_nivel=data["resumen"]["camiones_por_nivel"])
+    return dict(data, alertas=lista, resumen=resumen, vehiculos=vehiculos)

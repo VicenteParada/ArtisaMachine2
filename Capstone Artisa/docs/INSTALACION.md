@@ -168,7 +168,11 @@ recorridos, distancia a la ruta habitual y camino seguido). Una alerta terminada
 
 - **En la web:** Rutas y alertas → Alertas → **Historial**. Se elige un día y el período
   (Día, 7 días o Mes, hasta 92 días) y **↓ Descargar** genera un CSV que abre en Excel.
-- **Por la API:** `GET /api/alertas?desde=AAAA-MM-DD&hasta=AAAA-MM-DD` (con sesión iniciada).
+- El historial solo trae alertas **terminadas** (sus datos ya no cambian). Las que siguen
+  abiertas se ven en **Activas** y **Sin señal** hasta que terminan.
+- El CSV trae una fila por alerta: camión, conductor, inicio, fin, duración, nivel, km
+  recorridos, distancia a la ruta habitual, zona y dónde salió y dónde terminó (lat, lon).
+- **Por la API:** `GET /api/alertas?desde=AAAA-MM-DD&hasta=AAAA-MM-DD` (con sesión iniciada; solo terminadas).
 - La tabla se crea sola al iniciar; entra en el respaldo diario junto con el resto de la base.
 
 ## 7. Respaldos
