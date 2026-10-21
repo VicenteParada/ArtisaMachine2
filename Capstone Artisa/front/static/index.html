@@ -6,12 +6,12 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/mapa-base.css?v=20261021-datos-camion">
-  <link rel="stylesheet" href="/style.css?v=20261021-datos-camion">
+  <link rel="stylesheet" href="/mapa-base.css?v=20261021-datos-camion2">
+  <link rel="stylesheet" href="/style.css?v=20261021-datos-camion2">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
-  <script src="/mapa-base.js?v=20261021-datos-camion" defer></script>
-  <script src="/app.js?v=20261021-datos-camion" defer></script>
+  <script src="/mapa-base.js?v=20261021-datos-camion2" defer></script>
+  <script src="/app.js?v=20261021-datos-camion2" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -224,6 +224,10 @@
         <p class="telemetry-intro">Lo que más se sale de lo normal en el período, y abajo todos los camiones. Toca un camión en cualquier parte para ver su detalle día por día.</p>
         <div class="db-toolbar">
           <label class="db-field"><span>Período</span><select id="db-period" aria-label="Período"></select></label>
+          <label class="db-field db-field-small"><span>Días con datos</span><select id="db-min-days" aria-label="Mínimo de días con datos">
+            <option value="0">Todos</option><option value="5">5 o más</option><option value="10">10 o más</option><option value="15">15 o más</option></select></label>
+          <label class="db-field db-field-small"><span>Recorrido mínimo</span><select id="db-min-km" aria-label="Recorrido mínimo">
+            <option value="0">Sin mínimo</option><option value="100">100 km</option><option value="500">500 km</option><option value="1000">1.000 km</option></select></label>
           <div class="db-downloads">
             <button type="button" id="db-csv" class="fd-csv" title="Una fila por camión, como la tabla">↓ Resumen</button>
             <button type="button" id="db-csv-days" class="fd-csv" title="Una fila por camión y día">↓ Día a día</button>
@@ -242,12 +246,24 @@
                 <button type="button" data-db-rank="km" aria-pressed="false">Km</button>
               </div>
             </div>
+            <div class="db-rank-tools">
+              <label class="db-field db-field-small"><span>Orden</span><select id="db-rank-order" aria-label="Orden de la comparación">
+                <option value="desc">Mayor primero</option><option value="asc">Menor primero</option></select></label>
+              <label class="db-field db-field-small"><span>Mostrar</span><select id="db-rank-limit" aria-label="Cuántos camiones mostrar">
+                <option value="8">8 camiones</option><option value="15">15 camiones</option><option value="0">Todos</option></select></label>
+            </div>
             <div id="db-rank" class="dashboard-bars db-bars"></div>
             <button type="button" class="db-more" data-db-sort="paradas" id="db-rank-more">Ver todos en la tabla ↓</button>
           </article>
           <article class="dashboard-card db-rank-card">
             <div class="db-rank-head"><div><span class="eyebrow">DETENCIÓN POR DISTANCIA</span><h3>Minutos detenido cada 100 km</h3></div></div>
             <p class="db-rank-note">Más alto es más tiempo detenido para la misma distancia. En naranjo, el 25 % más alto. Solo camiones con 100 km o más.</p>
+            <div class="db-rank-tools">
+              <label class="db-field db-field-small"><span>Orden</span><select id="db-eff-order" aria-label="Orden de la detención por distancia">
+                <option value="desc">Mayor detención</option><option value="asc">Menor detención</option></select></label>
+              <label class="db-field db-field-small"><span>Mostrar</span><select id="db-eff-limit" aria-label="Cuántos camiones mostrar">
+                <option value="8">8 camiones</option><option value="15">15 camiones</option><option value="0">Todos</option></select></label>
+            </div>
             <div id="db-eff" class="dashboard-bars db-bars"></div>
             <button type="button" class="db-more" data-db-sort="por100">Ver todos en la tabla ↓</button>
           </article>

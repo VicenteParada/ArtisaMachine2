@@ -1045,3 +1045,7 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 @media(max-width:940px){.db-pair{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:690px){.db-findings{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .db-table-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:4px 0 10px}.db-table-head .db-table-title{margin:0}.db-table-head .db-search{flex:0 1 320px}
+.db-field-small select{min-width:0;width:150px}
+.db-rank-tools{display:flex;gap:8px;flex-wrap:wrap;margin:-2px 0 12px}
+.db-rank-tools .db-field-small select{width:150px;height:32px;font-size:11px}
+@media(max-width:690px){.db-field-small,.db-field-small select,.db-rank-tools .db-field-small select{width:100%}.db-rank-tools .db-field-small{flex:1 1 0}}

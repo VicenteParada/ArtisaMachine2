@@ -1256,7 +1256,8 @@ const DB_COLUMNS = [
 ];
 
 var dbState = {data: null, period: null, periods: {}, requests: {}, query: "", filter: "todos", sort: "reportes",
-  dir: -1, open: null, days: {}, rank: "paradas"};
+  dir: -1, open: null, days: {}, rank: "paradas", minDays: 0, minKm: 0,
+  rankOrder: "desc", rankLimit: 8, effOrder: "desc", effLimit: 8};
 const DB_RANKS = {
   paradas: {title: "Camiones con más paradas", color: "#d97941", value: (t) => t.paradas, show: (t) => `${format(t.paradas)} paradas`,
     detail: (t) => `${formatMinutes(t.detenido)} detenido · ${format(t.km, 1)} km`},
@@ -1265,7 +1266,7 @@ const DB_RANKS = {
   km: {title: "Camiones con más km", color: "#287a57", value: (t) => t.km, show: (t) => `${format(t.km, 1)} km`,
     detail: (t) => `${format(t.dias)} días con datos · ${format(t.reportes)} reportes`}
 };
-const DB_RANK_SIZE = 8;
+const DB_EFFICIENCY_KM = 100;  // la detención por distancia solo compara camiones con 100 km o más
 const DB_REFRESH_MS = 5 * 60 * 1000;
 
 // Período elegido como rango de días: un mes (hasta hoy si está en curso) o todo el historial.
@@ -1323,11 +1324,12 @@ function dbSilent(truck, info) {
   return truck.dias_sin_reportes === null || truck.dias_sin_reportes >= info.sin_reportes_dias;
 }
 
-// Camiones del filtro elegido (nivel o sin reportes). Los destacados y los gráficos usan estos;
-// la tabla además aplica la búsqueda.
+// Camiones de los filtros elegidos (nivel o sin reportes, días con datos y recorrido mínimo).
+// Los destacados, las comparaciones y la tabla usan estos; la tabla además aplica la búsqueda.
 function dbFiltered(info) {
   return info.camiones.map((truck) => ({...truck, por100: detainedPer100(truck), ultimo: truck.ultimo_dia || ""}))
-    .filter((truck) => dbState.filter === "todos" || (dbState.filter === "sin_reportes" ? dbSilent(truck, info) : truck.nivel === dbState.filter));
+    .filter((truck) => dbState.filter === "todos" || (dbState.filter === "sin_reportes" ? dbSilent(truck, info) : truck.nivel === dbState.filter))
+    .filter((truck) => truck.dias >= dbState.minDays && truck.km >= dbState.minKm);
 }
 
 function dbTrucks(info) {
@@ -1344,9 +1346,11 @@ function dbTrucks(info) {
 }
 
 function renderDashFilters(info) {
-  const silent = info.camiones.filter((truck) => dbSilent(truck, info)).length;
-  const chips = [["todos", "Todos", info.camiones.length, "Todos los camiones del catálogo"],
-    ...Object.entries(DB_LEVELS).map(([level, note]) => [level, "Nivel " + level, info.conteo[level], note]),
+  // Cuántos camiones quedan en cada filtro con los mínimos de días y km elegidos.
+  const base = info.camiones.filter((truck) => truck.dias >= dbState.minDays && truck.km >= dbState.minKm);
+  const silent = base.filter((truck) => dbSilent(truck, info)).length;
+  const chips = [["todos", "Todos", base.length, "Todos los camiones del catálogo"],
+    ...Object.entries(DB_LEVELS).map(([level, note]) => [level, "Nivel " + level, base.filter((truck) => truck.nivel === level).length, note]),
     ["sin_reportes", "Sin reportes", silent, `Sin reportes desde hace ${info.sin_reportes_dias} días o más (o nunca)`]];
   $("db-filters").replaceChildren(...chips.map(([value, label, count, title]) => {
     const chip = el("button", "db-chip" + (value.length === 1 ? " db-level-" + value.toLowerCase() : value === "sin_reportes" ? " is-warning" : ""));
@@ -1440,7 +1444,10 @@ function renderDashTable() {
   const thead = el("thead");
   thead.append(head);
   table.replaceChildren(thead, body);
-  $("db-foot").textContent = `${format(trucks.length)} de ${format(info.camiones.length)} camiones · del ${dbDay(range.desde)} al ${dbDay(range.hasta)}. ` +
+  const limits = [dbState.minDays ? `${format(dbState.minDays)} días con datos o más` : "",
+    dbState.minKm ? `${format(dbState.minKm)} km o más` : ""].filter(Boolean);
+  $("db-foot").textContent = `${format(trucks.length)} de ${format(info.camiones.length)} camiones · del ${dbDay(range.desde)} al ${dbDay(range.hasta)}` +
+    (limits.length ? ` · solo con ${limits.join(" y ")}` : "") + ". " +
     "El nivel A–D compara los reportes de cada camión con el resto de la flota en el período; no indica una falla por sí solo.";
 }
 
@@ -1475,7 +1482,7 @@ function dbBars(container, items) {
 // Lo que más se sale de lo normal en el período: destacados y dos comparaciones por camión.
 function renderDashHighlights(info) {
   const trucks = dbFiltered(info).filter((truck) => truck.reportes > 0);
-  const withKm = trucks.filter((truck) => truck.km >= 100 && truck.por100 !== null);
+  const withKm = trucks.filter((truck) => truck.km >= DB_EFFICIENCY_KM && truck.por100 !== null);
   const top = (list, key) => [...list].sort((a, b) => b[key] - a[key])[0];
   const silent = dbFiltered(info).filter((truck) => dbSilent(truck, info))
     .sort((a, b) => (b.dias_sin_reportes ?? 1e9) - (a.dias_sin_reportes ?? 1e9))[0];
@@ -1508,13 +1515,17 @@ function renderDashHighlights(info) {
   }
   $("db-rank-title").textContent = rank.title;
   $("db-rank-more").dataset.dbSort = dbState.rank;
-  const ranked = [...trucks].filter((truck) => rank.value(truck) > 0).sort((a, b) => rank.value(b) - rank.value(a)).slice(0, DB_RANK_SIZE);
+  const pick = (list, value, order, limit) => {
+    const sorted = [...list].sort((a, b) => order === "asc" ? value(a) - value(b) : value(b) - value(a));
+    return limit ? sorted.slice(0, limit) : sorted;
+  };
+  const ranked = pick(trucks.filter((truck) => rank.value(truck) > 0), rank.value, dbState.rankOrder, dbState.rankLimit);
   const max = Math.max(1, ...ranked.map(rank.value));
   dbBars($("db-rank"), ranked.map((truck) => ({patente: truck.patente, label: `${truck.patente} · ${truck.nombre || "Sin nombre"}`,
     show: rank.show(truck), detail: rank.detail(truck), width: rank.value(truck) / max * 100, color: rank.color})));
   const rates = withKm.map((truck) => truck.por100).sort((a, b) => a - b);
   const warning = rates[Math.floor(rates.length * 0.75)] ?? Infinity;
-  const efficiency = [...withKm].sort((a, b) => b.por100 - a.por100).slice(0, DB_RANK_SIZE);
+  const efficiency = pick(withKm, (truck) => truck.por100, dbState.effOrder, dbState.effLimit);
   const maxRate = Math.max(1, ...efficiency.map((truck) => truck.por100));
   dbBars($("db-eff"), efficiency.map((truck) => ({patente: truck.patente, label: `${truck.patente} · ${truck.nombre || "Sin nombre"}`,
     show: `${format(truck.por100, 0)} min / 100 km`, width: truck.por100 / maxRate * 100,
@@ -1674,6 +1685,14 @@ async function downloadDashDays() {
 $("db-period").addEventListener("change", (event) => { dbState.period = event.target.value; dbState.open = null; loadDashPeriod(); });
 $("db-search").addEventListener("input", (event) => { dbState.query = event.target.value; renderDashTable(); });
 $("db-csv").addEventListener("click", downloadDashCsv);
+for (const [id, key, number] of [["db-min-days", "minDays", true], ["db-min-km", "minKm", true],
+  ["db-rank-order", "rankOrder", false], ["db-rank-limit", "rankLimit", true],
+  ["db-eff-order", "effOrder", false], ["db-eff-limit", "effLimit", true]]) {
+  $(id).addEventListener("change", (event) => {
+    dbState[key] = number ? Number(event.target.value) : event.target.value;
+    renderDashTable();
+  });
+}
 for (const button of document.querySelectorAll("[data-db-rank]")) {
   button.addEventListener("click", () => { dbState.rank = button.dataset.dbRank; renderDashTable(); });
 }
