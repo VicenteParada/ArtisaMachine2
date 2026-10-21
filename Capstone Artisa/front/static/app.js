@@ -1338,9 +1338,8 @@ function dbSilent(truck, info) {
   return truck.dias_sin_reportes === null || truck.dias_sin_reportes >= info.sin_reportes_dias;
 }
 
-// Camiones de los filtros elegidos (nivel o sin reportes, días con datos y recorrido mínimo).
-// Los destacados, las comparaciones y la tabla usan estos; la tabla además aplica la búsqueda.
-function dbFiltered(info) {
+// Todos los camiones del período con sus cifras calculadas (las anomalías usan estos, sin filtros).
+function dbAll(info) {
   const monthly = new Map((dbState.data.camiones || []).map((truck) => [truck.patente, truck[dbState.monthMetric] || []]));
   return info.camiones.map((truck) => {
     const row = {...truck, por100: detainedPer100(truck), ultimo: truck.ultimo_dia || ""};
@@ -1348,7 +1347,12 @@ function dbFiltered(info) {
     dbState.data.meses.forEach((month, k) => { row["m:" + month] = values[k] || 0; });
     row.mtotal = sum(values);
     return row;
-  })
+  });
+}
+
+// Camiones de la tabla: los filtros de nivel o sin reportes, días con datos y recorrido mínimo.
+function dbFiltered(info) {
+  return dbAll(info)
     .filter((truck) => dbState.filter === "todos" || (dbState.filter === "sin_reportes" ? dbSilent(truck, info) : truck.nivel === dbState.filter))
     .filter((truck) => truck.dias >= dbState.minDays && truck.km >= dbState.minKm);
 }
@@ -1510,9 +1514,16 @@ window.addEventListener("resize", dbFitDetail);
 
 // Abre un camión en la tabla (desde un destacado o una barra) y la lleva a la vista.
 // La lista completa se mantiene: solo se abre ese camión y se lleva a la vista.
-function dbOpenTruck(patente) {
-  dbState.query = "";
+// Quita los filtros de la tabla: lo que viene de las anomalías (toda la flota) debe verse en ella.
+function dbClearFilters() {
+  Object.assign(dbState, {query: "", filter: "todos", minDays: 0, minKm: 0});
   $("db-search").value = "";
+  $("db-min-days").value = "0";
+  $("db-min-km").value = "0";
+}
+
+function dbOpenTruck(patente) {
+  dbClearFilters();
   dbState.open = patente;
   renderDashTable();
   if (!dbState.days[patente]) loadDashTruck(patente);
@@ -1538,13 +1549,13 @@ function dbBars(container, items) {
   if (!items.length) container.replaceChildren(el("span", "chart-empty", "Sin camiones con datos para comparar."));
 }
 
-// Lo que más se sale de lo normal en el período: destacados y dos comparaciones por camión.
+// Anomalías del período en toda la flota (sin los filtros de la tabla): destacados y dos comparaciones.
 function renderDashHighlights(info) {
-  const trucks = dbFiltered(info).filter((truck) => truck.reportes > 0);
+  const trucks = dbAll(info).filter((truck) => truck.reportes > 0);
   const withKm = trucks.filter((truck) => truck.km >= DB_EFFICIENCY_KM && truck.por100 !== null);
   const top = (list, key) => [...list].sort((a, b) => b[key] - a[key])[0];
   // Los camiones del catálogo que nunca reportaron se cuentan aparte: no dicen cuándo se cortó la señal.
-  const silentAll = dbFiltered(info).filter((truck) => dbSilent(truck, info));
+  const silentAll = dbAll(info).filter((truck) => dbSilent(truck, info));
   const never = silentAll.filter((truck) => !truck.ultimo_dia).length;
   const silent = silentAll.filter((truck) => truck.ultimo_dia).sort((a, b) => b.dias_sin_reportes - a.dias_sin_reportes)[0];
   const cards = [
@@ -1586,7 +1597,7 @@ function renderDashHighlights(info) {
     show: rank.show(truck), detail: rank.detail(truck), width: rank.value(truck) / max * 100, color: rank.color})));
   // Menos reportes: incluye a los que no reportaron nada en el período (si alguna vez reportaron);
   // la barra compara con la mediana de la flota (barra completa = lo normal).
-  const reporting = dbFiltered(info).filter((truck) => truck.ultimo_dia);
+  const reporting = dbAll(info).filter((truck) => truck.ultimo_dia);
   const sortedReports = reporting.map((truck) => truck.reportes).sort((a, b) => a - b);
   const median = sortedReports.length ? sortedReports[Math.floor(sortedReports.length / 2)] : 0;
   const low = pick(reporting, (truck) => truck.reportes, "asc", dbState.lowLimit);
@@ -1837,8 +1848,7 @@ for (const button of document.querySelectorAll("[data-db-sort]")) {
     dbState.view = "periodo";
     dbState.sort = button.dataset.dbSort;
     dbState.dir = Number(button.dataset.dbDir || -1);
-    dbState.query = "";
-    $("db-search").value = "";
+    dbClearFilters();
     renderDashTable();
     $("db-table-title").scrollIntoView({behavior: "smooth", block: "start"});
   });
