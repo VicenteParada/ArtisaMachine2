@@ -79,6 +79,24 @@ class ModeloTests(unittest.TestCase):
         self.assertEqual([n["nivel"] for n in data["niveles"] if n["alerta"]], ["N5", "N6"])
         self.assertEqual((data["datos_hasta"], data["proxima_con_datos_hasta"]), ("2026-10-09", "2026-10-16"))
 
+    def test_shared_roads_are_drawn_once_with_the_best_level(self):
+        # Una ruta mínima que va por la misma carretera que la troncal no agrega otra línea: cada
+        # tramo aparece una vez, con el mejor nivel, y dice qué rutas lo usan (la troncal primero).
+        global RUTAS
+        original = RUTAS
+        RUTAS = original + [dict(original[1], route_id="R-MINIMA-2", geometria=linea(-68.90))]
+        try:
+            data = v.rutas_aprendidas(cursor_con([]))
+        finally:
+            RUTAS = original
+        red = data["red"]
+        compartidos = [t for t in red["tramos"] if t[3] == 2]
+        self.assertTrue(compartidos)
+        self.assertTrue(all(t[2] == 1 and t[4] == [0, 2] for t in compartidos))
+        pares = {(min(a, b), max(a, b)) for a, b, *_ in red["tramos"]}
+        self.assertEqual(len(pares), len(red["tramos"]))   # sin tramos repetidos
+        self.assertTrue(all(abs(lon + 68.90) < 1e-6 or abs(lon + 68.70) < 1e-6 for _, lon in red["nodos"]))
+
     def test_position_level_uses_the_cell_and_its_neighbors(self):
         _, mapa = v.leer_modelo(cursor_con([]))
         self.assertEqual(mapa.en(-22.5, -68.9), (1, "R-TRONCAL"))

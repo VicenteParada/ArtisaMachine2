@@ -385,42 +385,90 @@ function truckPopup(vehicle) {
   return wrapper;
 }
 
-// --- Rutas aprendidas en el mapa: cada ruta con el color y grosor de su nivel ---
+// --- Rutas aprendidas en el mapa: una sola línea por camino ---
+// Muchas rutas comparten la misma carretera (una por cada par de lugares). El servidor entrega
+// la red ya agrupada: cada tramo una vez, con el mejor nivel que pasa por ahí y qué rutas lo usan.
+// Con una alerta o un camión elegido, la red queda gris y delgada y se resalta solo lo suyo.
 function vgDrawUsage() {
   usageLayer.clearLayers();
-  if (!vg.model) return;
+  const red = vg.model?.red;
+  if (!red) return;
+  const focus = Boolean(vg.selected);
+  const onlyMinimal = vg.zone === "rare" && !focus;
   const groups = {};
-  for (const route of vg.model.rutas) (groups[route.nivel] ||= []).push(route);
-  const onlyMinimal = vg.zone === "rare";
+  for (const [a, b, level] of red.tramos) (groups[level] ||= []).push([red.nodos[a], red.nodos[b]]);
   // De la menos usada a la troncal: las troncales quedan encima.
-  for (const level of ["N5", "N4", "N3", "N2", "N1"]) {
-    const routes = groups[level];
-    if (!routes) continue;
-    const style = ROUTE_LEVELS[level];
-    const muted = onlyMinimal && level !== "N5";
-    const lines = routes.flatMap((route) => route.lineas);
-    L.polyline(lines, {renderer: usageRenderer, lineCap: "round", lineJoin: "round", interactive: false,
-      color: muted ? "#9aa8a5" : style.color, weight: muted ? 2 : (onlyMinimal ? 4.5 : style.weight),
-      opacity: muted ? 0.4 : 0.9}).addTo(usageLayer);
-    // Franja invisible más ancha encima de cada ruta: tocarla muestra su ficha.
-    for (const route of routes) {
-      L.polyline(route.lineas, {renderer: usageRenderer, weight: 14, opacity: 0, lineCap: "round", className: "vg-hit"})
-        .on("click", (event) => { L.DomEvent.stopPropagation(event); vgInspect(route, event.latlng); })
-        .addTo(usageLayer);
-    }
+  for (const number of [5, 4, 3, 2, 1]) {
+    const segments = groups[number];
+    if (!segments) continue;
+    const style = ROUTE_LEVELS["N" + number];
+    const muted = focus || (onlyMinimal && number !== 5);
+    L.polyline(segments, {renderer: usageRenderer, lineCap: "round", lineJoin: "round", interactive: false,
+      color: muted ? "#93a29e" : style.color,
+      weight: focus ? Math.max(1.5, style.weight / 3) : muted ? 2 : (onlyMinimal ? 4.5 : style.weight),
+      opacity: focus ? 0.4 : muted ? 0.45 : 0.9}).addTo(usageLayer);
   }
+  if (focus) return;
+  // Franja invisible más ancha encima: tocar un camino muestra su nivel y qué rutas pasan.
+  const all = red.tramos.map(([a, b]) => [red.nodos[a], red.nodos[b]]);
+  L.polyline(all, {renderer: usageRenderer, weight: 14, opacity: 0, lineCap: "round", className: "vg-hit"})
+    .on("click", (event) => { L.DomEvent.stopPropagation(event); vgInspect(event.latlng); })
+    .addTo(usageLayer);
 }
 
-function vgInspect(route, latlng) {
-  const style = ROUTE_LEVELS[route.nivel];
+// El tramo más cercano al punto tocado (en píxeles de pantalla).
+function vgNearestSegment(latlng) {
+  const red = vg.model.red;
+  const p = fleetMap.latLngToLayerPoint(latlng);
+  const points = new Map();
+  const at = (index) => {
+    if (!points.has(index)) points.set(index, fleetMap.latLngToLayerPoint(red.nodos[index]));
+    return points.get(index);
+  };
+  let best = null, bestDistance = Infinity;
+  for (const tramo of red.tramos) {
+    const a = at(tramo[0]), b = at(tramo[1]);
+    const distance = L.LineUtil.pointToSegmentDistance(p, a, b);
+    if (distance < bestDistance) { best = tramo; bestDistance = distance; }
+  }
+  return bestDistance <= 12 ? best : null;
+}
+
+function vgInspect(latlng) {
+  const tramo = vgNearestSegment(latlng);
+  if (!tramo) return;
+  const [, , number, total, routeIndexes] = tramo;
+  const level = "N" + number;
+  const style = ROUTE_LEVELS[level];
   const box = el("div", "vg-inspect-box");
   const head = el("span", "vg-inspect-head");
-  head.append(levelBadge(route.nivel), el("strong", "", `Nivel ${levelNumber(route.nivel)} · ${style.short}`));
-  box.append(head, el("span", "vg-inspect-route", route.label),
-    el("span", "", `${format(route.camiones)} ${route.camiones === 1 ? "camión distinto" : "camiones distintos"} · ` +
-      `${format(route.recorridos)} ${route.recorridos === 1 ? "recorrido" : "recorridos"} · ~${format(route.km, 1)} km`),
-    el("small", "", style.label));
-  L.popup({className: "vg-inspect"}).setLatLng(latlng).setContent(box).openOn(fleetMap);
+  head.append(levelBadge(level), el("strong", "", `Nivel ${number} · ${style.short}`));
+  box.append(head, el("span", "", total === 1 ? "Pasa 1 ruta aprendida por este camino:"
+    : `Pasan ${format(total)} rutas aprendidas por este camino:`));
+  const list = el("ul", "vg-inspect-routes");
+  for (const index of routeIndexes.slice(0, 5)) {
+    const route = vg.model.rutas[index];
+    const item = el("li");
+    item.append(levelBadge(route.nivel), el("span", "", route.label),
+      el("small", "", `${format(route.camiones)} ${route.camiones === 1 ? "camión" : "camiones"}`));
+    list.append(item);
+  }
+  box.append(list);
+  if (total > Math.min(5, routeIndexes.length)) box.append(el("small", "", `y ${format(total - Math.min(5, routeIndexes.length))} más`));
+  box.append(el("small", "", "El color es el de la ruta más concurrida que pasa por aquí."));
+  L.popup({className: "vg-inspect", autoPanPaddingTopLeft: [20, 120], autoPanPaddingBottomRight: [20, 90]}).setLatLng(latlng).setContent(box).openOn(fleetMap);
+}
+
+// La línea de una ruta aprendida, resaltada sobre la red apagada (con borde blanco).
+function vgHighlightRoute(routeId) {
+  const route = routeId && vg.model?.rutas.find((item) => item.id === routeId);
+  if (!route) return;
+  const color = ROUTE_LEVELS[route.nivel].color;
+  L.polyline(route.lineas, {renderer: selectionRenderer, color: "#ffffff", weight: 11, opacity: 0.9, lineCap: "round",
+    lineJoin: "round", interactive: false}).addTo(selectionLayer);
+  L.polyline(route.lineas, {renderer: selectionRenderer, color, weight: 7, opacity: 0.85, lineCap: "round",
+    lineJoin: "round", interactive: false}).bindTooltip(`${ROUTE_LEVELS[route.nivel].short} · ${route.label}`,
+    {sticky: true, className: "vg-tag"}).addTo(selectionLayer);
 }
 
 function initializeFleetMap() {
@@ -823,6 +871,7 @@ function setMonitorTab(tab) {
 function vgSelect(selection, focus = true) {
   vg.selected = selection;
   selectionLayer.clearLayers();
+  if (usageLayer) vgDrawUsage();
   if (fleetMap) fleetMap.closePopup();
   if (selection.kind === "alert") {
     const alert = vg.alerts.get(selection.id);
@@ -865,14 +914,16 @@ function vgWhere(item) {
 function vgShowAlert(alert, focus) {
   const state = VG_STATES[alert.estado];
   // La ruta mínima por la que anduvo, resaltada debajo de su recorrido.
-  const minimal = alert.ruta && vg.model?.rutas.find((route) => route.id === alert.ruta);
-  if (minimal) {
-    L.polyline(minimal.lineas, {renderer: selectionRenderer, color: ROUTE_LEVELS.N5.color, weight: 9, opacity: 0.25,
-      lineCap: "round", interactive: false}).addTo(selectionLayer);
-  }
+  vgHighlightRoute(alert.ruta);
   // Recorrido fuera de ruta (con borde blanco), su inicio y la ruta habitual más cercana.
-  L.polyline(alert.estela, {renderer: selectionRenderer, color: "#ffffff", weight: 8, opacity: 0.95, lineCap: "round", interactive: false}).addTo(selectionLayer);
-  L.polyline(alert.estela, {renderer: selectionRenderer, color: "#d7301f", weight: 4, opacity: 1, lineCap: "round", interactive: false}).addTo(selectionLayer);
+  // Sin ruta mínima debajo (fuera de ruta) el recorrido lleva borde blanco para verse sobre el mapa;
+  // sobre una ruta mínima va sin borde, así se ve la ruta roja a ambos lados.
+  if (!alert.ruta) {
+    L.polyline(alert.estela, {renderer: selectionRenderer, color: "#ffffff", weight: 8, opacity: 0.95, lineCap: "round", interactive: false}).addTo(selectionLayer);
+  }
+  L.polyline(alert.estela, {renderer: selectionRenderer, color: "#172d32", weight: alert.ruta ? 3 : 4, opacity: 1, lineCap: "round",
+    lineJoin: "round", interactive: false}).bindTooltip(`Recorrido de ${alert.patente} en alerta`,
+    {sticky: true, className: "vg-tag"}).addTo(selectionLayer);
   L.circleMarker(alert.estela[0], {renderer: selectionRenderer, radius: 6, color: "#d7301f", weight: 3, fillColor: "#fff", fillOpacity: 1})
     .bindTooltip("Salió de las rutas habituales · " + vgTime(alert.inicio), {direction: "top", className: "vg-tag"})
     .addTo(selectionLayer);
@@ -915,6 +966,7 @@ function vgShowAlert(alert, focus) {
 
 function vgShowVehicle(vehicle, focus) {
   const status = vehicleStatus(vehicle);
+  vgHighlightRoute(vehicle.ruta);
   const title = el("div", "vg-card-title");
   title.append(el("span", "plate-chip", vehicle.vehicle_id), el("strong", "", vehicle.vehicle_name || vehicle.vehicle_id));
   const facts = el("div", "vg-facts-grid");
@@ -956,6 +1008,7 @@ function vgRestoreSelection() {
 function vgReset(fit = true) {
   vg.selected = null;
   if (selectionLayer) selectionLayer.clearLayers();
+  if (usageLayer) vgDrawUsage();
   if (fleetMap) fleetMap.closePopup();
   $("map-selection-detail").classList.remove("vg-card");
   setSelectionDetail("Selección", "Elige una alerta o un camión",

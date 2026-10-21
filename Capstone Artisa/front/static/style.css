@@ -1150,3 +1150,9 @@ td.fd-col-level{color:#b8c3c0}
 @keyframes assistant-in{from{opacity:0;transform:translateY(10px)}}
 @media(prefers-reduced-motion:reduce){.assistant-panel,.assistant-message.pending p:after{animation:none}.assistant-bubble{transition:none}}
 @media(max-width:690px){.assistant-widget{right:12px;bottom:12px;left:12px}.assistant-panel{width:100%;height:calc(100vh - 96px)}.assistant-bubble{width:52px;height:52px}}
+
+/* Ficha de un camino del mapa: qué rutas aprendidas pasan por ahí */
+.vg-inspect-routes{list-style:none;margin:2px 0;padding:0;display:grid;gap:4px}
+.vg-inspect-routes li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px;font-size:10px}
+.vg-inspect-routes .lr-badge{width:15px;height:15px;font-size:9px}
+.vg-inspect-routes small{color:var(--muted);white-space:nowrap}

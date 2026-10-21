@@ -44,6 +44,7 @@ CORTE_HORAS = 6              # más de 6 h sin reportes separa dos episodios
 RADIO_BUSQUEDA = 12          # celdas de 0,1° alrededor para la distancia (~130 km)
 MAX_ALERTAS = 200
 MAX_ESTELA = 160
+MAX_RUTAS_TRAMO = 12         # rutas que se nombran al tocar un tramo del mapa
 
 
 def _gps_valido(lat, lon):
@@ -175,24 +176,55 @@ def _lineas(geometria):
 
 
 class MapaRutas:
-    """Dónde pasa cada ruta aprendida: por celda, el mejor nivel (el número más bajo) y su ruta."""
+    """Dónde pasa cada ruta aprendida: por celda, el mejor nivel (el número más bajo) y su ruta.
+
+    También arma la red para dibujar: muchas rutas comparten la misma carretera (una por cada
+    par de lugares), y dibujarlas una encima de otra se ve como un manojo de líneas. La red tiene
+    un solo tramo por par de celdas vecinas recorridas, con el mejor nivel que pasa por ahí y
+    qué rutas lo usan; el punto de cada celda es el promedio de por dónde pasaron las rutas, así
+    queda sobre el camino y no en el centro del cuadro."""
 
     def __init__(self, rutas):
         self.celdas = {}
-        for ruta in rutas:
+        self.sumas = defaultdict(lambda: [0.0, 0.0, 0])
+        self.tramos = {}  # (celda, celda) -> [mejor nivel, {índice de ruta}]
+        for k, ruta in enumerate(rutas):
             numero = _numero(ruta["nivel"])
             for linea in ruta["lineas"]:
+                anterior = None
                 for (la0, lo0), (la1, lo1) in zip(linea, linea[1:]):
                     for lat, lon in muestras_tramo(la0, lo0, la1, lo1):
                         c = celda(lat, lon)
                         if c not in self.celdas or numero < self.celdas[c][0]:
                             self.celdas[c] = (numero, ruta["id"])
+                        suma = self.sumas[c]
+                        suma[0] += lat
+                        suma[1] += lon
+                        suma[2] += 1
+                        if anterior is not None and c != anterior:
+                            clave = (anterior, c) if anterior < c else (c, anterior)
+                            tramo = self.tramos.setdefault(clave, [numero, set()])
+                            tramo[0] = min(tramo[0], numero)
+                            tramo[1].add(k)
+                        anterior = c
         # Celdas de rutas N1–N4 agrupadas en cuadros de 0,1° para medir distancias rápido.
         self.indice = defaultdict(list)
         for (i, j), (numero, _) in self.celdas.items():
             if numero <= HABITUAL:
                 lat, lon = _centro(i), _centro(j)
                 self.indice[(math.floor(lat * 10), math.floor(lon * 10))].append((lat, lon))
+
+    def red(self, rutas):
+        """{"nodos": [[lat, lon], …], "tramos": [[a, b, nivel, total, [rutas…]], …]} con las rutas
+        de cada tramo ordenadas de la más a la menos concurrida (a lo más MAX_RUTAS_TRAMO)."""
+        indice, nodos = {}, []
+        for c, (la, lo, n) in self.sumas.items():
+            indice[c] = len(nodos)
+            nodos.append([round(la / n, 5), round(lo / n, 5)])
+        orden = lambda k: (_numero(rutas[k]["nivel"]), -rutas[k]["camiones"], k)  # noqa: E731
+        tramos = [[indice[a], indice[b], numero, len(usan), sorted(usan, key=orden)[:MAX_RUTAS_TRAMO]]
+                  for (a, b), (numero, usan) in self.tramos.items()]
+        return {"nodos": nodos, "tramos": tramos}
 
     def en(self, lat, lon):
         """(nivel 1..6, route_id) de la mejor ruta en la celda o sus vecinas (~1 km)."""
@@ -275,7 +307,8 @@ def leer_modelo(cursor):
         "parametros": parametros, "niveles": niveles,
     }
     mapa = MapaRutas(rutas)
-    _CACHE.update(version=(version["id"], version["creado_en"]), modelo=dict(modelo, rutas=rutas), mapa=mapa)
+    _CACHE.update(version=(version["id"], version["creado_en"]), modelo=dict(modelo, rutas=rutas, red=mapa.red(rutas)),
+                  mapa=mapa)
     return _CACHE["modelo"], mapa
 
 
@@ -423,7 +456,7 @@ def vigilancia(cursor, ahora=None):
             ahora_por_nivel[f"N{numero}"] += 1
     return {
         "status": "ok", "generado_en": _iso(ahora), "desde": _iso(desde), "hasta": _iso(ahora),
-        "modelo": {k: v for k, v in modelo.items() if k != "rutas"},
+        "modelo": {k: v for k, v in modelo.items() if k not in ("rutas", "red")},
         "camiones": len(por_camion), "catalogo": len(catalogo),
         "reportes": sum(len(p) for p in por_camion.values()),
         "reportes_alerta": REPORTES, "refresh_seconds": rutas_api.REFRESH_SECONDS,
