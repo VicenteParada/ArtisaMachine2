@@ -17,7 +17,6 @@ API = os.environ.get("API_URL", "http://endpoints:8000")
 ROOT = Path(__file__).with_name("static")
 FILES = {"/": ("index.html", "text/html; charset=utf-8"),
          "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-         "/map-data.js": ("map-data.js", "text/javascript; charset=utf-8"),
          "/mapa-base.js": ("mapa-base.js", "text/javascript; charset=utf-8"),
          "/mapa-base.css": ("mapa-base.css", "text/css; charset=utf-8"),
          "/exploracion-gps": ("gps-maps.html", "text/html; charset=utf-8"),

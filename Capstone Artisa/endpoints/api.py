@@ -591,7 +591,7 @@ class Handler(JsonHandler):
                                          "/api/reportes/mes-completo?mes=YYYY-MM",
                                          "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
                                          "/api/camiones/X?fecha=YYYY-MM-DD", "/api/dashboard/camion?patente=X",
-                                         "/api/dashboard/niveles?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
+                                         "/api/dashboard/camiones?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
                                          "/api/alertas?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
                                          "POST /api/chat", *PENDING_RESPONSES]})
             return
@@ -644,7 +644,7 @@ class Handler(JsonHandler):
                 return
             self.respond(200, result)
             return
-        if path == "/api/dashboard/niveles":
+        if path == "/api/dashboard/camiones":
             try:
                 desde = date.fromisoformat(_param(parsed.query, "desde") or "")
                 hasta = date.fromisoformat(_param(parsed.query, "hasta") or "")
@@ -656,7 +656,7 @@ class Handler(JsonHandler):
                 return
             try:
                 with connect_db(read_timeout=30) as connection, connection.cursor() as cursor:
-                    result = dashboard_api.report_levels(cursor, desde, hasta)
+                    result = dashboard_api.trucks_period(cursor, desde, hasta)
             except pymysql.MySQLError as error:
                 self.database_error(error)
                 return
