@@ -50,12 +50,22 @@ def flota(desvio_lon=-68.50, termina=AHORA, minutos=12):
                           lon=desvio_lon)
 
 
-def cursor_con(alertas=(), version=VERSION):
+def cursor_con(alertas=(), version=VERSION, cortes=()):
     return FakeCursor([
         ("FROM rutas_version", lambda _: [dict(version)] if version else []),
         ("FROM rutas_clasificadas", RUTAS),
         ("FROM alertas_ruta", list(alertas)),
+        ("FROM cortes_senal", list(cortes)),
     ])
+
+
+def corte(desde, hasta=None, tipo="sin_datos", asset="T19"):
+    """Fila de cortes_senal tal como la deja Machine."""
+    return {"asset_id": asset, "desde": desde, "hasta": hasta, "minutos": 17, "tipo": tipo,
+            "lat_antes": -22.5, "lon_antes": -68.5, "velocidad_antes": 87.0, "encendido_antes": 1,
+            "evento_antes": "Reporte por tiempo", "lat_despues": -22.45 if hasta else None,
+            "lon_despues": -68.45 if hasta else None, "km_linea": 10.9 if hasta else None,
+            "kmh_necesaria": 38.0 if hasta else None, "copias": 13, "ultima_copia": desde + timedelta(minutes=16)}
 
 
 def guardada(id_, inicio, fin, estado="activa", asset="T19", nivel="N6"):
@@ -146,6 +156,16 @@ class EnVivoTests(unittest.TestCase):
         self.assertIsNone(t01["nivel"])  # posición de ayer: no se clasifica
         self.assertEqual(data["resumen"]["camiones_por_nivel"], {"N6": 1, "N1": 1})
 
+    def test_each_alert_carries_the_signal_cuts_during_it(self):
+        inicio, fin = AHORA - timedelta(minutes=50), AHORA - timedelta(minutes=40)
+        cortes = [corte(inicio, inicio + timedelta(minutes=17)),                     # durante la alerta
+                  corte(fin, None, "gps_congelado"),                                  # sigue sin posición
+                  corte(inicio, inicio + timedelta(minutes=17), asset="T05")]         # otro camión
+        data = v.vigilancia(cursor_con([guardada(1, inicio, fin)], cortes=cortes), AHORA)
+        cerrado, abierto = data["alertas"][0]["cortes"]
+        self.assertEqual((cerrado["minutos"], cerrado["km_linea"], cerrado["despues"]), (17, 10.9, [-22.45, -68.45]))
+        self.assertEqual((abierto["hasta"], abierto["tipo"], abierto["minutos"]), (None, "gps_congelado", 40))
+
     def test_an_active_alert_without_new_data_shows_without_signal(self):
         # Si Machine dejó de revisar, la web no la sigue mostrando como activa.
         data = v.vigilancia(cursor_con([guardada(1, AHORA - timedelta(hours=3), AHORA - timedelta(hours=2))]), AHORA)
@@ -159,7 +179,7 @@ class EnVivoTests(unittest.TestCase):
         execute = cursor.execute
         cursor.execute = lambda query, params=None: (consultas.append(query), execute(query, params))
         data = v.alertas_rango(cursor, date(2026, 10, 19), date(2026, 10, 19), AHORA)
-        self.assertIn("estado = 'terminada'", consultas[-1])  # las abiertas no entran al historial
+        self.assertIn("estado = 'terminada'", consultas[0])  # las abiertas no entran al historial
         self.assertEqual([a["id"] for a in data["alertas"]], [2, 1])
         self.assertEqual(data["resumen"]["terminadas"], 2)
         self.assertEqual(data["desde"], "2026-10-19")

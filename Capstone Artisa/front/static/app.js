@@ -287,6 +287,18 @@ const vgDuration = (minutes) => minutes < 60 ? `${format(minutes)} min`
   : `${format(Math.floor(minutes / 60))} h ${String(Math.round(minutes % 60)).padStart(2, "0")} min`;
 const vgClock = (iso) => new Intl.DateTimeFormat("es-CL", {hour: "2-digit", minute: "2-digit", timeZone: HISTORY_ZONE})
   .format(new Date(iso));
+// Cortes de señal (Machine, Parte 9): un camión fuera de las rutas habituales sin posición nueva.
+const VG_CUTS = {
+  gps_congelado: {label: "GPS sin posición nueva", note: "El equipo siguió transmitiendo, pero repitiendo la misma posición"},
+  sin_datos: {label: "Sin datos", note: "No llegó ningún reporte: sin cobertura, equipo apagado o sin energía"}
+};
+const vgCutsMinutes = (alert) => (alert.cortes || []).reduce((total, cut) => total + cut.minutos, 0);
+function vgCutText(cut) {
+  const end = cut.hasta ? `${vgClock(cut.hasta)}` : "sigue";
+  const where = (point) => point ? `${point[0].toFixed(5)}, ${point[1].toFixed(5)}` : "—";
+  return `${vgClock(cut.desde)} (${where(cut.antes)}) → ${end} (${where(cut.despues)}) · ${vgDuration(cut.minutos)} · `
+    + VG_CUTS[cut.tipo].label + (cut.km_linea === null ? "" : ` · ${format(cut.km_linea, 1)} km en línea recta`);
+}
 // Una alerta por su id, esté en las de hoy o en el historial cargado.
 const vgAlertById = (id) => vg.alerts.get(id) || vg.history.alerts.get(id);
 const vgAlertKey = (alert) => "a" + alert.id;
@@ -804,6 +816,15 @@ function vgAlertItem(id, alert, withDay) {
   who.append(el("span", "plate-chip", alert.patente), el("strong", "", alert.nombre || "Sin nombre"));
   button.append(head, who, vgWhere(alert), el("span", "vg-alert-facts", vgAlertFacts(alert)),
     el("span", "vg-alert-driver", "Conductor: " + (alert.conductor || "no informado")));
+  const cuts = alert.cortes || [];
+  if (cuts.length) {
+    const open = cuts.find((cut) => !cut.hasta);
+    const frozen = cuts.some((cut) => cut.tipo === "gps_congelado");
+    button.append(el("span", "vg-alert-cut" + (frozen ? " is-frozen" : ""), open
+      ? `${VG_CUTS[open.tipo].label} desde ${vgClock(open.desde)}`
+      : `${format(cuts.length)} ${cuts.length === 1 ? "corte" : "cortes"} de señal · ${vgDuration(vgCutsMinutes(alert))} sin posición`
+        + (frozen ? " · GPS sin posición nueva" : "")));
+  }
   button.addEventListener("click", () => vgSelect({kind: "alert", id}));
   item.append(button);
   return item;
@@ -886,7 +907,8 @@ function downloadAlertHistory() {
   const history = vg.history;
   const header = ["Patente", "Camión", "Conductor", "Inicio (hora Chile)", "Fin (hora Chile)", "Duración (min)",
     "Nivel", "Ruta", "Km recorridos", "Km máximos a una ruta habitual", "Zona", "Salió de la ruta en (lat, lon)",
-    "Terminó en (lat, lon)", "Versión del modelo"];
+    "Terminó en (lat, lon)", "Cortes de señal", "Minutos sin posición", "GPS sin posición nueva",
+    "Detalle de los cortes", "Versión del modelo"];
   const number = (value) => value === null || value === undefined ? "" : format(value, 1).replace(/\./g, "");
   const point = (p) => p && Number.isFinite(Number(p[0])) ? `${Number(p[0]).toFixed(5)}, ${Number(p[1]).toFixed(5)}` : "";
   const lines = [header.map(csvValue).join(";")];
@@ -894,7 +916,9 @@ function downloadAlertHistory() {
     lines.push([alert.patente, alert.nombre, alert.conductor,
       csvLocalDateTime(alert.inicio), csvLocalDateTime(alert.fin), alert.minutos,
       alert.nivel === "N6" ? "N6 · fuera de ruta" : "N5 · ruta mínima", alert.ruta_label, number(alert.km_recorridos),
-      number(alert.km_al_corredor), alert.ubicacion, point(alert.estela?.[0]?.[0]), point(alert.posicion), alert.version_modelo].map(csvValue).join(";"));
+      number(alert.km_al_corredor), alert.ubicacion, point(alert.estela?.[0]?.[0]), point(alert.posicion),
+      (alert.cortes || []).length, vgCutsMinutes(alert), (alert.cortes || []).some((cut) => cut.tipo === "gps_congelado") ? "Sí" : "No",
+      (alert.cortes || []).map(vgCutText).join(" | "), alert.version_modelo].map(csvValue).join(";"));
   }
   saveCsv(lines, `artisa-alertas-${history.desde}${history.hasta !== history.desde ? "-a-" + history.hasta : ""}.csv`);
 }
@@ -1010,6 +1034,20 @@ function vgShowAlert(alert, focus) {
       .bindTooltip(`Ruta habitual más cercana · ${format(alert.corredor.km, 1)} km`, {permanent: true, direction: "auto", className: "vg-tag"})
       .addTo(selectionLayer);
   }
+  // Cortes de señal: dónde se perdió la posición y dónde reapareció (sin dibujar un camino).
+  for (const cut of alert.cortes || []) {
+    const label = VG_CUTS[cut.tipo].label;
+    if (cut.despues) {
+      L.polyline([cut.antes, cut.despues], {renderer: selectionRenderer, color: "#7a6f8f", weight: 2, dashArray: "1 7",
+        lineCap: "round", opacity: 0.9}).bindTooltip(`${label} · ${vgDuration(cut.minutos)} · ${format(cut.km_linea, 1)} km en línea recta`,
+        {sticky: true, className: "vg-tag"}).addTo(selectionLayer);
+      L.circleMarker(cut.despues, {renderer: selectionRenderer, radius: 5, color: "#7a6f8f", weight: 3, fillColor: "#fff", fillOpacity: 1})
+        .bindTooltip(`Reapareció · ${vgClock(cut.hasta)}`, {direction: "top", className: "vg-tag"}).addTo(selectionLayer);
+    }
+    L.circleMarker(cut.antes, {renderer: selectionRenderer, radius: 6, color: "#fff", weight: 2, fillColor: "#7a6f8f", fillOpacity: 1})
+      .bindTooltip(`Última posición antes del corte · ${vgClock(cut.desde)}${cut.hasta ? "" : " · sigue sin posición"}`,
+        {direction: "top", className: "vg-tag"}).addTo(selectionLayer);
+  }
   if (!truckMarkers.has(alert.patente)) {
     L.circleMarker(alert.posicion, {renderer: selectionRenderer, radius: 8, color: "#fff", weight: 3, fillColor: "#d7301f", fillOpacity: 1})
       .bindTooltip("Último dato · " + vgTime(alert.fin), {direction: "top", className: "vg-tag"}).addTo(selectionLayer);
@@ -1028,7 +1066,8 @@ function vgShowAlert(alert, focus) {
     el("p", "vg-card-line", vgAlertWhen(alert, true)),
     facts
   ];
-  if (alert.estela.length > 1) {
+  if (alert.cortes?.length) lines.push(vgCutsBlock(alert.cortes));
+  else if (alert.estela.length > 1) {
     const gaps = alert.estela.length - 1;
     lines.push(el("p", "vg-card-line", `${format(gaps)} ${gaps === 1 ? "hueco" : "huecos"} de más de 5 min sin reportes (no se dibuja${gaps === 1 ? "" : "n"} como camino)`));
   }
@@ -1039,9 +1078,33 @@ function vgShowAlert(alert, focus) {
   vgCard("Alerta", el("b", "vg-state " + state.className, state.label), title, lines);
   if (focus) {
     const bounds = L.latLngBounds(alert.estela.flat());
+    for (const cut of alert.cortes || []) { bounds.extend(cut.antes); if (cut.despues) bounds.extend(cut.despues); }
     if (alert.corredor) bounds.extend(alert.corredor.punto);
     fleetMap.fitBounds(bounds, {padding: [60, 60], maxZoom: 13});
   }
+}
+
+function vgCutsBlock(cuts) {
+  const block = el("div", "vg-cuts");
+  block.append(el("p", "vg-cuts-title", cuts.length === 1 ? "Corte de señal" : `${format(cuts.length)} cortes de señal`));
+  for (const cut of cuts) {
+    const kind = VG_CUTS[cut.tipo];
+    const row = el("div", "vg-cut" + (cut.tipo === "gps_congelado" ? " is-frozen" : ""));
+    const head = el("p", "vg-cut-head");
+    head.append(el("b", "", kind.label), el("span", "", `${vgClock(cut.desde)} → ${cut.hasta ? vgClock(cut.hasta) : "sigue"} · ${vgDuration(cut.minutos)}`));
+    const details = [kind.note + "."];
+    details.push(`Antes: ${cut.velocidad_antes === null ? "—" : format(cut.velocidad_antes, 0) + " km/h"}`
+      + (cut.encendido_antes === null ? "" : cut.encendido_antes ? ", motor encendido" : ", motor apagado")
+      + (cut.evento_antes ? ` (${cut.evento_antes})` : "") + ".");
+    if (cut.hasta) {
+      details.push(`Reapareció a ${format(cut.km_linea, 1)} km en línea recta (${format(cut.kmh_necesaria, 0)} km/h de promedio).`);
+    } else if (cut.ultima_copia && cut.tipo === "gps_congelado") {
+      details.push(`Última transmisión del equipo: ${vgClock(cut.ultima_copia)}.`);
+    }
+    row.append(head, el("p", "vg-cut-text", details.join(" ")));
+    block.append(row);
+  }
+  return block;
 }
 
 function vgShowVehicle(vehicle, focus) {

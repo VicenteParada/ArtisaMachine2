@@ -233,7 +233,8 @@ def publicar_alertas(connection, utc_now):
         resultado = modelo_rutas.vigilar(connection, utc_now)
         STATE["alertas"] = resultado or {"estado": "sin modelo de rutas"}
         if resultado and (resultado["nuevas"] or resultado["cerradas"]):
-            print(f"Alertas: {resultado['nuevas']} nuevas, {resultado['cerradas']} cerradas", flush=True)
+            print(f"Alertas: {resultado['nuevas']} nuevas, {resultado['cerradas']} cerradas"
+                  f" · {resultado.get('cortes', 0)} cortes de señal en curso o recientes", flush=True)
     except Exception as error:
         try:
             connection.rollback()

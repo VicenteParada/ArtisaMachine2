@@ -21,8 +21,10 @@ VERSION = {"id": 9, "creado_en": datetime(2026, 10, 10, 1, 0)}
 class FakeConnection:
     """Conexión simulada: responde las lecturas y anota las escrituras en alertas_ruta."""
 
-    def __init__(self, filas, faenas=(), guardadas=(), rutas=None, version=VERSION):
-        self.escrituras = []
+    def __init__(self, filas, faenas=(), guardadas=(), rutas=None, version=VERSION, copias=None, abiertos=(),
+                 siguiente=None):
+        self.escrituras, self.cortes = [], []
+        copias, siguiente = copias or {}, siguiente or {}
         catalogo = [{"asset_id": f"T{k:02d}"} for k in range(20)]
 
         def escribir(params):
@@ -41,6 +43,10 @@ class FakeConnection:
                 "location": "Sierra Gorda"}]),
             ("SELECT id, asset_id, inicio, fin, estado FROM alertas_ruta", list(guardadas)),
             ("alertas_ruta", escribir),
+            ("COUNT(*) AS copias", lambda params: [copias.get(params, {"copias": 1})]),
+            ("WHERE hasta IS NULL", list(abiertos)),
+            ("report_date > %s ORDER BY", lambda params: [siguiente[params[0]]] if params[0] in siguiente else []),
+            ("cortes_senal", lambda params: self.cortes.append(params) or []),
         ])
 
     def cursor(self):
@@ -64,7 +70,11 @@ def detectar(filas, faenas=()):
     mr._VIGILANCIA.update(version=None, mapa=None, etiquetas={})
     capturadas = {}
     original = mr.guardar_alertas
-    mr.guardar_alertas = lambda connection, alertas, ahora, version_id: capturadas.setdefault("a", alertas)
+    def capturar(connection, alertas, ahora, version_id):
+        capturadas["a"] = alertas
+        return {}
+
+    mr.guardar_alertas = capturar
     try:
         mr.vigilar(FakeConnection(filas, faenas), AHORA)
     finally:
@@ -137,6 +147,54 @@ def alerta(inicio, fin, estado="activa", asset="T19"):
             "latitud": -22.52, "longitud": -68.5, "corredor": (41.0, [-22.5, -68.9]),
             "estela": [[-22.5, -68.5], [-22.52, -68.5]], "nombre": "Lampa-919", "conductor": "JUAN PÉREZ",
             "ubicacion": "Sierra Gorda"}
+
+
+@unittest.skipIf(mr is None, "numpy/scikit-learn se validan dentro del contenedor Machine")
+class CortesTests(unittest.TestCase):
+    """Parte 9: como TFWK19, que a 87 km/h fuera de ruta pasó 17 min sin posición y después quedó
+    transmitiendo copias del último reporte sin posición nueva."""
+
+    def setUp(self):
+        mr._VIGILANCIA.update(version=None, mapa=None, etiquetas={})
+
+    def detectar(self, filas):
+        return mr.detectar_cortes(mr.rm.leer_reportes(FakeConnection(filas).cursor_, AHORA - timedelta(hours=24),
+                                                      AHORA + timedelta(hours=1), {f"T{k:02d}" for k in range(20)}),
+                                  mr.rm.MapaRutas(mr.rm.leer_rutas(FakeConnection([]).cursor_, 9)), [], AHORA + timedelta(minutes=40))
+
+    def test_a_moving_truck_off_route_that_stops_reporting(self):
+        filas = flota() + camino("T19", AHORA + timedelta(minutes=17), 6, lat0=-22.53, lat1=-22.56, lon=-68.50)
+        hueco, abierto = self.detectar(filas)
+        self.assertEqual((hueco["asset_id"], hueco["minutos"], hueco["km_linea"]), ("T19", 17, 1.1))
+        self.assertEqual((hueco["lat_antes"], hueco["lat_despues"]), (-22.52, -22.53))
+        self.assertIsNone(abierto["hasta"])                      # sigue sin posición nueva
+
+    def test_gaps_on_usual_routes_or_while_stopped_are_not_cuts(self):
+        filas = [f for f in flota() if f["asset_id"] != "T19"]  # en la troncal (N1)
+        self.assertEqual(self.detectar(filas), [])
+        parado = [dict(f, speed=0.0) for f in flota() if f["asset_id"] == "T19"]
+        self.assertEqual(self.detectar(parado), [])
+
+    def test_copies_that_keep_arriving_mean_the_gps_was_frozen(self):
+        desde = AHORA - timedelta(minutes=50)
+        base = {"asset_id": "T19", "desde": desde}
+        congelado = mr._copias(FakeConnection([], copias={("T19", desde): {
+            "copias": 13, "primera": AHORA - timedelta(minutes=40), "ultima": AHORA - timedelta(minutes=1),
+            "encendido": 1, "evento": "Reporte por tiempo"}}).cursor_, base)
+        self.assertEqual((congelado["tipo"], congelado["copias"], congelado["encendido_antes"]), ("gps_congelado", 13, 1))
+        # Copias que llegaron juntas (el conector se puso al día) no dicen que el equipo transmitía.
+        juntas = mr._copias(FakeConnection([], copias={("T19", desde): {
+            "copias": 13, "primera": AHORA, "ultima": AHORA + timedelta(seconds=3)}}).cursor_, base)
+        self.assertEqual(juntas["tipo"], "sin_datos")
+
+    def test_an_open_cut_out_of_the_window_is_closed_with_the_next_position(self):
+        desde = AHORA - timedelta(hours=30)
+        abierto = {"asset_id": "T19", "desde": desde, "lat_antes": -22.5, "lon_antes": -68.5}
+        connection = FakeConnection([], abiertos=[abierto], siguiente={"T19": {
+            "report_date": desde + timedelta(hours=2), "latitude": -22.6, "longitude": -68.5}})
+        mr.guardar_cortes(connection, [], AHORA)
+        hasta, minutos, *_ = connection.cortes[-1]
+        self.assertEqual((hasta, minutos), (desde + timedelta(hours=2), 120))
 
 
 @unittest.skipIf(mr is None, "numpy/scikit-learn se validan dentro del contenedor Machine")

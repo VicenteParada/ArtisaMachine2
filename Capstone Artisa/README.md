@@ -63,6 +63,12 @@ más de una ruta habitual (N1–N4). Es algo para revisar, no una falta comproba
 `alertas_ruta`: cuándo empezó y terminó cada una, cuánto duró, nivel, km recorridos y camino
 seguido. Así quedan como registro aunque el camión vuelva a su ruta.
 
+**Cortes de señal (Parte 9):** si un camión en movimiento fuera de las rutas habituales pasa más
+de 5 min sin posición nueva, se guarda en `cortes_senal`: último reporte antes (hora, lugar,
+velocidad, motor), primero después y la distancia en línea recta entre ambos. "GPS sin posición
+nueva" = siguieron llegando copias del mismo reporte (el equipo transmitía, pero sin GPS);
+"Sin datos" = no llegó nada. Es un indicio para revisar, no una prueba.
+
 ## Web
 
 | Sección | Para qué sirve |

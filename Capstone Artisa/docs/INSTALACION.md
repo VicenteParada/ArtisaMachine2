@@ -113,7 +113,7 @@ python3 scripts/artisa.py rutas
 |---|---|---|
 | Telemetría | Cada 30 s | Trae los reportes nuevos de la API. Si se corta la red, reintenta y recupera lo pendiente. |
 | Día en curso | Cada 10 min | Actualiza las cifras de hoy. |
-| Alertas | Cada minuto | Revisa si algún camión salió de las rutas habituales y lo guarda en la tabla `alertas_ruta`. |
+| Alertas | Cada minuto | Revisa si algún camión salió de las rutas habituales y lo guarda en `alertas_ruta`; los cortes de señal fuera de ruta, en `cortes_senal`. |
 | Cierre diario | 00:30 | Cierra el día anterior, recalcula días con reportes atrasados y reentrena el modelo de rutas (previsión de los próximos 7 días). |
 | Respaldo | 03:00 | Guarda la base en `respaldos/` y conserva los últimos 3 días. |
 
@@ -171,7 +171,12 @@ recorridos, distancia a la ruta habitual y camino seguido). Una alerta terminada
 - El historial solo trae alertas **terminadas** (sus datos ya no cambian). Las que siguen
   abiertas se ven en **Activas** y **Sin señal** hasta que terminan.
 - El CSV trae una fila por alerta: camión, conductor, inicio, fin, duración, nivel, km
-  recorridos, distancia a la ruta habitual, zona y dónde salió y dónde terminó (lat, lon).
+  recorridos, distancia a la ruta habitual, zona, dónde salió y dónde terminó (lat, lon) y los
+  cortes de señal durante la alerta.
+- **Cortes de señal:** se guardan en la tabla `cortes_senal` (camión fuera de las rutas
+  habituales que pasa más de 5 min sin posición nueva). En la ficha de la alerta se ve dónde se
+  perdió la posición y dónde reapareció. "GPS sin posición nueva" significa que el equipo siguió
+  transmitiendo copias del último reporte; "Sin datos", que no llegó nada.
 - **Por la API:** `GET /api/alertas?desde=AAAA-MM-DD&hasta=AAAA-MM-DD` (con sesión iniciada; solo terminadas).
 - La tabla se crea sola al iniciar; entra en el respaldo diario junto con el resto de la base.
 

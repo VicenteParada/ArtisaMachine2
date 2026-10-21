@@ -9,7 +9,8 @@
   la descarga (las que siguen abiertas están en /api/vigilancia).
 
 Las alertas las detecta y guarda Machine cada minuto en la tabla alertas_ruta (Parte 8 del
-modelo); esta API solo las lee. Solo lectura.
+modelo) y los cortes de señal en cortes_senal (Parte 9); cada alerta lleva los cortes que hubo
+durante ella. Esta API solo los lee. Solo lectura.
 """
 
 from collections import Counter
@@ -107,12 +108,44 @@ def _alerta(fila, ahora):
     }
 
 
+def _corte(fila, ahora):
+    hasta = fila["hasta"]
+    return {
+        "desde": rm.iso(fila["desde"]), "hasta": rm.iso(hasta) if hasta else None,
+        "minutos": fila["minutos"] if hasta else round((ahora - fila["desde"]).total_seconds() / 60),
+        "tipo": fila["tipo"], "antes": [fila["lat_antes"], fila["lon_antes"]],
+        "despues": [fila["lat_despues"], fila["lon_despues"]] if fila["lat_despues"] is not None else None,
+        "velocidad_antes": fila["velocidad_antes"], "encendido_antes": fila["encendido_antes"],
+        "evento_antes": fila["evento_antes"], "km_linea": fila["km_linea"], "kmh_necesaria": fila["kmh_necesaria"],
+        "copias": fila["copias"], "ultima_copia": rm.iso(fila["ultima_copia"]) if fila["ultima_copia"] else None,
+    }
+
+
+def _con_cortes(cursor, filas, ahora):
+    """Cortes de señal de cada alerta: los que empezaron entre su inicio y su fin (incluidos)."""
+    if not filas:
+        return {}
+    camiones = sorted({f["asset_id"] for f in filas})
+    try:
+        cursor.execute(
+            f"""SELECT * FROM cortes_senal WHERE asset_id IN ({", ".join(["%s"] * len(camiones))})
+                AND desde >= %s AND desde <= %s ORDER BY desde""",
+            (*camiones, min(f["inicio"] for f in filas), max(f["fin"] for f in filas)))
+        cortes = cursor.fetchall()
+    except pymysql.err.ProgrammingError:
+        return {}  # tabla aún no creada
+    return {f["id"]: [_corte(c, ahora) for c in cortes
+                      if c["asset_id"] == f["asset_id"] and f["inicio"] <= c["desde"] <= f["fin"]] for f in filas}
+
+
 def _leer_alertas(cursor, condicion, valores, ahora):
     try:
         cursor.execute(f"SELECT * FROM alertas_ruta WHERE {condicion} ORDER BY fin DESC LIMIT {MAX_ALERTAS}", valores)
     except pymysql.err.ProgrammingError:
         return []  # tabla aún no creada (Machine la crea al arrancar)
-    lista = [_alerta(fila, ahora) for fila in cursor.fetchall()]
+    filas = cursor.fetchall()
+    cortes = _con_cortes(cursor, filas, ahora)
+    lista = [dict(_alerta(fila, ahora), cortes=cortes.get(fila["id"], [])) for fila in filas]
     orden = {"activa": 0, "sin_senal": 1, "terminada": 2}
     return sorted(lista, key=lambda a: orden[a["estado"]])
 

@@ -26,6 +26,10 @@ nivel las que se dejan de usar. Todo el modelo está en este archivo, dividido e
                               guarda en alertas_ruta a los que andan en una ruta mínima (N5) o
                               fuera de ruta (N6). Al terminar, cada alerta queda fija.
 
+  PARTE 9 · Cortes de señal   Cada minuto registra en cortes_senal cuando un camión fuera de las
+                              rutas habituales deja de dar posiciones nuevas: último reporte antes,
+                              primero después y si el equipo siguió transmitiendo sin posición.
+
 El mapa de la web (endpoints/vigilancia_api.py) usa la misma versión activa y el mismo índice de
 rutas (common/rutas_mapa.py) para dar a cada camión su nivel en vivo, y lee las alertas guardadas.
 """
@@ -1069,11 +1073,121 @@ def guardar_alertas(connection, alertas, ahora, version_id):
     return resultado
 
 
+# ==============================================================================================
+# PARTE 9 · CORTES DE SEÑAL
+# Un camión en movimiento, fuera de las faenas y de las rutas N1–N4, que pasa más de CORTE_MIN
+# minutos sin una posición nueva. Se guarda en cortes_senal con el último reporte antes del
+# corte (hora, lugar, velocidad, motor, evento) y el primero después (hora y lugar), la distancia
+# en línea recta entre ambos y la velocidad media que habría necesitado.
+#
+# El tipo sale de las copias del último reporte. La API entrega el mismo reporte (misma hora y
+# posición, distinto id) cada vez que el equipo transmite sin una posición GPS nueva:
+#   gps_congelado  siguieron llegando copias durante CORTE_MIN minutos o más: el equipo tenía
+#                  conexión, pero el GPS no daba posición (antena desconectada o tapada, falla).
+#   sin_datos      no llegó nada: sin cobertura, equipo apagado o sin energía.
+# Es un indicio para revisar con la empresa, no una prueba. Mientras no reaparece, el corte
+# queda abierto (hasta = NULL) y se completa solo cuando llega la posición siguiente.
+# ==============================================================================================
+
+CORTE_MIN = ALERTA_SALTO_MIN
+CORTE_COPIAS = 3
+
+
+def detectar_cortes(por_camion, mapa, faenas, ahora):
+    """Cortes de señal fuera de las rutas habituales: [{asset_id, desde, hasta, …}] (fechas UTC)."""
+    cortes = []
+    for asset_id, puntos in por_camion.items():
+        anterior = None
+        for i, punto in enumerate(puntos):
+            siguiente = puntos[i + 1] if i + 1 < len(puntos) else None
+            hasta = siguiente[0] if siguiente else ahora
+            _, lat, lon, velocidad = punto
+            if ((hasta - punto[0]).total_seconds() > CORTE_MIN * 60 and _en_movimiento(punto, anterior)
+                    and not rm.en_faena(faenas, lat, lon) and not mapa.habitual(lat, lon)):
+                corte = {"asset_id": asset_id, "desde": punto[0], "hasta": siguiente and siguiente[0],
+                         "minutos": round((hasta - punto[0]).total_seconds() / 60),
+                         "lat_antes": round(lat, 5), "lon_antes": round(lon, 5), "velocidad_antes": velocidad,
+                         "lat_despues": None, "lon_despues": None, "km_linea": None, "kmh_necesaria": None}
+                if siguiente:
+                    km = rm.distancia_km(lat, lon, siguiente[1], siguiente[2])
+                    corte.update(lat_despues=round(siguiente[1], 5), lon_despues=round(siguiente[2], 5),
+                                 km_linea=round(km, 1), kmh_necesaria=round(km / (corte["minutos"] / 60 or 1), 0))
+                cortes.append(corte)
+            anterior = punto
+    return cortes
+
+
+def _copias(cursor, corte):
+    """Copias recibidas del último reporte antes del corte, su motor y evento, y el tipo de corte."""
+    try:
+        cursor.execute(
+            """SELECT COUNT(*) AS copias, MIN(recibido_en) AS primera, MAX(recibido_en) AS ultima,
+                      MAX(ignition) AS encendido, MAX(event_name) AS evento
+               FROM telemetria_api WHERE asset_id=%s AND report_date=%s""",
+            (corte["asset_id"], corte["desde"]))
+        fila = cursor.fetchone() or {}
+    except Exception:  # tabla aún no creada o histórico sin copias
+        fila = {}
+    copias = fila.get("copias") or 0
+    transmitiendo = (copias >= CORTE_COPIAS and fila.get("primera") and fila.get("ultima")
+                     and (fila["ultima"] - fila["primera"]).total_seconds() >= CORTE_MIN * 60)
+    return dict(corte, copias=copias, ultima_copia=fila.get("ultima"), encendido_antes=fila.get("encendido"),
+                evento_antes=fila.get("evento"), tipo="gps_congelado" if transmitiendo else "sin_datos")
+
+
+def _siguiente_posicion(cursor, asset_id, desde):
+    """Primera posición nueva después de `desde` (para cerrar cortes que salieron de la ventana)."""
+    cursor.execute(
+        """SELECT report_date, latitude, longitude FROM telemetria_api
+           WHERE asset_id=%s AND report_date > %s ORDER BY report_date LIMIT 1""", (asset_id, desde))
+    return cursor.fetchone()
+
+
+def guardar_cortes(connection, cortes, ahora):
+    """Guarda o completa los cortes (uno por camión y hora del último reporte). Los abiertos que
+    salieron de la ventana se cierran con la posición siguiente, si ya llegó. Devuelve cuántos."""
+    columnas = ("hasta", "minutos", "tipo", "lat_antes", "lon_antes", "velocidad_antes", "encendido_antes",
+                "evento_antes", "lat_despues", "lon_despues", "km_linea", "kmh_necesaria", "copias", "ultima_copia")
+    with connection.cursor() as cursor:
+        vistos = set()
+        for corte in cortes:
+            corte = _copias(cursor, corte)
+            vistos.add((corte["asset_id"], corte["desde"]))
+            valores = [corte[c] for c in columnas]
+            if valores[7]:
+                valores[7] = str(valores[7])[:128]
+            cursor.execute(
+                f"""INSERT INTO cortes_senal (asset_id, desde, {", ".join(columnas)}, detectado_en, actualizado_en)
+                    VALUES (%s, %s, {", ".join(["%s"] * len(columnas))}, %s, %s)
+                    ON DUPLICATE KEY UPDATE {", ".join(f"{c}=VALUES({c})" for c in columnas)},
+                    actualizado_en=VALUES(actualizado_en)""",
+                (corte["asset_id"], corte["desde"], *valores, ahora, ahora))
+        cursor.execute("SELECT asset_id, desde, lat_antes, lon_antes FROM cortes_senal WHERE hasta IS NULL")
+        for abierto in cursor.fetchall():
+            if (abierto["asset_id"], abierto["desde"]) in vistos:
+                continue
+            fila = _siguiente_posicion(cursor, abierto["asset_id"], abierto["desde"])
+            if fila:
+                minutos = round((fila["report_date"] - abierto["desde"]).total_seconds() / 60)
+                km = rm.distancia_km(abierto["lat_antes"], abierto["lon_antes"], fila["latitude"], fila["longitude"])
+                cursor.execute(
+                    """UPDATE cortes_senal SET hasta=%s, minutos=%s, lat_despues=%s, lon_despues=%s, km_linea=%s,
+                       kmh_necesaria=%s, actualizado_en=%s WHERE asset_id=%s AND desde=%s""",
+                    (fila["report_date"], minutos, round(fila["latitude"], 5), round(fila["longitude"], 5),
+                     round(km, 1), round(km / (minutos / 60 or 1)), ahora, abierto["asset_id"], abierto["desde"]))
+            else:
+                cursor.execute("UPDATE cortes_senal SET minutos=%s, actualizado_en=%s WHERE asset_id=%s AND desde=%s",
+                               (round((ahora - abierto["desde"]).total_seconds() / 60), ahora,
+                                abierto["asset_id"], abierto["desde"]))
+    connection.commit()
+    return len(cortes)
+
+
 _VIGILANCIA = {"version": None, "mapa": None, "etiquetas": {}}
 
 
 def vigilar(connection, ahora=None):
-    """Una pasada de alertas (la llama el servicio cada minuto). None si aún no hay modelo."""
+    """Una pasada de alertas y cortes de señal (la llama el servicio cada minuto). None si aún no hay modelo."""
     ahora = ahora or datetime.now(timezone.utc).replace(tzinfo=None)
     with connection.cursor() as cursor:
         version = rm.version_activa(cursor)
@@ -1086,10 +1200,12 @@ def vigilar(connection, ahora=None):
                                etiquetas={r["id"]: r["label"] for r in rutas})
         por_camion = rm.leer_reportes(cursor, ahora - timedelta(hours=ALERTA_VENTANA_HORAS), ahora,
                                       rm.catalogo(cursor))
-        alertas = detectar_alertas(cursor, por_camion, _VIGILANCIA["mapa"], _VIGILANCIA["etiquetas"],
-                                   rm.leer_faenas(cursor), ahora)
+        faenas = rm.leer_faenas(cursor)
+        alertas = detectar_alertas(cursor, por_camion, _VIGILANCIA["mapa"], _VIGILANCIA["etiquetas"], faenas, ahora)
     connection.commit()
-    return guardar_alertas(connection, alertas, ahora, version[0])
+    resultado = guardar_alertas(connection, alertas, ahora, version[0])
+    resultado["cortes"] = guardar_cortes(connection, detectar_cortes(por_camion, _VIGILANCIA["mapa"], faenas, ahora), ahora)
+    return resultado
 
 
 if __name__ == "__main__":

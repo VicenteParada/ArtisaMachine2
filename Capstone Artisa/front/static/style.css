@@ -1176,3 +1176,14 @@ td.fd-col-level{color:#b8c3c0}
 .vg-history-csv{padding:6px 10px;border:1px solid var(--green);border-radius:6px;background:#fff;color:var(--green);font-size:10px;font-weight:700;white-space:nowrap}
 .vg-history-csv:hover{background:#edf5ee}
 .vg-history-csv:disabled{opacity:.45;cursor:default}
+
+/* Cortes de señal en la lista y la ficha de una alerta */
+.vg-alert-cut{font-size:9px;font-weight:600;color:#5d5470}
+.vg-alert-cut.is-frozen{color:#8a2f86}
+.vg-cuts{display:grid;gap:6px;padding:8px;border-radius:7px;background:#f4f2f7}
+.vg-cuts-title{margin:0;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#5d5470}
+.vg-cut{display:grid;gap:2px;padding-left:8px;border-left:3px solid #9a91ad}
+.vg-cut.is-frozen{border-left-color:#8a2f86}
+.vg-cut-head{display:flex;justify-content:space-between;gap:8px;margin:0;font-size:10px;color:var(--ink)}
+.vg-cut-head span{color:var(--muted);white-space:nowrap}
+.vg-cut-text{margin:0;font-size:9px;line-height:1.45;color:var(--muted)}

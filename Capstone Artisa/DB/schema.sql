@@ -264,3 +264,35 @@ CREATE TABLE IF NOT EXISTS alertas_ruta (
     INDEX idx_alertas_ruta_inicio (inicio),
     INDEX idx_alertas_ruta_estado (estado, fin)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Cortes de señal (machine_learning/modelo_rutas.py, Parte 9). Un camión en movimiento fuera de
+-- las rutas habituales que pasa más de 5 min sin posición nueva. desde y hasta: último reporte
+-- antes del corte y primero después (UTC). hasta NULL: sigue sin posición nueva. tipo
+-- gps_congelado: siguieron llegando copias del mismo reporte (el equipo transmitía sin GPS).
+-- tipo sin_datos: no llegó nada. km_linea y kmh_necesaria: distancia en línea recta entre ambos
+-- puntos y la velocidad media que habría necesitado.
+CREATE TABLE IF NOT EXISTS cortes_senal (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    asset_id VARCHAR(16) NOT NULL,
+    desde DATETIME(6) NOT NULL,
+    hasta DATETIME(6) NULL,
+    minutos INT UNSIGNED NOT NULL,
+    tipo VARCHAR(16) NOT NULL,
+    lat_antes DOUBLE NOT NULL,
+    lon_antes DOUBLE NOT NULL,
+    velocidad_antes DOUBLE NULL,
+    encendido_antes TINYINT(1) NULL,
+    evento_antes VARCHAR(128) NULL,
+    lat_despues DOUBLE NULL,
+    lon_despues DOUBLE NULL,
+    km_linea DOUBLE NULL,
+    kmh_necesaria DOUBLE NULL,
+    copias INT UNSIGNED NOT NULL DEFAULT 0,
+    ultima_copia DATETIME(6) NULL,
+    detectado_en DATETIME(6) NOT NULL,
+    actualizado_en DATETIME(6) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_cortes_senal_camion_desde (asset_id, desde),
+    INDEX idx_cortes_senal_desde (desde),
+    INDEX idx_cortes_senal_abiertos (hasta)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

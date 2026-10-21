@@ -215,10 +215,15 @@ def alerts_summary(data):
         "generado_en": data.get("generado_en"), "resumen": data.get("resumen"),
         "regla": f"alerta en N5 o N6 durante {data.get('min_minutos')} min o más y a {data.get('min_km')} km o "
                  "más de una ruta N1–N4, fuera de las faenas",
+        "cortes_de_senal": "gps_congelado = el equipo siguió transmitiendo sin posición GPS nueva; sin_datos = no "
+                           "llegó nada (sin cobertura o equipo apagado). Es un indicio para revisar, no una prueba.",
         "alertas": [{"patente": a.get("patente"), "numero": a.get("nombre"), "estado": a.get("estado"),
                      "nivel": NIVELES.get(a.get("nivel"), a.get("nivel")), "ruta": a.get("ruta_label"),
                      "desde": a.get("inicio"), "minutos": a.get("minutos"), "km_recorridos": a.get("km_recorridos"),
-                     "km_a_ruta_habitual": a.get("km_al_corredor")}
+                     "km_a_ruta_habitual": a.get("km_al_corredor"),
+                     "cortes_de_senal": [{"tipo": c.get("tipo"), "desde": c.get("desde"), "hasta": c.get("hasta"),
+                                          "minutos": c.get("minutos"), "km_linea": c.get("km_linea")}
+                                         for c in a.get("cortes") or []]}
                     for a in data.get("alertas") or [] if a.get("estado") != "terminada"][:TOP],
     }
 
