@@ -103,6 +103,14 @@ class DeteccionTests(unittest.TestCase):
         self.assertEqual(detectar([dict(f, speed=0.0) if f["longitude"] == -68.50 else f for f in flota()]), [])
         self.assertEqual(detectar(flota(desvio_lon=-68.885)), [])              # a ~1,5 km de la troncal
 
+    def test_the_trail_is_cut_where_reports_stop(self):
+        # Como TFWK19: 17 min sin reportes en medio de la alerta. No se une con una recta.
+        filas = flota()
+        filas += camino("T19", AHORA + timedelta(minutes=17), 6, lat0=-22.53, lat1=-22.56, lon=-68.50)
+        alerta, = detectar(filas)
+        self.assertEqual(len(alerta["estela"]), 2)
+        self.assertEqual(alerta["estela"][1][0], [-22.53, -68.5])
+
     def test_without_a_learned_model_nothing_is_checked(self):
         self.assertIsNone(mr.vigilar(FakeConnection(flota(), version=None), AHORA))
 

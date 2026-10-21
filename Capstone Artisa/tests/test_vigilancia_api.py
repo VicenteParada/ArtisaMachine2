@@ -135,7 +135,7 @@ class EnVivoTests(unittest.TestCase):
         alerta, = data["alertas"]
         self.assertEqual((alerta["patente"], alerta["estado"], alerta["nivel"], alerta["minutos"]), ("T19", "activa", "N6", 19))
         self.assertEqual(alerta["corredor"], {"km": 41.0, "punto": [-22.5, -68.9]})
-        self.assertEqual(alerta["estela"], [[-22.5, -68.5], [-22.52, -68.5]])
+        self.assertEqual(alerta["estela"], [[[-22.5, -68.5], [-22.52, -68.5]]])  # guardada sin tramos: uno solo
         self.assertEqual((alerta["nombre"], alerta["conductor"]), ("Lampa-919", "JUAN PÉREZ"))
         self.assertEqual(data["resumen"]["activas"], 1)
         self.assertEqual(data["modelo"]["version"], 9)

@@ -894,7 +894,7 @@ function downloadAlertHistory() {
     lines.push([alert.patente, alert.nombre, alert.conductor,
       csvLocalDateTime(alert.inicio), csvLocalDateTime(alert.fin), alert.minutos,
       alert.nivel === "N6" ? "N6 · fuera de ruta" : "N5 · ruta mínima", alert.ruta_label, number(alert.km_recorridos),
-      number(alert.km_al_corredor), alert.ubicacion, point(alert.estela?.[0]), point(alert.posicion), alert.version_modelo].map(csvValue).join(";"));
+      number(alert.km_al_corredor), alert.ubicacion, point(alert.estela?.[0]?.[0]), point(alert.posicion), alert.version_modelo].map(csvValue).join(";"));
   }
   saveCsv(lines, `artisa-alertas-${history.desde}${history.hasta !== history.desde ? "-a-" + history.hasta : ""}.csv`);
 }
@@ -1000,7 +1000,7 @@ function vgShowAlert(alert, focus) {
   L.polyline(alert.estela, {renderer: selectionRenderer, color: "#172d32", weight: alert.ruta ? 3 : 4, opacity: 1, lineCap: "round",
     lineJoin: "round", interactive: false}).bindTooltip(`Recorrido de ${alert.patente} en alerta`,
     {sticky: true, className: "vg-tag"}).addTo(selectionLayer);
-  L.circleMarker(alert.estela[0], {renderer: selectionRenderer, radius: 6, color: "#d7301f", weight: 3, fillColor: "#fff", fillOpacity: 1})
+  L.circleMarker(alert.estela[0][0], {renderer: selectionRenderer, radius: 6, color: "#d7301f", weight: 3, fillColor: "#fff", fillOpacity: 1})
     .bindTooltip("Salió de las rutas habituales · " + vgTime(alert.inicio), {direction: "top", className: "vg-tag"})
     .addTo(selectionLayer);
   if (alert.corredor) {
@@ -1028,13 +1028,17 @@ function vgShowAlert(alert, focus) {
     el("p", "vg-card-line", vgAlertWhen(alert, true)),
     facts
   ];
+  if (alert.estela.length > 1) {
+    const gaps = alert.estela.length - 1;
+    lines.push(el("p", "vg-card-line", `${format(gaps)} ${gaps === 1 ? "hueco" : "huecos"} de más de 5 min sin reportes (no se dibuja${gaps === 1 ? "" : "n"} como camino)`));
+  }
   if (alert.ubicacion) lines.push(el("p", "vg-card-place", alert.ubicacion));
   const link = el("a", "selection-link", "Ver su día completo →");
   link.href = `#camiones/${encodeURIComponent(alert.patente)}/${vgLocalDay(alert.fin)}`;
   lines.push(link);
   vgCard("Alerta", el("b", "vg-state " + state.className, state.label), title, lines);
   if (focus) {
-    const bounds = L.latLngBounds(alert.estela);
+    const bounds = L.latLngBounds(alert.estela.flat());
     if (alert.corredor) bounds.extend(alert.corredor.punto);
     fleetMap.fitBounds(bounds, {padding: [60, 60], maxZoom: 13});
   }

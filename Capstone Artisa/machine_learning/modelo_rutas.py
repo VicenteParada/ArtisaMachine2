@@ -897,6 +897,7 @@ ALERTA_CORTE_HORAS = 6        # más de 6 h sin reportes separa dos episodios
 ALERTA_VENTANA_HORAS = 24     # reportes que se revisan en cada pasada
 VEL_MOVIMIENTO_KMH = 5
 MAX_ESTELA = 160
+ALERTA_SALTO_MIN = 5         # minutos sin reportes que cortan el camino dibujado (igual que un recorrido)
 
 
 def _en_movimiento(punto, anterior):
@@ -953,11 +954,24 @@ def _identidad(cursor, asset_id, hasta):
 
 
 def _estela(puntos):
+    """Camino seguido durante la alerta, en tramos [[[lat, lon], …], …]. Se corta donde hay un
+    hueco de más de ALERTA_SALTO_MIN entre reportes o un salto de GPS, igual que los recorridos:
+    así no se dibuja una recta por donde no hay datos."""
+    tramos = [[puntos[0]]]
+    for a, b in zip(puntos, puntos[1:]):
+        horas = (b[0] - a[0]).total_seconds() / 3600
+        km = rm.distancia_km(a[1], a[2], b[1], b[2])
+        if horas * 60 > ALERTA_SALTO_MIN or (horas > 0 and km / horas > rm.VEL_MAX_KMH):
+            tramos.append([])
+        tramos[-1].append(b)
     paso = max(1, math.ceil(len(puntos) / MAX_ESTELA))
-    elegidos = puntos[::paso]
-    if elegidos[-1] is not puntos[-1]:
-        elegidos.append(puntos[-1])
-    return [[round(p[1], 5), round(p[2], 5)] for p in elegidos]
+    salida = []
+    for tramo in tramos:
+        elegidos = tramo[::paso]
+        if elegidos[-1] is not tramo[-1]:
+            elegidos.append(tramo[-1])
+        salida.append([[round(p[1], 5), round(p[2], 5)] for p in elegidos])
+    return salida
 
 
 def detectar_alertas(cursor, por_camion, mapa, etiquetas, faenas, ahora):

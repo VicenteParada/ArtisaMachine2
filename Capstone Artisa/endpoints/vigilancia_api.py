@@ -89,6 +89,9 @@ def _alerta(fila, ahora):
     estado = fila["estado"]
     if estado == "activa" and (ahora - fila["fin"]).total_seconds() > ACTIVA_MIN * 60:
         estado = "sin_senal"
+    estela = json.loads(fila["estela"])
+    if estela and not isinstance(estela[0][0], list):
+        estela = [estela]  # alertas guardadas antes de cortar el camino en tramos
     corredor = None
     if fila["corredor_lat"] is not None:
         corredor = {"km": fila["corredor_km"], "punto": [fila["corredor_lat"], fila["corredor_lon"]]}
@@ -99,7 +102,7 @@ def _alerta(fila, ahora):
         "reportes": fila["reportes"], "km_recorridos": fila["km_recorridos"],
         "km_al_corredor": fila["km_ruta_habitual"], "nivel": fila["nivel"], "ruta": fila["route_id"],
         "ruta_label": fila["ruta_label"], "posicion": [fila["latitud"], fila["longitud"]],
-        "velocidad": fila["velocidad"], "estela": json.loads(fila["estela"]), "corredor": corredor,
+        "velocidad": fila["velocidad"], "estela": estela, "corredor": corredor,
         "version_modelo": fila["version_modelo"],
     }
 
