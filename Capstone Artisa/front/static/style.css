@@ -758,24 +758,8 @@ td.fd-col-truck{padding-left:10px}td.fd-col-truck .fd-name{display:block;margin-
 .fd-detail td>div{position:sticky;left:12px;max-width:calc(var(--fd-wrap,100%) - 26px)}
 .fd-loading{margin:8px 0;color:var(--muted);font-size:10px}
 .fd-foot{display:block;margin-top:9px;color:var(--muted);font-size:9px;line-height:1.5}
-.fd-cal-wrap{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:18px;align-items:start}
-.fd-cal-scroll{overflow-x:auto;padding-bottom:6px;scrollbar-width:thin}
-.fd-cal-months{display:grid;grid-auto-flow:column;grid-auto-columns:13px;gap:3px;height:14px;font-size:8px;color:var(--muted);text-transform:capitalize}
-.fd-cal-months span{white-space:nowrap;overflow:visible}
-.fd-cal{display:grid;grid-auto-flow:column;grid-auto-columns:13px;gap:3px;width:max-content}
-.fd-cal-week{display:grid;grid-template-rows:repeat(7,13px);gap:3px}
-.fd-day{display:block;border-radius:3px;background:color-mix(in srgb,#1f6b50 calc(var(--heat) * 100%),#eef2ef)}
-.fd-day.is-zero{background:#f6e2d8}
-.fd-day.is-out{background:transparent}
-a.fd-day:hover{outline:2px solid var(--ink);outline-offset:1px}
-.fd-cal-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px;margin:0;font-size:10px}
-.fd-cal-stats dt{color:var(--muted);font-size:9px}
-.fd-cal-stats dd{margin:2px 0 0;font-weight:700;font-size:11px;line-height:1.35}
 .fd-open{display:inline-block;margin-top:12px;font-size:10px;font-weight:700;color:var(--green)}
-.fd-cal-legend{display:flex;align-items:center;gap:4px;margin-top:8px;font-size:8px;color:var(--muted)}
-.fd-cal-legend i{width:11px;height:11px;border-radius:3px;background:color-mix(in srgb,#1f6b50 calc(var(--heat) * 100%),#eef2ef)}
-.fd-cal-legend i:first-of-type{background:#f6e2d8}
-@media(max-width:690px){td.fd-col-truck .fd-name{display:none}.fd-cal-wrap{grid-template-columns:minmax(0,1fr)}.fd-col-truck{min-width:86px}}
+@media(max-width:690px){td.fd-col-truck .fd-name{display:none}.fd-col-truck{min-width:86px}}
 /* Dashboard: pestañas, período y datos globales */
 .fd-tab{display:grid;gap:3px;text-align:left;border:0;border-radius:9px;padding:13px 16px;background:transparent;color:var(--ink);font:inherit}
 .fd-tab strong{font-size:13px}.fd-tab small{font-size:10px;color:var(--muted)}
@@ -788,7 +772,6 @@ a.fd-day:hover{outline:2px solid var(--ink);outline-offset:1px}
 /* Datos detallados: período, barras diarias y franja */
 .fd-col-num{text-align:right;min-width:86px;font-variant-numeric:tabular-nums}
 td.fd-col-num.is-late{color:#b24c31;font-weight:600}
-.fd-day.is-period{box-shadow:0 0 0 1.5px var(--ink)}
 .fd-detail-heading{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
 .fd-detail-heading div{font-size:12px;font-weight:700;color:var(--ink)}.fd-detail-heading span{font-size:9px;color:var(--muted)}
 @media(max-width:690px){.fd-tab small{display:none}.dashboard-method{flex-direction:column;gap:5px}}
@@ -1055,3 +1038,40 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .db-table th.is-period{background:#e8f2ec;color:var(--ink)}
 .db-table td.is-period{background:#f3f8f4;font-weight:700}
 .db-table td.is-zero{color:#c4643f}
+
+/* Detalle de un camión: cifras, calendario por mes y reportes por mes */
+.db-detail{display:grid;gap:12px}
+.db-detail-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.db-detail-facts div{display:grid;gap:2px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.db-detail-facts span{color:var(--muted);font-size:9px}.db-detail-facts strong{font-size:15px}.db-detail-facts small{color:var(--muted);font-size:9px}
+.db-detail-body{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start}
+.db-detail-label{margin:0 0 8px;color:var(--ink);font-size:10px;font-weight:700}
+.db-cal-tools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.db-cal{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px}
+.db-cal.is-detailed{grid-template-columns:minmax(0,520px)}
+.db-cal-title{display:flex;justify-content:space-between;align-items:baseline;gap:6px;margin-bottom:5px;font-size:10px}
+.db-cal-title span{color:var(--muted);font-size:9px}
+.db-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}
+.db-cal-grid>b{color:var(--muted);font-size:8px;text-align:center}
+.db-cal-day{position:relative;display:grid;place-items:center;aspect-ratio:1;border-radius:4px;background:color-mix(in srgb,#1f6b50 calc(var(--heat) * 100%),#eef2ef);color:var(--ink);text-decoration:none}
+.db-cal-day small{font-size:8px;font-weight:700}
+.db-cal-day.is-dark{color:#fff}
+.db-cal-day.is-zero{background:#f6e2d8;color:#9c3f21}
+.db-cal-day.is-out{background:transparent;color:#c3ccc9}
+.db-cal-day.is-today{box-shadow:0 0 0 2px var(--orange)}
+a.db-cal-day:hover{outline:2px solid var(--ink);outline-offset:1px}
+.db-cal.is-detailed .db-cal-day{aspect-ratio:auto;min-height:46px;place-items:start;align-content:space-between;padding:4px 5px}
+.db-cal.is-detailed .db-cal-day b{justify-self:end;font-size:10px}
+.db-cal.is-detailed .db-cal-grid{gap:4px}
+.fd-cal-legend{display:flex;align-items:center;gap:4px;font-size:8px;color:var(--muted)}
+.fd-cal-legend i{width:11px;height:11px;border-radius:3px;background:color-mix(in srgb,#1f6b50 calc(var(--heat) * 100%),#eef2ef)}
+.fd-cal-legend i.is-zero{background:#f6e2d8}
+.db-month-bars{display:flex;align-items:flex-end;gap:6px;height:170px;padding:4px 0}
+.db-month-bar{display:grid;grid-template-rows:auto 1fr auto auto;justify-items:center;gap:3px;flex:1 1 0;min-width:0;height:100%}
+.db-month-bar span{display:flex;align-items:flex-end;width:100%;max-width:34px;border-radius:5px;background:#eef2ef;overflow:hidden}
+.db-month-bar i{display:block;width:100%;border-radius:5px;background:#5f9a82}
+.db-month-bar.is-period i{background:var(--green)}
+.db-month-bar b{font-size:8px}.db-month-bar small{font-size:9px;font-weight:700}.db-month-bar em{font-size:8px;font-style:normal;color:var(--muted)}
+@media(max-width:940px){.db-detail-body{grid-template-columns:minmax(0,1fr)}.db-detail-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.db-cal-day.is-dark small,.db-cal-day.is-dark b{color:#fff}
+.db-cal-day small{opacity:.9}

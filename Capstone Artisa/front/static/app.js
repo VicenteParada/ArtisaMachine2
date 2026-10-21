@@ -1271,7 +1271,7 @@ function dbColumns() {
 
 var dbState = {data: null, period: null, periods: {}, requests: {}, query: "", filter: "todos", sort: "reportes",
   dir: -1, open: null, days: {}, rank: "paradas", minDays: 0, minKm: 0,
-  rankOrder: "desc", rankLimit: 8, effOrder: "desc", effLimit: 8, view: "periodo", monthMetric: "reportes"};
+  rankOrder: "desc", rankLimit: 8, effOrder: "desc", effLimit: 8, view: "periodo", monthMetric: "reportes", dayMetric: "km"};
 const DB_RANKS = {
   paradas: {title: "Camiones con más paradas", color: "#d97941", value: (t) => t.paradas, show: (t) => `${format(t.paradas)} paradas`,
     detail: (t) => `${formatMinutes(t.detenido)} detenido · ${format(t.km, 1)} km`},
@@ -1442,6 +1442,7 @@ function renderDashTable() {
   const body = el("tbody");
   for (const truck of trucks) {
     const row = el("tr", "fd-row");
+    row.dataset.patente = truck.patente;
     row.tabIndex = 0;
     row.setAttribute("aria-expanded", String(dbState.open === truck.patente));
     const name = el("td", "fd-col-truck");
@@ -1484,21 +1485,36 @@ function renderDashTable() {
   const thead = el("thead");
   thead.append(head);
   table.replaceChildren(thead, body);
+  dbFitDetail();
   const limits = [dbState.minDays ? `${format(dbState.minDays)} días con datos o más` : "",
     dbState.minKm ? `${format(dbState.minKm)} km o más` : ""].filter(Boolean);
   $("db-foot").textContent = `${format(trucks.length)} de ${format(info.camiones.length)} camiones · del ${dbDay(range.desde)} al ${dbDay(range.hasta)}` +
     (limits.length ? ` · solo con ${limits.join(" y ")}` : "") + ". " +
     "El nivel A–D compara los reportes de cada camión con el resto de la flota en el período; no indica una falla por sí solo.";
+  if (dbState.query) {
+    const clear = el("button", "db-more", " Ver la lista completa");
+    clear.type = "button";
+    clear.addEventListener("click", () => { dbState.query = ""; $("db-search").value = ""; renderDashTable(); });
+    $("db-foot").append(clear);
+  }
 }
 
+// El detalle abierto ocupa el ancho visible de la tabla (aunque la tabla tenga scroll lateral).
+function dbFitDetail() {
+  $("db-table").style.setProperty("--fd-wrap", $("db-table-wrap").clientWidth + "px");
+}
+window.addEventListener("resize", dbFitDetail);
+
 // Abre un camión en la tabla (desde un destacado o una barra) y la lleva a la vista.
+// La lista completa se mantiene: solo se abre ese camión y se lleva a la vista.
 function dbOpenTruck(patente) {
-  dbState.query = patente;
-  $("db-search").value = patente;
+  dbState.query = "";
+  $("db-search").value = "";
   dbState.open = patente;
   renderDashTable();
   if (!dbState.days[patente]) loadDashTruck(patente);
-  $("db-table-title").scrollIntoView({behavior: "smooth", block: "start"});
+  const row = $("db-table").querySelector(`tr[data-patente="${CSS.escape(patente)}"]`);
+  (row || $("db-table-title")).scrollIntoView({behavior: "smooth", block: "start"});
 }
 
 function dbBars(container, items) {
@@ -1597,82 +1613,131 @@ function dashDetailRow(truck, range) {
   return row;
 }
 
-// Calendario de todo su historial (un cuadro por día, más oscuro con más reportes) y lo que
-// el resumen de la fila no dice: su mejor día y su promedio por día con datos en el período.
+// Detalle de un camión: cifras del período, un calendario por mes (cada día con su número y,
+// en un mes, su valor) y sus reportes y km mes a mes. Lo que se mide en el calendario se elige.
+const DB_DAY_METRICS = {
+  km: {label: "Km", index: 2, show: (v) => `${format(v, v < 100 ? 1 : 0)} km`, short: (v) => format(v, 0)},
+  reportes: {label: "Reportes", index: 1, show: (v) => `${format(v)} reportes`, short: (v) => v >= 1000 ? format(v / 1000, 1) + " mil" : format(v)},
+  paradas: {label: "Paradas", index: 3, show: (v) => `${format(v)} paradas`, short: (v) => format(v)},
+  detenido: {label: "Tiempo detenido", index: 4, show: (v) => formatMinutes(v) + " detenido", short: (v) => v >= 60 ? format(v / 60, 0) + " h" : format(v) + " m"}
+};
+const DB_WEEKDAYS = ["L", "M", "M", "J", "V", "S", "D"];
+
 function dashCalendar(truck, days, range) {
   const data = dbState.data;
+  const metric = DB_DAY_METRICS[dbState.dayMetric];
   const byDay = new Map(days.map((day) => [day[0], day]));
-  const start = new Date(data.desde + "T12:00:00Z");
-  start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));  // lunes
-  const end = new Date(data.hoy + "T12:00:00Z");
-  const max = Math.max(1, ...days.map((day) => day[1]));
-  const grid = el("div", "fd-cal");
-  const months = el("div", "fd-cal-months");
-  let lastMonth = "";
-  for (const week = new Date(start); week <= end; week.setUTCDate(week.getUTCDate() + 7)) {
-    const column = el("div", "fd-cal-week");
-    for (let d = 0; d < 7; d++) {
-      const date = new Date(week);
-      date.setUTCDate(date.getUTCDate() + d);
-      const iso = date.toISOString().slice(0, 10);
-      const square = el("a", "fd-day");
-      if (iso < data.desde || iso > data.hoy) {
-        square.classList.add("is-out");
-      } else {
-        const [, reports = 0, km = 0, stops = 0, stopped = 0] = byDay.get(iso) || [];
-        square.style.setProperty("--heat", reports ? (0.15 + 0.85 * Math.sqrt(reports / max)).toFixed(3) : "0");
-        square.classList.toggle("is-zero", !reports);
-        square.classList.toggle("is-period", iso >= range.desde && iso <= range.hasta && dbState.period !== "todos");
-        square.href = `#camiones/${encodeURIComponent(truck.patente)}/${iso}`;
-        square.title = `${dayLabel(iso, "long")}: ${format(reports)} reportes · ${format(km, 1)} km · ${format(stops)} paradas` +
-          (stopped ? ` · ${formatMinutes(stopped)} detenido` : "") + (reports ? " · abrir el día" : "");
-        square.setAttribute("aria-label", square.title);
-      }
-      column.append(square);
-    }
-    const monthKey = week.toISOString().slice(0, 7);
-    months.append(el("span", "", monthKey !== lastMonth ? dashMonthLabel(monthKey) : ""));
-    lastMonth = monthKey;
-    grid.append(column);
-  }
-  const inPeriod = days.filter((day) => day[0] >= range.desde && day[0] <= range.hasta && day[1] > 0);
-  const best = inPeriod.reduce((top, day) => !top || day[2] > top[2] ? day : top, null);
-  const stats = el("dl", "fd-cal-stats");
-  for (const [label, value] of [
-    ["Día con más km", best ? `${dbDay(best[0])} · ${format(best[2], 1)} km` : "—"],
-    ["Promedio por día con datos", inPeriod.length ? `${format(truck.km / inPeriod.length, 1)} km · ${format(truck.reportes / inPeriod.length, 0)} reportes` : "—"]
+  const value = (iso) => Number((byDay.get(iso) || [])[metric.index] || 0);
+  const inPeriod = days.filter((day) => day[0] >= range.desde && day[0] <= range.hasta);
+  const active = inPeriod.filter((day) => day[1] > 0);
+  const best = active.reduce((top, day) => !top || day[2] > top[2] ? day : top, null);
+  const periodDays = Math.round((dayDate(range.hasta) - dayDate(range.desde)) / 86400000) + 1;
+  const months = dbState.period === "todos" ? data.meses : [dbState.period];
+  const max = Math.max(1, ...days.filter((day) => day[0].slice(0, 7) >= months[0] && day[0].slice(0, 7) <= months.at(-1))
+    .map((day) => Number(day[metric.index] || 0)));
+  const detailed = months.length === 1;
+
+  const box = el("div", "db-detail");
+  const heading = el("div", "fd-detail-heading");
+  heading.append(el("div", "", `${truck.patente} · ${truck.nombre || "Sin nombre"}`),
+    el("span", "", capitalize(dbPeriodLabel(dbState.period))));
+  const facts = el("div", "db-detail-facts");
+  for (const [label, text, note] of [
+    ["Días con datos", `${format(active.length)} de ${format(periodDays)}`, periodDays - active.length ? `${format(periodDays - active.length)} sin reportes` : "todos con reportes"],
+    ["Promedio por día con datos", active.length ? `${format(truck.km / active.length, 1)} km` : "—", active.length ? `${format(truck.reportes / active.length, 0)} reportes` : ""],
+    ["Día con más km", best ? `${format(best[2], 1)} km` : "—", best ? dbDay(best[0]) : ""],
+    ["Por parada", truck.paradas ? `${format(truck.detenido / truck.paradas, 0)} min` : "—", `${format(truck.paradas)} paradas en el período`]
   ]) {
-    const pair = el("div");
-    pair.append(el("dt", "", label), el("dd", "", value));
-    stats.append(pair);
+    const fact = el("div");
+    fact.append(el("span", "", label), el("strong", "", text), el("small", "", note));
+    facts.append(fact);
   }
-  const side = el("div", "fd-cal-side");
-  side.append(stats);
+
+  const toolbar = el("div", "db-cal-tools");
+  const toggle = el("div", "db-toggle");
+  for (const [key, item] of Object.entries(DB_DAY_METRICS)) {
+    const button = el("button", key === dbState.dayMetric ? "is-active" : "", item.label);
+    button.type = "button";
+    button.addEventListener("click", (event) => { event.stopPropagation(); dbState.dayMetric = key; renderDashTable(); });
+    toggle.append(button);
+  }
+  const legend = el("div", "fd-cal-legend");
+  legend.append(el("span", "", "Sin reportes"), el("i", "is-zero"), el("span", "", "· menos"),
+    ...[0.25, 0.5, 0.75, 1].map((heat) => { const swatch = el("i"); swatch.style.setProperty("--heat", String(heat)); return swatch; }),
+    el("span", "", `más (hasta ${metric.show(max)})`));
+  toolbar.append(toggle, legend);
+
+  const calendar = el("div", "db-cal" + (detailed ? " is-detailed" : ""));
+  for (const month of months) {
+    const [year, number] = month.split("-").map(Number);
+    const block = el("div", "db-cal-month");
+    const total = sum(days.filter((day) => day[0].startsWith(month)).map((day) => Number(day[metric.index] || 0)));
+    const title = el("div", "db-cal-title");
+    title.append(el("strong", "", capitalize(dashMonthLabel(month, "long"))), el("span", "", metric.show(total)));
+    const grid = el("div", "db-cal-grid");
+    grid.append(...DB_WEEKDAYS.map((name) => el("b", "", name)));
+    const first = new Date(Date.UTC(year, number - 1, 1));
+    for (let k = 0; k < (first.getUTCDay() + 6) % 7; k++) grid.append(el("i"));
+    const length = new Date(Date.UTC(year, number, 0)).getUTCDate();
+    for (let d = 1; d <= length; d++) {
+      const iso = `${month}-${String(d).padStart(2, "0")}`;
+      const entry = byDay.get(iso);
+      const amount = value(iso);
+      const cell = el(iso < data.desde || iso > data.hoy ? "span" : "a", "db-cal-day");
+      cell.append(el("small", "", String(d)));
+      if (cell.tagName === "SPAN") {
+        cell.classList.add("is-out");
+      } else {
+        const reports = Number((entry || [])[1] || 0);
+        cell.classList.toggle("is-zero", !reports);
+        cell.classList.toggle("is-today", iso === data.hoy);
+        const heat = amount ? 0.18 + 0.82 * Math.sqrt(amount / max) : 0;
+        cell.style.setProperty("--heat", heat.toFixed(3));
+        cell.classList.toggle("is-dark", heat > 0.4);
+        if (detailed) cell.append(el("b", "", reports ? metric.short(amount) : "—"));
+        cell.href = `#camiones/${encodeURIComponent(truck.patente)}/${iso}`;
+        cell.title = `${dayLabel(iso, "long")}: ` + (reports
+          ? `${format(reports)} reportes · ${format(entry[2], 1)} km · ${format(entry[3] || 0)} paradas · ${formatMinutes(entry[4] || 0)} detenido. Toca para ver su recorrido.`
+          : "sin reportes");
+        cell.setAttribute("aria-label", cell.title);
+        cell.addEventListener("click", (event) => event.stopPropagation());
+      }
+      grid.append(cell);
+    }
+    block.append(title, grid);
+    calendar.append(block);
+  }
+
+  // Mes a mes del camión (todo el historial), con lo mismo que se mide en el calendario.
+  const perMonth = data.meses.map((month) => {
+    const list = days.filter((day) => day[0].startsWith(month));
+    return {month, value: sum(list.map((day) => Number(day[metric.index] || 0))), active: list.filter((day) => day[1] > 0).length};
+  });
+  const maxMonth = Math.max(1, ...perMonth.map((item) => item.value));
+  const monthsChart = el("div", "db-month-bars");
+  for (const item of perMonth) {
+    const bar = el("div", "db-month-bar" + (item.month === dbState.period ? " is-period" : ""));
+    const track = el("span");
+    const fill = el("i");
+    fill.style.height = (item.value / maxMonth * 100).toFixed(1) + "%";
+    track.append(fill);
+    bar.title = `${capitalize(dashMonthLabel(item.month, "long"))}: ${metric.show(item.value)} · ${format(item.active)} días con datos`;
+    bar.append(el("b", "", item.value ? metric.short(item.value) : "0"), track,
+      el("small", "", capitalize(dashMonthLabel(item.month))), el("em", "", `${format(item.active)} días`));
+    monthsChart.append(bar);
+  }
+  const monthsBox = el("div", "db-detail-months");
+  monthsBox.append(el("p", "db-detail-label", `${metric.label} por mes (todo el historial)`), monthsChart);
   if (truck.ultimo_dia) {
     const link = el("a", "fd-open", "Ver su último día con datos →");
     link.href = `#camiones/${encodeURIComponent(truck.patente)}/${truck.ultimo_dia}`;
-    side.append(link);
+    monthsBox.append(link);
   }
-  const scroller = el("div", "fd-cal-scroll");
-  scroller.append(months, grid);
-  const wrap = el("div", "fd-cal-wrap");
-  wrap.append(scroller, side);
-  const legend = el("div", "fd-cal-legend");
-  legend.append(el("span", "", "Menos"), ...[0, 0.35, 0.6, 0.8, 1].map((heat) => {
-    const swatch = el("i");
-    swatch.style.setProperty("--heat", String(heat));
-    return swatch;
-  }), el("span", "", "Más reportes · cada cuadro es un día; tócalo para abrir su recorrido" +
-    (dbState.period !== "todos" ? " · con borde, el período elegido" : "")));
-  const box = el("div");
-  const heading = el("div", "fd-detail-heading");
-  heading.append(el("div", "", `${truck.patente} · ${truck.nombre || "Sin nombre"}`),
-    el("span", "", `Historial desde el ${dbDay(data.desde)}`));
-  box.append(heading, wrap, legend);
-  requestAnimationFrame(() => {
-    const target = scroller.querySelector(".fd-day.is-period");
-    scroller.scrollLeft = target ? target.parentElement.offsetLeft - 20 : scroller.scrollWidth;
-  });
+  const body = el("div", "db-detail-body");
+  const calendarBox = el("div");
+  calendarBox.append(el("p", "db-detail-label", "Día por día · toca un día para ver su recorrido"), toolbar, calendar);
+  body.append(calendarBox, monthsBox);
+  box.append(heading, facts, body);
   return box;
 }
 
