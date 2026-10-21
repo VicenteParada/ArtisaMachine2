@@ -1049,3 +1049,9 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .db-rank-tools{display:flex;gap:8px;flex-wrap:wrap;margin:-2px 0 12px}
 .db-rank-tools .db-field-small select{width:150px;height:32px;font-size:11px}
 @media(max-width:690px){.db-field-small,.db-field-small select,.db-rank-tools .db-field-small select{width:100%}.db-rank-tools .db-field-small{flex:1 1 0}}
+.db-table-head .db-table-title{margin-right:auto}
+.db-toggle[hidden]{display:none}
+.db-toggle button.is-active[data-db-month-metric]{border-color:var(--green);background:var(--green)}
+.db-table th.is-period{background:#e8f2ec;color:var(--ink)}
+.db-table td.is-period{background:#f3f8f4;font-weight:700}
+.db-table td.is-zero{color:#c4643f}
