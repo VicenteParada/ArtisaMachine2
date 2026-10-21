@@ -21,6 +21,11 @@ FALLBACK_MODEL = "gemini-flash-lite-latest"
 TIMEOUT_SECONDS = 30
 # Incluye el razonamiento interno de los modelos que "piensan" antes de responder.
 MAX_OUTPUT_TOKENS = 4096
+# Razonamiento bajo: para resumir datos ya calculados no hace falta pensar mucho, y con el
+# nivel por defecto el modelo principal a veces no alcanzaba a responder en TIMEOUT_SECONDS
+# (contestaba el de respaldo, más lento en total y menos preciso). Si un modelo no acepta el
+# parámetro (HTTP 400) se repite la consulta sin él.
+THINKING = {"thinkingLevel": "low"}
 ATTEMPTS = 2
 RETRY_SECONDS = 2
 
@@ -29,6 +34,10 @@ _used = threading.local()
 
 class LLMUnavailable(Exception):
     """El modelo no está configurado o no respondió. El mensaje se muestra al usuario."""
+
+
+class _BadRequest(Exception):
+    """HTTP 400: la consulta tiene un parámetro que el modelo no acepta."""
 
 
 class _Skip(Exception):
@@ -73,7 +82,9 @@ def _call(model, body, key, opener):
         with opener(request, timeout=TIMEOUT_SECONDS) as response:
             return json.loads(response.read())
     except HTTPError as error:
-        if error.code in (400, 401, 403):
+        if error.code == 400:
+            raise _BadRequest() from None
+        if error.code in (401, 403):
             raise LLMUnavailable("Gemini rechazó la consulta: revisa GEMINI_API_KEY y GEMINI_MODEL en .env.") from None
         if error.code == 429:  # la cuota gratuita es por modelo: otro modelo puede responder
             raise _Skip("quota") from None
@@ -91,16 +102,30 @@ def generate(system, question, opener=urlopen, sleep=_sleep):
     key = _api_key()
     if not key:
         raise LLMUnavailable("El asistente no está configurado: falta GEMINI_API_KEY en .env.")
-    body = json.dumps({
-        "system_instruction": {"parts": [{"text": system}]},
-        "contents": [{"role": "user", "parts": [{"text": question}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": MAX_OUTPUT_TOKENS},
-    }).encode("utf-8")
+    def body(thinking):
+        config = {"temperature": 0.2, "maxOutputTokens": MAX_OUTPUT_TOKENS}
+        if thinking:
+            config["thinkingConfig"] = THINKING
+        return json.dumps({
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": question}]}],
+            "generationConfig": config,
+        }).encode("utf-8")
+
+    def call(model):
+        try:
+            return _call(model, body(True), key, opener)
+        except _BadRequest:
+            try:
+                return _call(model, body(False), key, opener)
+            except _BadRequest:
+                raise LLMUnavailable("Gemini rechazó la consulta: revisa GEMINI_API_KEY y GEMINI_MODEL en .env.") from None
+
     payload, reason = None, None
     for model in dict.fromkeys((_model(), FALLBACK_MODEL)):
         for attempt in range(ATTEMPTS):
             try:
-                payload = _call(model, body, key, opener)
+                payload = call(model)
             except _Skip as skip:
                 reason = skip.reason
                 print(f"Asistente: {model} no respondió ({reason})", flush=True)

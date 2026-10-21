@@ -223,6 +223,20 @@ class GeminiClientTests(unittest.TestCase):
         body = json.loads(request.data)
         self.assertEqual(body["system_instruction"]["parts"][0]["text"], "reglas")
         self.assertEqual(body["contents"][0]["parts"][0]["text"], "pregunta")
+        self.assertEqual(body["generationConfig"]["thinkingConfig"], {"thinkingLevel": "low"})
+
+    def test_model_without_thinking_level_is_asked_again_without_it(self):
+        bodies = []
+
+        def opener(request, timeout):
+            body = json.loads(request.data)
+            bodies.append(body)
+            if "thinkingConfig" in body["generationConfig"]:
+                raise HTTPError("u", 400, "unknown field", {}, None)
+            return gemini_reply("Sin razonamiento")
+
+        self.assertEqual(llm.generate("s", "q", opener), "Sin razonamiento")
+        self.assertEqual([("thinkingConfig" in b["generationConfig"]) for b in bodies], [True, False])
 
     def test_errors_become_clear_messages(self):
         def raising(error):
@@ -330,6 +344,28 @@ class ChatEndpointTests(unittest.TestCase):
             self.assertEqual(self.post("/api/chat", b"x" * 5000)[0], 413)
             status, payload = self.post("/api/chat", b'{"pregunta": ""}')
         self.assertEqual((status, payload["error"]), (400, "Escribe una pregunta."))
+
+
+class CacheTests(unittest.TestCase):
+    def setUp(self):
+        self.saved = dict(api._cache)
+        api._cache.clear()
+
+    def tearDown(self):
+        api._cache.clear()
+        api._cache.update(self.saved)
+
+    def test_old_result_is_served_at_once_and_refreshed_behind(self):
+        api._cache["/api/vigilancia"] = (api.time.monotonic() - 3600, {"status": "ok", "viejo": True})
+        with mock.patch.object(api, "_refresh_later") as refresh:
+            self.assertEqual(api.cached_result("/api/vigilancia"), {"status": "ok", "viejo": True})
+        refresh.assert_called_once_with("/api/vigilancia")
+
+    def test_chat_never_waits_for_a_cold_calculation(self):
+        with mock.patch.object(api, "_refresh_later") as refresh, mock.patch.object(api, "_compute") as compute:
+            self.assertIsNone(api.chat_source("/api/vigilancia"))
+        refresh.assert_called_once_with("/api/vigilancia")
+        compute.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -448,27 +448,31 @@ def history_request(path, query):
     return truck_day, (asset_id, dia, limit, after)
 
 
-# --- Caché de /api/mapa y /api/dashboard -----------------------------------------
-# El mapa recorre la última posición de cada camión: con MariaDB ocupada (cierre diario)
-# puede tardar. Se calcula como máximo una vez por minuto, una sola consulta a la vez, y si
-# un cálculo falla se entrega el último resultado bueno. Las posiciones en vivo usan un
-# endpoint liviano independiente de esta caché.
+# --- Caché de los resultados pesados (BUILDERS) ------------------------------------------
+# Calcular /api/vigilancia (7 días de reportes de toda la flota) o el mapa puede tardar más de
+# lo que espera el navegador. Por eso nunca se hace esperar a nadie por un recálculo: si hay un
+# resultado guardado se entrega al tiempo (aunque tenga más de CACHE_SECONDS) y se recalcula
+# por detrás. Solo la primera petición después de arrancar espera, y para eso el servicio
+# calienta la caché al iniciar y mantiene al día lo que se pidió en los últimos minutos.
+# Si un cálculo falla se conserva el último resultado bueno. Un candado por ruta: el mapa, el
+# dashboard y la vigilancia se calculan en paralelo sin esperarse entre sí.
 CACHE_SECONDS = 60
+MANTENER_MINUTOS = 15        # se recalcula por detrás lo pedido en los últimos 15 min
 _cache = {}
-# Un candado por ruta: el mapa, el dashboard y la predicción se calculan en paralelo; antes
-# compartían uno y la predicción esperaba al mapa hasta agotar el tiempo del navegador.
 _cache_locks = {}
+_pedidas = {}
 
 
-def cached_result(path):
-    now = time.monotonic()
-    entry = _cache.get(path)
-    if entry and now - entry[0] < CACHE_SECONDS:
-        return entry[1]
-    with _cache_locks.setdefault(path, threading.Lock()):
+def _lock(path):
+    return _cache_locks.setdefault(path, threading.Lock())
+
+
+def _compute(path):
+    """Calcula y guarda el resultado de la ruta (una sola vez a la vez por ruta)."""
+    with _lock(path):
         entry = _cache.get(path)
         if entry and time.monotonic() - entry[0] < CACHE_SECONDS:
-            return entry[1]  # otra petición lo calculó mientras esperábamos
+            return entry[1]  # otro hilo lo calculó mientras esperábamos
         try:
             with connect_db(read_timeout=80) as connection, connection.cursor() as cursor:
                 result = BUILDERS[path](cursor)
@@ -481,12 +485,51 @@ def cached_result(path):
         return result
 
 
+def _refresh_later(path):
+    """Recalcula por detrás, salvo que ya haya un cálculo de esa ruta en curso."""
+    if not _lock(path).locked():
+        threading.Thread(target=_compute, args=(path,), daemon=True, name=f"cache{path}").start()
+
+
+def cached_result(path, wait=True):
+    """El último resultado de la ruta. Si está viejo se entrega igual y se recalcula por detrás.
+    Sin ningún resultado aún: con wait=True se calcula y se espera; con wait=False se pide por
+    detrás y se devuelve None."""
+    _pedidas[path] = time.monotonic()
+    entry = _cache.get(path)
+    if entry:
+        if time.monotonic() - entry[0] >= CACHE_SECONDS:
+            _refresh_later(path)
+        return entry[1]
+    if not wait:
+        _refresh_later(path)
+        return None
+    return _compute(path)
+
+
+def keep_warm():
+    """Al arrancar calcula todo una vez; después mantiene al día lo que alguien pidió hace poco."""
+    for path in BUILDERS:
+        _pedidas.setdefault(path, time.monotonic())
+    while True:
+        for path in BUILDERS:
+            reciente = time.monotonic() - _pedidas.get(path, float("-inf")) < MANTENER_MINUTOS * 60
+            entry = _cache.get(path)
+            if reciente and (not entry or time.monotonic() - entry[0] >= CACHE_SECONDS):
+                try:
+                    _compute(path)
+                except Exception as error:  # MariaDB aún arrancando, etc.: se reintenta en la vuelta siguiente
+                    print(f"Endpoints: caché de {path} pendiente ({type(error).__name__})", flush=True)
+        time.sleep(10)
+
+
 def chat_source(path):
-    """Fuentes del asistente: /api/estado (liviano) o un resultado en caché."""
+    """Fuentes del asistente: /api/estado (liviano) o el último resultado guardado, sin esperar
+    un recálculo: el asistente responde al tiempo con lo que ya ve la web."""
     if path == "/api/estado":
         with connect_db(autocommit=False, read_timeout=15) as connection, connection.cursor() as cursor:
             return pipeline_state(cursor)
-    return cached_result(path)
+    return cached_result(path, wait=False)
 
 
 class Handler(JsonHandler):
@@ -671,4 +714,5 @@ class Handler(JsonHandler):
 
 
 if __name__ == "__main__":
+    threading.Thread(target=keep_warm, daemon=True, name="cache").start()
     serve(Handler, "Endpoints")

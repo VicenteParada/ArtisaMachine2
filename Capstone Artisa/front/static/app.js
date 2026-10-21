@@ -62,6 +62,7 @@ function clearSessionWork() {
   refreshing = false;
   liveVehiclesRefreshing = false;
   if (typeof vg !== "undefined") vg.loading = false;
+  if (typeof vgRetry !== "undefined") clearTimeout(vgRetry);
   $("refresh").disabled = false;
   window.clearTimeout(fleetRetry);
 }
@@ -480,9 +481,15 @@ function vgApplyLayers() {
 }
 
 // --- Carga ---
+// Mientras no haya datos se reintenta cada VG_RETRY_MS (no cada minuto), en cualquier pestaña.
+const VG_RETRY_MS = 15000;
+let vgRetry = null;
+
 async function loadVigilance(quiet = true) {
   if (!token() || vg.loading) return;
   vg.loading = true;
+  clearTimeout(vgRetry);
+  initializeFleetMap();  // el mapa base se ve de inmediato, aunque los datos sigan en camino
   const version = sessionVersion;
   try {
     const data = await api("/api/vigilancia", {timeoutMs: 90000});
@@ -495,8 +502,17 @@ async function loadVigilance(quiet = true) {
     if (version !== sessionVersion) return;
     $("heatmap-source-status").textContent = "Sin conexión";
     $("heatmap-source-status").className = "status warning";
-    $("map-last-update").textContent = "No se pudo actualizar (" + error.message + "). Se muestran los últimos datos y se reintenta cada minuto.";
-    if (!vg.data && !quiet) $("alert-list").replaceChildren(el("li", "monitor-empty", "No se pudo cargar: " + error.message));
+    if (vg.data) {
+      $("map-last-update").textContent = "No se pudo actualizar (" + error.message + "). Se muestran los últimos datos y se reintenta cada minuto.";
+    } else {
+      // Primera carga: el servidor puede seguir calculando; se reintenta pronto y solo.
+      $("heatmap-source-status").textContent = "Cargando…";
+      $("heatmap-source-status").className = "status neutral";
+      $("map-last-update").textContent = "El servidor todavía está preparando las rutas y los camiones; se reintenta solo en unos segundos.";
+      $("alert-list").replaceChildren(el("li", "monitor-empty", quiet ? "Preparando los datos… se reintenta solo."
+        : "No se pudo cargar (" + error.message + "). Se reintenta solo en unos segundos."));
+      vgRetry = setTimeout(() => loadVigilance(), VG_RETRY_MS);
+    }
   } finally {
     if (version === sessionVersion) vg.loading = false;
   }
