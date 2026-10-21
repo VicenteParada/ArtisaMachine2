@@ -994,7 +994,7 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .db-field{display:grid;gap:4px;color:var(--muted);font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
 .db-field select{height:36px;min-width:230px;border:1px solid #b9ccc1;border-radius:8px;padding:0 10px;background:#fff;color:var(--ink);font:inherit;font-size:12px;font-weight:600;text-transform:none;letter-spacing:0}
 .db-field select:focus{border-color:var(--green);outline:3px solid rgba(31,107,80,.12)}
-.db-search{flex:1 1 220px;height:36px}
+.db-search{height:36px}
 .db-downloads{display:flex;gap:6px;margin-left:auto}
 .db-downloads .fd-csv{height:36px}
 .db-filters{display:flex;gap:6px;flex-wrap:wrap}
@@ -1019,3 +1019,29 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
   .db-downloads{width:100%;margin-left:0}.db-downloads .fd-csv{flex:1}
 }
 .db-table th button{text-transform:none}
+
+/* Datos por camión: destacados y comparaciones (lo que más se sale de lo normal) */
+.db-findings{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:12px 0}
+.db-finding{position:relative;display:grid;gap:3px;min-width:0;padding:12px 12px 12px 15px;border:1px solid #dfe8e2;border-radius:9px;background:#f8faf8;color:var(--ink);font:inherit;text-align:left;cursor:pointer;overflow:hidden}
+.db-finding:before{content:"";position:absolute;inset:0 auto 0 0;width:4px;background:var(--finding)}
+.db-finding:hover{border-color:#afc5b8;background:#fff;box-shadow:0 5px 15px rgba(23,45,50,.07)}
+.db-finding span{color:var(--muted);font-size:9px}
+.db-finding strong{font-size:19px;letter-spacing:-.4px;line-height:1.15}
+.db-finding b{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.db-finding small{color:var(--muted);font-size:8px}
+.db-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:18px}
+.db-rank-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.db-rank-head h3{margin:6px 0 0;font-size:15px}
+.db-rank-note{margin:-4px 0 12px;color:var(--muted);font-size:9px;line-height:1.5}
+.db-toggle{display:inline-flex;gap:4px;flex-wrap:wrap}
+.db-toggle button{padding:6px 11px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);font-size:10px;font-weight:600}
+.db-toggle button.is-active{border-color:var(--ink);background:var(--ink);color:#fff}
+.db-bars{gap:6px}
+.db-bar{width:100%;padding:6px 8px;border:0;border-radius:7px;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.db-bar:hover{background:#f2f7f3}
+.db-more{margin-top:10px;padding:0;border:0;background:none;color:var(--green);font-size:10px;font-weight:700;cursor:pointer}
+.db-table-title{margin:4px 0 10px;font-size:15px}
+@media(max-width:1150px){.db-findings{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:940px){.db-pair{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:690px){.db-findings{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.db-table-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:4px 0 10px}.db-table-head .db-table-title{margin:0}.db-table-head .db-search{flex:0 1 320px}
