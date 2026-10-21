@@ -1159,3 +1159,8 @@ td.fd-col-level{color:#b8c3c0}
 /* Predicción: aire bajo el texto y, en celular, la tarjeta de alertas a todo el ancho */
 .learned-panel .atlas-lede{margin-bottom:14px}
 @media(max-width:690px){.learned-panel .vg-stats .vg-alert-card{grid-column:1/-1}}
+
+/* "¿Cómo funciona el modelo?": la ficha del machine learning, plegada al final */
+.lr-model-details summary small{margin-left:8px;color:var(--muted);font-size:10px}
+.lr-model-details .lr-model{margin-top:12px}
+.lr-model-details .lr-model strong{color:var(--ink)}

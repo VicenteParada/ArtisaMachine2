@@ -6,13 +6,13 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/mapa-base.css?v=20261021-limpio">
-  <link rel="stylesheet" href="/style.css?v=20261021-limpio">
+  <link rel="stylesheet" href="/mapa-base.css?v=20261021-rutas-alertas">
+  <link rel="stylesheet" href="/style.css?v=20261021-rutas-alertas">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
-  <script src="/mapa-base.js?v=20261021-limpio" defer></script>
-  <script src="/map-data.js?v=20261021-limpio" defer></script>
-  <script src="/app.js?v=20261021-limpio" defer></script>
+  <script src="/mapa-base.js?v=20261021-rutas-alertas" defer></script>
+  <script src="/map-data.js?v=20261021-rutas-alertas" defer></script>
+  <script src="/app.js?v=20261021-rutas-alertas" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -60,7 +60,7 @@
     <div class="nav-label">ESPACIO DE TRABAJO</div>
     <nav aria-label="Navegación principal">
       <a data-dataset-link="trucks" href="#camiones"><span>⛟</span> Camiones en vivo</a>
-      <a data-dataset-link="prediction" href="#prediccion"><span>◈</span> Predicción</a>
+      <a data-dataset-link="prediction" href="#prediccion"><span>◈</span> Rutas y alertas</a>
       <a data-dataset-link="heatmap" href="#mapa-calor"><span>◷</span> Datos históricos</a>
       <a data-dataset-link="dashboard" href="#dashboard"><span>▥</span> Dashboard</a>
       <a id="overview-link" href="#flujo"><span>▦</span> Arquitectura</a>
@@ -103,7 +103,7 @@
     </section>
     <nav class="dataset-tabs" aria-label="Espacios de análisis">
       <a class="dataset-tab" data-dataset-tab="trucks" href="#camiones"><span class="dataset-icon">⛟</span><span><strong>Camiones en vivo</strong><small>Dónde están y qué hicieron</small></span></a>
-      <a class="dataset-tab" data-dataset-tab="prediction" href="#prediccion"><span class="dataset-icon">◈</span><span><strong>Predicción</strong><small>Rutas previstas y alertas</small></span></a>
+      <a class="dataset-tab" data-dataset-tab="prediction" href="#prediccion"><span class="dataset-icon">◈</span><span><strong>Rutas y alertas</strong><small>Rutas previstas y camiones en vivo</small></span></a>
       <a class="dataset-tab" data-dataset-tab="heatmap" href="#mapa-calor"><span class="dataset-icon">◷</span><span><strong>Datos históricos</strong><small>Mapas de días pasados</small></span></a>
       <a class="dataset-tab" data-dataset-tab="dashboard" href="#dashboard"><span class="dataset-icon">▥</span><span><strong>Dashboard</strong><small>Indicadores e informes</small></span></a>
     </nav>
@@ -409,7 +409,7 @@
     <div id="mapa-calor" class="dataset-space" data-dataset-view="heatmap" hidden>
       <section class="panel heatmap-panel atlas history-panel" aria-labelledby="history-title">
         <div class="atlas-head">
-          <div><h2 id="history-title">Datos históricos</h2><p class="atlas-lede">Cómo se movió la flota en días pasados. Lo que pasa ahora está en Predicción.</p></div>
+          <div><h2 id="history-title">Datos históricos</h2><p class="atlas-lede">Cómo se movió la flota en días pasados. Lo que pasa ahora está en Rutas y alertas.</p></div>
           <a class="status info history-live-link" href="#prediccion">Ver en vivo →</a>
         </div>
         <div id="explorer-routes" class="explorer-frame-wrap">
@@ -420,7 +420,7 @@
     <div id="prediccion" class="dataset-space" data-dataset-view="prediction" hidden>
       <section class="panel heatmap-panel atlas learned-panel" aria-labelledby="atlas-title">
         <div class="atlas-head">
-          <div><span class="eyebrow">MACHINE LEARNING</span><h2 id="atlas-title">Predicción de rutas</h2><p id="heatmap-intro" class="atlas-lede">Las rutas que el modelo prevé para los próximos 7 días y los camiones en vivo. Hay alerta si un camión sale de las rutas habituales.</p></div>
+          <div><span class="eyebrow">MACHINE LEARNING</span><h2 id="atlas-title">Rutas previstas y alertas</h2><p id="heatmap-intro" class="atlas-lede">Las rutas que el modelo prevé para los próximos 7 días y los camiones en vivo. Hay alerta si un camión sale de las rutas habituales.</p></div>
           <span id="heatmap-source-status" class="status info">Cargando…</span>
         </div>
         <div class="atlas-stats vg-stats" id="atlas-stats" aria-label="Resumen del modelo y de la flota en vivo">
@@ -477,12 +477,11 @@
           <div class="lr-table-wrap"><table id="lr-table" class="lr-table"></table></div>
           <small id="lr-table-foot" class="lr-table-foot">Esperando el modelo…</small>
         </article>
-        <article class="dashboard-card lr-model-card">
-          <div class="dashboard-card-heading"><div><span class="eyebrow">FICHA DEL MODELO</span><h3>Cómo aprende las rutas</h3></div><span class="chart-unit">Aprendizaje no supervisado</span></div>
-          <ol id="lr-model" class="lr-model"><li class="chart-empty">Esperando el modelo…</li></ol>
-        </article>
         </div>
         <details class="heatmap-method"><summary>¿Cuándo hay una alerta?</summary><p id="heatmap-method">Esperando el modelo…</p></details>
+        <details class="heatmap-method lr-model-details"><summary>¿Cómo funciona el modelo? <small>Machine learning · aprendizaje no supervisado</small></summary>
+          <ol id="lr-model" class="lr-model"><li class="chart-empty">Esperando el modelo…</li></ol>
+        </details>
       </section>
     </div>
     <footer><span>ARTISA <span class="slash">/</span> Del origen al frontend</span><span>ETL · MariaDB · Machine Learning · Endpoints · Frontend</span></footer>

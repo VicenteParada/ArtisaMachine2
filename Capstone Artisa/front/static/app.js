@@ -227,7 +227,7 @@ function syncDatasetView() {
   }
   $("overview-link").classList.toggle("active", overview);
   document.querySelector(".topbar strong").textContent = overview ? "Arquitectura"
-    : {trucks: "Camiones en vivo", heatmap: "Datos históricos", prediction: "Predicción", dashboard: "Dashboard"}[view];
+    : {trucks: "Camiones en vivo", heatmap: "Datos históricos", prediction: "Rutas y alertas", dashboard: "Dashboard"}[view];
   for (const link of document.querySelectorAll(".sidebar [data-dataset-link]")) {
     link.classList.toggle("active", !overview && link.dataset.datasetLink === view);
   }
@@ -245,7 +245,7 @@ function syncDatasetView() {
   }
 }
 
-// --- Predicción: rutas aprendidas por el modelo, camiones en vivo y alertas ---------------------
+// --- Rutas y alertas: rutas aprendidas por el modelo, camiones en vivo y alertas ---------------------
 // El modelo (machine_learning/modelo_rutas.py) aprende las rutas de los viajes reales y las clasifica
 // por cuántos camiones distintos las usan: N1 troncal … N5 mínima (1 o 2 camiones). Se reaprende
 // cada día y lo aprendido es la previsión de los próximos 7 días. Las líneas llegan de /api/rutas-aprendidas (solo cambian con

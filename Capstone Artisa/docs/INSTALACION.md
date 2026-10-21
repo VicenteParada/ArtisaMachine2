@@ -96,7 +96,7 @@ Todos los servicios deben decir `healthy` y la telemetría no debe mostrar error
 | Revisa | Qué deberías ver |
 |---|---|
 | Camiones en vivo | Los camiones con su último dato de hace pocos minutos |
-| Predicción | El mapa con rutas y camiones (las rutas aparecen cuando se cierra el primer día) |
+| Rutas y alertas | El mapa con rutas y camiones (las rutas aparecen cuando se cierra el primer día) |
 | Arquitectura | Los 5 servicios operativos |
 
 Para entrenar el modelo de rutas de inmediato, sin esperar a la madrugada:
@@ -178,7 +178,7 @@ Conviene copiar la carpeta `respaldos/` a otro equipo de vez en cuando.
 | La web no abre | `python3 scripts/artisa.py estado` y luego `python3 scripts/artisa.py iniciar` |
 | "Sin conexión con la API" | Revisa que el servidor esté en la red de la empresa; se recupera solo al volver |
 | "La API rechazó las credenciales" (403) | `docker compose restart telemetria`; si sigue, revisa la IP con el equipo y vuelve a `conectar-api` |
-| Predicción dice "Modelo pendiente" | Falta el primer día cerrado; o entrena ya con `python3 scripts/artisa.py rutas` |
+| Rutas y alertas dice "Modelo pendiente" | Falta el primer día cerrado; o entrena ya con `python3 scripts/artisa.py rutas` |
 | El asistente dice que no está configurado | Falta `GEMINI_API_KEY` en `.env` (ver 1.6) |
 | Olvidé la contraseña | `python3 scripts/artisa.py contrasena` |
 | Disco lleno | Baja `RESPALDO_DIAS` en `.env` o saca respaldos antiguos de `respaldos/` |

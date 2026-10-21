@@ -1,5 +1,5 @@
 // Mapa base común de Artisa: el mismo fondo y el mismo selector de capas en todos los mapas
-// (Mapa de rutas, Mapas de telemetría, Predicción y el día de cada camión).
+// (Rutas y alertas, Mapas de telemetría y el día de cada camión).
 //
 // - Fondos: Calles y lugares (OpenStreetMap) o Satélite (Esri, con nombres encima). Si el
 //   proveedor activo falla, se cambia solo al otro.

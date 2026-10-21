@@ -65,7 +65,7 @@ más de una ruta habitual (N1–N4). Es algo para revisar, no una falta comproba
 | Sección | Para qué sirve |
 |---|---|
 | Camiones en vivo | Dónde está cada camión y qué hizo cada día: recorrido, viajes, paradas, reportes y últimos 30 días. |
-| Predicción | Rutas previstas para los próximos 7 días con su nivel (N1–N5), camiones en vivo, alertas, tabla de niveles y ficha del modelo. |
+| Rutas y alertas | Rutas previstas para los próximos 7 días con su nivel (N1–N5), camiones en vivo encima, alertas y tabla de niveles. Al final, plegado, "¿Cómo funciona el modelo?". |
 | Datos históricos | Mapas de días pasados (hasta 14 días): calor, rutas por camión, uso de rutas y puntos. |
 | Dashboard | Indicadores de la flota e informes por mes y por camión (con el nivel de reporte A–D). |
 | Asistente | Chat abajo a la derecha que responde sobre la flota, las rutas y las alertas. |
