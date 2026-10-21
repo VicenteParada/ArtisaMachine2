@@ -157,6 +157,10 @@ services:
       VIGILANCIA_REPORTES: ${VIGILANCIA_REPORTES:-3}
       VIGILANCIA_MIN_MINUTOS: ${VIGILANCIA_MIN_MINUTOS:-10}
       VIGILANCIA_MIN_KM: ${VIGILANCIA_MIN_KM:-2}
+      # Asistente (Gemini). La clave va solo en .env (GEMINI_API_KEY); sin clave, el chat avisa
+      # que no está configurado y el resto de la web sigue igual.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-}
     depends_on:
       mariadb:
         condition: service_healthy

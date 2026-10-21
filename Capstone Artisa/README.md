@@ -21,9 +21,9 @@ flowchart LR
 | Servicio | Qué hace |
 |---|---|
 | `telemetria` | Trae los reportes de la API de la empresa cada 30 s. Sobrevive a cortes de red y recupera lo pendiente sin duplicar. |
-| `machine-diario` | Cierra cada día, extrae viajes, clasifica las rutas y predice la actividad de los próximos 15 días (00:30). |
+| `machine-diario` | Cierra cada día (00:30), extrae viajes y reentrena el modelo de rutas con cada semana de datos nuevos. |
 | `mariadb` | Base de datos (volumen persistente). |
-| `endpoints` | API de solo lectura para la web (`/api/*`). |
+| `endpoints` | API de solo lectura para la web (`/api/*`) y el asistente (`/api/chat`). |
 | `front` + `nginx` | Interfaz web; nginx es la única entrada (puerto 8080). |
 | `auth` | Inicio de sesión (contraseña con hash, sesiones JWT de 12 h). |
 | `respaldo` | Respaldo diario de MariaDB en `respaldos/` (03:00). |
@@ -54,7 +54,28 @@ flowchart LR
 | Dashboard | Dos pestañas. **Centro de control**: estado actual de la flota (en ruta, detenidos, sin señal, km y viajes de hoy), actividad diaria del mes, totales del mes, comparación por camión (paradas, tiempo detenido, km, viajes), km frente a horas detenidas y hallazgos del mes. **Informes históricos**: resumen mensual por día y comparación por camión; descarga del informe operativo completo o de la matriz de reportes/km por patente, búsqueda, orden, calendarios y calidad de los datos (`/api/dashboard`, cierre diario). La comparación por camión incluye el **nivel de reporte** A–D del período: cuartiles de los reportes GPS de cada camión frente al resto de la flota (A el 25 % que más reporta, D el 25 % que menos; es relativo), filtro por nivel y aviso de los días con falla de datos, en que la flota envió menos de la mitad de la mediana diaria (`/api/dashboard/niveles?desde=&hasta=`, metodología del cuaderno `procesamientodatos.ipynb`). |
 | Predicción | **Rutas aprendidas en vivo** (`/api/rutas-aprendidas` cambia con cada versión del modelo; `/api/vigilancia` cada minuto): las rutas del modelo con color y grosor según su nivel N1–N5, los camiones en vivo encima con su nivel, y las alertas (activas, sin señal, en la semana) con patente, conductor, ubicación, duración, ruta mínima y distancia a la ruta habitual más cercana. Incluye la **ficha del modelo** (algoritmos, datos, reentrenamiento) y la **tabla de clasificación** (rango de camiones de cada nivel, rutas, recorridos y camiones en cada nivel ahora). |
 | Datos históricos | **Mapas de telemetría**: estudio de cualquier rango guardado de hasta 14 días (calor, rutas por camión, uso de rutas en % de la flota y puntos). Solo historial. |
+| Asistente | Burbuja de chat abajo a la derecha, en todas las vistas: IA que responde sobre las reglas del sistema y los datos actuales de la flota (ver abajo). |
 | Arquitectura | Estado de cada servicio. |
+
+## Asistente (IA)
+
+Chat en la web (`POST /api/chat`, detrás del mismo inicio de sesión) que responde preguntas
+sobre cómo funciona Artisa y sobre los datos de la flota, sin inventar cifras.
+
+- **Modelo:** Gemini, gratuito desde Google AI Studio. Pon la clave en `.env`
+  (`GEMINI_API_KEY=...`; opcional `GEMINI_MODEL`, por defecto `gemini-flash-latest`) y
+  ejecuta `python3 scripts/artisa.py iniciar`. La clave va solo en `.env`, nunca en Git;
+  sin clave, el chat avisa que no está configurado. Si Gemini falla o se agota su cuota
+  gratuita, el chat lo avisa y el resto de la web sigue funcionando. El proveedor está aislado en
+  `endpoints/llm.py` (se puede cambiar por Ollama local).
+- **Contexto:** las secciones *Servicios*, *Reglas clave* y *Web* de este README, más un
+  resumen de los mismos resultados que ya muestra la web (estado del sistema, camiones,
+  reportes diarios, rutas aprendidas con sus niveles y alertas en vivo).
+- **Solo lectura y privacidad:** no ejecuta SQL propio ni modifica datos. Al modelo solo
+  llegan datos agregados (totales, patentes y números internos, rutas por nombre); nunca
+  conductores, RUT ni coordenadas.
+- **Límites:** preguntas de hasta 500 caracteres; 6 por minuto por IP en Nginx, y 6 por
+  minuto y 200 por día en total.
 
 ## Estructura
 

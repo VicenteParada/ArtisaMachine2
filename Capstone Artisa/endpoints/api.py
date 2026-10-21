@@ -14,7 +14,7 @@ import pymysql
 from common import dias
 from common.db import connect_db
 from common.http import JsonHandler, serve
-from endpoints import camiones_api, dashboard_api, rutas_api, vigilancia_api
+from endpoints import camiones_api, chat_api, dashboard_api, rutas_api, vigilancia_api
 
 
 STARTED_AT = time.monotonic()
@@ -481,6 +481,14 @@ def cached_result(path):
         return result
 
 
+def chat_source(path):
+    """Fuentes del asistente: /api/estado (liviano) o un resultado en caché."""
+    if path == "/api/estado":
+        with connect_db(autocommit=False, read_timeout=15) as connection, connection.cursor() as cursor:
+            return pipeline_state(cursor)
+    return cached_result(path)
+
+
 class Handler(JsonHandler):
     def database_error(self, error):
         self.log_error("Error de MariaDB: %s", type(error).__name__)
@@ -490,9 +498,28 @@ class Handler(JsonHandler):
         })
 
     def do_POST(self):
-        self.respond(404, {"error": "Ruta no encontrada"})
+        if urlsplit(self.path).path != "/api/chat":
+            self.respond(404, {"error": "Ruta no encontrada"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = -1
+        if not 0 < length <= chat_api.MAX_CUERPO:
+            self.respond(413 if length > chat_api.MAX_CUERPO else 400, {"error": "Tamaño de cuerpo inválido"})
+            return
+        question, error = chat_api.read_question(self.rfile.read(length))
+        if error:
+            self.respond(400, {"error": error})
+            return
+        # El asistente solo lee los mismos resultados que ya ve la web (en caché salvo el estado).
+        status, payload = chat_api.answer(question, chat_source)
+        if status == 503:
+            self.log_error("Asistente no disponible: %s", payload["error"])
+        self.respond(status, payload)
 
-    do_DELETE = do_POST
+    def do_DELETE(self):
+        self.respond(404, {"error": "Ruta no encontrada"})
 
     def do_GET(self):
         parsed = urlsplit(self.path)
@@ -509,7 +536,7 @@ class Handler(JsonHandler):
                                          "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
                                          "/api/camiones/X?fecha=YYYY-MM-DD", "/api/dashboard/camion?patente=X",
                                          "/api/dashboard/niveles?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
-                                         *PENDING_RESPONSES]})
+                                         "POST /api/chat", *PENDING_RESPONSES]})
             return
         if path in BUILDERS:
             # Resultados de Machine si existe una clasificación activa; si no, "pendiente".
