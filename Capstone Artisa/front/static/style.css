@@ -1156,3 +1156,6 @@ td.fd-col-level{color:#b8c3c0}
 .vg-inspect-routes li{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px;font-size:10px}
 .vg-inspect-routes .lr-badge{width:15px;height:15px;font-size:9px}
 .vg-inspect-routes small{color:var(--muted);white-space:nowrap}
+/* Predicción: aire bajo el texto y, en celular, la tarjeta de alertas a todo el ancho */
+.learned-panel .atlas-lede{margin-bottom:14px}
+@media(max-width:690px){.learned-panel .vg-stats .vg-alert-card{grid-column:1/-1}}

@@ -556,7 +556,7 @@ async function loadVigilance(quiet = true) {
       // Primera carga: el servidor puede seguir calculando; se reintenta pronto y solo.
       $("heatmap-source-status").textContent = "Cargando…";
       $("heatmap-source-status").className = "status neutral";
-      $("map-last-update").textContent = "El servidor todavía está preparando las rutas y los camiones; se reintenta solo en unos segundos.";
+      $("map-last-update").textContent = "Preparando las rutas y los camiones… se reintenta solo.";
       $("alert-list").replaceChildren(el("li", "monitor-empty", quiet ? "Preparando los datos… se reintenta solo."
         : "No se pudo cargar (" + error.message + "). Se reintenta solo en unos segundos."));
       vgRetry = setTimeout(() => loadVigilance(), VG_RETRY_MS);
@@ -608,13 +608,10 @@ function renderVigilance(data) {
   vgRestoreSelection();
   vgApplyLayers();
   $("heatmap-method").textContent =
-    `Cada camión que reportó en los últimos 30 minutos toma el nivel de la ruta aprendida que pasa a menos de ~1 km; ` +
-    `si no hay ninguna, está fuera de ruta (N6). Hay alerta cuando un camión en movimiento, fuera de las faenas, anda en ` +
-    `una ruta mínima (N5) o fuera de ruta durante ${format(data.min_minutos)} min o más (al menos ${format(data.reportes_alerta)} ` +
-    `reportes en movimiento) y a ${format(data.min_km)} km o más de una ruta habitual (N1–N4): así no salta por un desvío ` +
-    "corto ni por un salto del GPS. Termina cuando vuelve a una ruta N1–N4 o entra a una faena; si deja de reportar por " +
-    "30 min queda \"sin señal\". La lista \"En la semana\" guarda las de los últimos 7 días. Es un comportamiento inusual " +
-    "para revisar, no una falta comprobada.";
+    `Un camión en movimiento, fuera de las faenas, anda en una ruta mínima (N5) o fuera de ruta (N6) durante ` +
+    `${format(data.min_minutos)} min o más y a ${format(data.min_km)} km o más de una ruta habitual (N1–N4). Termina al ` +
+    "volver a una ruta habitual o entrar a una faena; sin reportes por 30 min queda \"sin señal\". Es algo para revisar, " +
+    "no una falta comprobada.";
   if (!vg.fitted && $("heatmap-map").offsetParent !== null) requestAnimationFrame(() => vgFit(false));
 }
 
@@ -637,7 +634,7 @@ function vgRenderTable(data) {
   const now = data.resumen.camiones_por_nivel || {};
   const head = el("thead");
   const headRow = el("tr");
-  for (const label of ["Nivel", "Camiones distintos por ruta", "Rutas", "Recorridos", "Camiones ahora", "Alerta"]) {
+  for (const label of ["Nivel", "Camiones por ruta", "Rutas", "Recorridos", "Ahora", "Alerta"]) {
     headRow.append(el("th", "", label));
   }
   head.append(headRow);
@@ -648,7 +645,7 @@ function vgRenderTable(data) {
     const name = el("td", "lr-level");
     name.append(levelBadge(row.nivel), el("span", "", style.short));
     tr.append(name,
-      el("td", "", row.nivel === "N6" ? "Ninguna ruta aprendida a ~1 km" : levelRange(row.nivel)),
+      el("td", "", row.nivel === "N6" ? "Sin ruta aprendida cerca" : levelRange(row.nivel)),
       el("td", "lr-num", row.nivel === "N6" ? "—" : format(row.rutas)),
       el("td", "lr-num", row.nivel === "N6" ? "—" : format(row.recorridos)),
       el("td", "lr-num", format(now[row.nivel] || 0)),
@@ -658,10 +655,9 @@ function vgRenderTable(data) {
   }
   $("lr-table").replaceChildren(head, body);
   const missing = 4 - vg.model.niveles.filter((row) => levelNumber(row.nivel) <= 4).length;
-  $("lr-table-foot").textContent = "Los rangos de N1 a N4 no se fijan a mano: los aprende el modelo con cortes naturales " +
-    "sobre los camiones de cada ruta, y cambian con cada versión. " + (missing > 0
-      ? `Con los datos actuales aprendió ${format(4 - missing)} ${4 - missing === 1 ? "grupo" : "grupos"} en vez de 4. ` : "") +
-    "\"Camiones ahora\" cuenta los que reportaron en los últimos 30 minutos.";
+  $("lr-table-foot").textContent = "N1 a N4 los define el modelo con los datos de cada versión" + (missing > 0
+    ? ` (esta vez aprendió ${format(4 - missing)} ${4 - missing === 1 ? "grupo" : "grupos"})` : "") +
+    ". «Ahora»: camiones con señal en los últimos 30 min.";
 }
 
 // Ficha del modelo: qué algoritmos usa, con qué datos aprendió y cuándo se reentrena.
@@ -674,50 +670,39 @@ function vgRenderModel() {
     return item;
   };
   $("lr-model").replaceChildren(
-    step("Datos de entrenamiento", "Viajes reales del cierre diario",
-      `${format(model.viajes)} viajes de ${format(model.camiones)} camiones entre el ${formatDataDay(model.datos_desde)} ` +
-      `y el ${formatDataDay(model.datos_hasta)}. Un viaje va de una parada a la siguiente; no se inventan puntos.`),
-    step("1. Lugares de origen y destino", "DBSCAN (distancia haversine)",
-      `Las paradas dentro de una faena toman esa faena; las demás se agrupan si hay al menos ` +
-      `${format(params.lugar_min_viajes || 3)} paradas a menos de ${format(params.lugar_radio_m || 500)} m. ` +
-      `Resultado: ${format(model.lugares)} lugares.`),
-    step("2. Rutas", "Clustering jerárquico aglomerativo (enlace promedio)",
-      `Para cada par de lugares, cada viaje se resume en ${format(params.muestras || 32)} puntos a igual distancia y se ` +
-      `juntan los que siguen el mismo camino (a menos de ${format(params.ruta_distancia_m || 750)} m en promedio). ` +
-      `Un desvío real queda como otra ruta. Resultado: ${format(model.total_rutas)} rutas.`),
-    step("3. Línea de cada ruta", "Medoide",
-      "Se dibuja el viaje real más parecido a todos los de su ruta: es un camino recorrido, no un promedio."),
-    step("4. Nivel de uso", "Cortes naturales de Jenks (k-means exacto en 1D)",
-      `Con ${format(params.max_camiones_minima || 2)} camiones o menos la ruta es mínima (N5). El resto se reparte en ` +
-      "hasta 4 grupos que aprende el modelo sobre el logaritmo de los camiones de cada ruta (N1 a N4)."),
-    step("Reentrenamiento diario y previsión de 7 días", `Versión ${format(model.version)} · ${vgTime(model.creado_en)}`,
-      `Se reaprende desde cero ${model.cada_dias === 1 ? "cada día, con el día recién cerrado" : `cada ${format(model.cada_dias)} días`} ` +
-      `y los últimos ${format((Date.parse(model.datos_hasta) - Date.parse(model.datos_desde)) / 86400000 + 1)} días. ` +
-      `Lo aprendido es la previsión de por dónde andará la flota del ${formatDataDay(model.prevision_desde)} al ` +
-      `${formatDataDay(model.prevision_hasta)}; cada madrugada esa ventana avanza un día. Las rutas nuevas aparecen ` +
-      "y las que se dejan de usar bajan de nivel."),
-    step("Uso en vivo", "Clasificación de cada posición",
-      "Cada camión toma el nivel de la ruta aprendida que pasa a menos de ~1 km; si no hay ninguna está fuera de ruta (N6). " +
-      "En N5 y N6, con tiempo y distancia suficientes, se genera una alerta.")
+    step("Datos", "Viajes reales del cierre diario",
+      `${format(model.viajes)} viajes de ${format(model.camiones)} camiones, del ${formatDataDay(model.datos_desde)} ` +
+      `al ${formatDataDay(model.datos_hasta)}.`),
+    step("1. Lugares", "DBSCAN",
+      `Junta las paradas cercanas (${format(params.lugar_radio_m || 500)} m) en lugares: ${format(model.lugares)}.`),
+    step("2. Rutas", "Clustering jerárquico",
+      `Junta los viajes que siguen el mismo camino entre dos lugares: ${format(model.total_rutas)} rutas.`),
+    step("3. Línea", "Medoide", "Cada ruta se dibuja con su viaje real más representativo."),
+    step("4. Niveles", "Cortes naturales de Jenks",
+      `N5 = ${format(params.max_camiones_minima || 2)} camiones o menos. N1 a N4 los aprende el modelo.`),
+    step("5. Previsión", `Versión ${format(model.version)} · se reentrena cada día`,
+      `Con los últimos 90 días prevé las rutas del ${formatDataDay(model.prevision_desde)} al ` +
+      `${formatDataDay(model.prevision_hasta)}.`),
+    step("En vivo", "Nivel de cada camión",
+      "Toma el nivel de la ruta a menos de ~1 km; sin ninguna cerca, está fuera de ruta (N6).")
   );
 }
 
 function vgRenderStats(data) {
   const model = vg.model;
-  $("vg-model").textContent = `Rutas previstas del ${dayLabel(model.prevision_desde, "short")} al ${dayLabel(model.prevision_hasta, "short")}`;
-  $("vg-model-d").textContent = `Versión ${format(model.version)} · aprendió con viajes del ${formatDataDay(model.datos_desde)} ` +
-    `al ${formatDataDay(model.datos_hasta)} · ${model.cada_dias === 1 ? "se reaprende cada día" : `se reaprende cada ${format(model.cada_dias)} días`}`;
+  $("vg-model").textContent = `${dayLabel(model.prevision_desde, "short")} – ${dayLabel(model.prevision_hasta, "short")}`;
+  $("vg-model-d").textContent = `Versión ${format(model.version)} · ${model.cada_dias === 1 ? "se actualiza cada día" : `cada ${format(model.cada_dias)} días`}`;
   const alertRoutes = model.niveles.filter((row) => row.nivel === "N5").reduce((total, row) => total + row.rutas, 0);
   $("vg-routes").textContent = format(model.total_rutas);
-  $("vg-routes-d").textContent = `${format(model.total_rutas - alertRoutes)} habituales (N1–N4) · ${format(alertRoutes)} mínimas (N5)`;
+  $("vg-routes-d").textContent = `${format(model.total_rutas - alertRoutes)} habituales · ${format(alertRoutes)} mínimas`;
   vgRenderLive();
   const summary = data.resumen;
   $("vg-alerts").textContent = format(summary.activas);
   $("vg-alerts-card").classList.toggle("has-alerts", summary.activas > 0);
-  $("vg-alerts-d").textContent = `${format(summary.sin_senal)} sin señal · ${format(summary.terminadas)} en la semana`;
+  $("vg-alerts-d").textContent = `${format(summary.sin_senal)} sin señal · ${format(summary.terminadas)} esta semana`;
   $("heatmap-source-status").textContent = summary.activas
-    ? `${format(summary.activas)} ${summary.activas === 1 ? "camión en ruta mínima o fuera de ruta" : "camiones en rutas mínimas o fuera de ruta"}`
-    : "En vivo · todos en rutas habituales";
+    ? `${format(summary.activas)} ${summary.activas === 1 ? "alerta activa" : "alertas activas"}`
+    : "En vivo · sin alertas";
   $("heatmap-source-status").className = "status " + (summary.activas ? "warning" : "info");
 }
 
@@ -726,15 +711,15 @@ function vgRenderLive() {
   if (!vg.data) return;
   const recent = vg.vehicles.filter((v) => Date.now() - new Date(v.timestamp).getTime() <= 15 * 60 * 1000);
   $("vg-moving").textContent = format(recent.filter((v) => Number(v.speed_kmh || 0) > 3).length);
-  $("vg-moving-d").textContent = `${format(recent.length)} con dato de los últimos 15 min`;
+  $("vg-moving-d").textContent = `de ${format(recent.length)} con señal (15 min)`;
   const last = vg.vehicles.reduce((top, v) => (!top || v.timestamp > top ? v.timestamp : top), null);
   $("vg-last").textContent = last ? formatAge((Date.now() - new Date(last).getTime()) / 1000) : "—";
-  $("vg-last-d").textContent = last ? formatLocal(last) + " (hora de Chile)" : "Sin reportes";
+  $("vg-last-d").textContent = last ? formatLocal(last) : "Sin reportes";
   const stale = last && Date.now() - new Date(last).getTime() > 15 * 60 * 1000;
   $("vg-last").closest(".atlas-stat").classList.toggle("is-stale", Boolean(stale));
   $("map-last-update").textContent = (stale
-    ? "No están llegando datos nuevos: se muestra la última posición recibida"
-    : "Toca una ruta para ver su nivel y cuántos camiones la usan") + " · actualizado " + new Intl.DateTimeFormat("es-CL", {
+    ? "Sin datos nuevos: se muestra la última posición"
+    : "Toca un camino para ver su detalle") + " · " + new Intl.DateTimeFormat("es-CL", {
     hour: "2-digit", minute: "2-digit", timeZone: HISTORY_ZONE}).format(new Date());
 }
 
@@ -816,7 +801,7 @@ function vgRenderAlertList() {
   }));
   if (!visible.length) {
     const empty = {
-      activa: "Ningún camión anda por rutas mínimas ni fuera de ruta en este momento.",
+      activa: "Sin alertas en este momento.",
       sin_senal: "Ningún camión dejó de reportar en una ruta mínima o fuera de ruta.",
       terminada: "Sin alertas en los últimos 7 días."
     }[vg.alertFilter];
@@ -1013,7 +998,7 @@ function vgReset(fit = true) {
   if (fleetMap) fleetMap.closePopup();
   $("map-selection-detail").classList.remove("vg-card");
   setSelectionDetail("Selección", "Elige una alerta o un camión",
-    "El mapa muestra solo lo elegido. Toca una ruta para ver su nivel y cuántos camiones la usan.");
+    "El mapa mostrará solo lo suyo.");
   vgApplyLayers();
   vgMarkSelection();
   if (fit) vgFit(true);
@@ -2476,7 +2461,7 @@ async function refresh() {
       $("notice").textContent = `No se pudo actualizar: ${problems.join(", ")}. Se muestran los últimos datos disponibles y se reintentará automáticamente. ${reason}`;
     } else {
       $("notice").hidden = state.status === "ok";
-      $("notice").textContent = "Una etapa no ha respondido recientemente o está preparando datos nuevos. Los datos mostrados corresponden a la última carga disponible.";
+      $("notice").textContent = "Algún servicio está preparando datos: se muestra la última carga disponible.";
     }
   } finally {
     if (version === sessionVersion) { refreshing = false; $("refresh").disabled = false; }
