@@ -732,8 +732,6 @@
 .vehicle-live-row.off .vehicle-live-state{color:var(--muted);font-weight:500}
 
 /* --- Dashboard de la flota (mes a mes por patente) --- */
-.fd-csv{border:1px solid var(--green);background:#fff;color:var(--green);border-radius:6px;padding:8px 12px;font-size:10px;font-weight:700;white-space:nowrap}
-.fd-csv:hover{background:#eef6ef}
 .fd-search{flex:1 1 220px;display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:7px;padding:0 10px;color:var(--muted);background:#fff}
 .fd-search input{border:0;outline:0;width:100%;padding:9px 0;font-size:11px;background:transparent}
 .fd-search:focus-within{border-color:var(--green)}
@@ -978,8 +976,6 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .db-field select{height:36px;min-width:230px;border:1px solid #b9ccc1;border-radius:8px;padding:0 10px;background:#fff;color:var(--ink);font:inherit;font-size:12px;font-weight:600;text-transform:none;letter-spacing:0}
 .db-field select:focus{border-color:var(--green);outline:3px solid rgba(31,107,80,.12)}
 .db-search{height:36px}
-.db-downloads{display:flex;gap:6px;margin-left:auto}
-.db-downloads .fd-csv{height:36px}
 .db-filters{display:flex;gap:6px;flex-wrap:wrap}
 .db-chip{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--ink);font-size:11px;font-weight:600;cursor:pointer}
 .db-chip b{min-width:20px;padding:1px 6px;border-radius:999px;background:#eef2ef;font-size:10px;text-align:center}
@@ -999,7 +995,6 @@ td.fd-col-num.is-late{color:#b24c31;font-weight:600}
 .db-silent{color:#b24c31;font-weight:700}
 @media(max-width:690px){
   .db-field,.db-field select{width:100%;min-width:0}
-  .db-downloads{width:100%;margin-left:0}.db-downloads .fd-csv{flex:1}
 }
 .db-table th button{text-transform:none}
 
@@ -1075,3 +1070,14 @@ a.db-cal-day:hover{outline:2px solid var(--ink);outline-offset:1px}
 @media(max-width:940px){.db-detail-body{grid-template-columns:minmax(0,1fr)}.db-detail-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .db-cal-day.is-dark small,.db-cal-day.is-dark b{color:#fff}
 .db-cal-day small{opacity:.9}
+
+/* Descargas explicadas */
+.db-downloads{display:grid;grid-template-columns:minmax(160px,.7fr) repeat(2,minmax(0,1fr));gap:8px;align-items:stretch;margin:0 0 10px}
+.db-downloads-title{display:grid;align-content:center;gap:2px;font-size:11px;font-weight:700;color:var(--ink)}
+.db-downloads-title small{font-size:9px;font-weight:400;color:var(--muted)}
+.db-download{display:grid;gap:3px;padding:9px 12px;border:1px solid var(--green);border-radius:8px;background:#fff;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.db-download strong{color:var(--green);font-size:11px}
+.db-download small{color:var(--muted);font-size:9px;line-height:1.4}
+.db-download:hover{background:#eef6ef}
+.db-download:disabled{opacity:.6;cursor:wait}
+@media(max-width:690px){.db-downloads{grid-template-columns:minmax(0,1fr)}}

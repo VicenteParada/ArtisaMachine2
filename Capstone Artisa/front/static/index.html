@@ -6,12 +6,12 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/mapa-base.css?v=20261021-datos-camion5">
-  <link rel="stylesheet" href="/style.css?v=20261021-datos-camion5">
+  <link rel="stylesheet" href="/mapa-base.css?v=20261021-datos-camion6">
+  <link rel="stylesheet" href="/style.css?v=20261021-datos-camion6">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
-  <script src="/mapa-base.js?v=20261021-datos-camion5" defer></script>
-  <script src="/app.js?v=20261021-datos-camion5" defer></script>
+  <script src="/mapa-base.js?v=20261021-datos-camion6" defer></script>
+  <script src="/app.js?v=20261021-datos-camion6" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -228,10 +228,6 @@
             <option value="0">Todos</option><option value="5">5 o más</option><option value="10">10 o más</option><option value="15">15 o más</option></select></label>
           <label class="db-field db-field-small"><span>Recorrido mínimo</span><select id="db-min-km" aria-label="Recorrido mínimo">
             <option value="0">Sin mínimo</option><option value="100">100 km</option><option value="500">500 km</option><option value="1000">1.000 km</option></select></label>
-          <div class="db-downloads">
-            <button type="button" id="db-csv" class="fd-csv" title="Una fila por camión, como la tabla">↓ Resumen</button>
-            <button type="button" id="db-csv-days" class="fd-csv" title="Una fila por camión y día">↓ Día a día</button>
-          </div>
         </div>
         <div class="db-filters" id="db-filters" role="group" aria-label="Filtrar camiones"></div>
         <p class="db-note" id="db-note" aria-live="polite"></p>
@@ -256,16 +252,14 @@
             <button type="button" class="db-more" data-db-sort="paradas" id="db-rank-more">Ver todos en la tabla ↓</button>
           </article>
           <article class="dashboard-card db-rank-card">
-            <div class="db-rank-head"><div><span class="eyebrow">DETENCIÓN POR DISTANCIA</span><h3>Minutos detenido cada 100 km</h3></div></div>
-            <p class="db-rank-note">Más alto es más tiempo detenido para la misma distancia. En naranjo, el 25 % más alto. Solo camiones con 100 km o más.</p>
+            <div class="db-rank-head"><div><span class="eyebrow">MENOS REPORTES</span><h3 id="db-low-title">Camiones que menos reportaron</h3></div></div>
+            <p class="db-rank-note" id="db-low-note">Comparados con la mediana de la flota en el período: la barra completa es lo normal.</p>
             <div class="db-rank-tools">
-              <label class="db-field db-field-small"><span>Orden</span><select id="db-eff-order" aria-label="Orden de la detención por distancia">
-                <option value="desc">Mayor detención</option><option value="asc">Menor detención</option></select></label>
-              <label class="db-field db-field-small"><span>Mostrar</span><select id="db-eff-limit" aria-label="Cuántos camiones mostrar">
+              <label class="db-field db-field-small"><span>Mostrar</span><select id="db-low-limit" aria-label="Cuántos camiones mostrar">
                 <option value="8">8 camiones</option><option value="15">15 camiones</option><option value="0">Todos</option></select></label>
             </div>
-            <div id="db-eff" class="dashboard-bars db-bars"></div>
-            <button type="button" class="db-more" data-db-sort="por100">Ver todos en la tabla ↓</button>
+            <div id="db-low" class="dashboard-bars db-bars"></div>
+            <button type="button" class="db-more" data-db-sort="reportes" data-db-dir="1">Ver todos en la tabla ↓</button>
           </article>
         </div>
         <div class="db-table-head">
@@ -279,6 +273,11 @@
             <button type="button" data-db-month-metric="km" aria-pressed="false">Km</button>
           </div>
           <label class="fd-search db-search"><span>⌕</span><input id="db-search" type="search" placeholder="Buscar patente o camión…" aria-label="Buscar patente o camión"></label>
+        </div>
+        <div class="db-downloads" aria-label="Descargar en Excel">
+          <span class="db-downloads-title">Descargar en Excel (CSV)<small>Con el período, los filtros y la búsqueda que tengas ahora</small></span>
+          <button type="button" id="db-csv" class="db-download"><strong>↓ Tabla por camión</strong><small id="db-csv-note">Una fila por camión con sus cifras del período</small></button>
+          <button type="button" id="db-csv-days" class="db-download"><strong id="db-csv-days-label">↓ Detalle día por día</strong><small>Una fila por camión y día: reportes, km, paradas, tiempo detenido y hora del primer y último reporte</small></button>
         </div>
         <div class="fd-table-wrap" id="db-table-wrap"><table id="db-table" class="fd-table db-table"></table></div>
         <small class="fd-foot" id="db-foot"></small>

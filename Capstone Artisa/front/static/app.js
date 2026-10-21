@@ -1271,7 +1271,7 @@ function dbColumns() {
 
 var dbState = {data: null, period: null, periods: {}, requests: {}, query: "", filter: "todos", sort: "reportes",
   dir: -1, open: null, days: {}, rank: "paradas", minDays: 0, minKm: 0,
-  rankOrder: "desc", rankLimit: 8, effOrder: "desc", effLimit: 8, view: "periodo", monthMetric: "reportes", dayMetric: "km"};
+  rankOrder: "desc", rankLimit: 8, lowLimit: 8, view: "periodo", monthMetric: "reportes", dayMetric: "km"};
 const DB_RANKS = {
   paradas: {title: "Camiones con más paradas", color: "#d97941", value: (t) => t.paradas, show: (t) => `${format(t.paradas)} paradas`,
     detail: (t) => `${formatMinutes(t.detenido)} detenido · ${format(t.km, 1)} km`},
@@ -1280,7 +1280,7 @@ const DB_RANKS = {
   km: {title: "Camiones con más km", color: "#287a57", value: (t) => t.km, show: (t) => `${format(t.km, 1)} km`,
     detail: (t) => `${format(t.dias)} días con datos · ${format(t.reportes)} reportes`}
 };
-const DB_EFFICIENCY_KM = 100;  // la detención por distancia solo compara camiones con 100 km o más
+const DB_EFFICIENCY_KM = 100;  // "Más detención por distancia" solo compara camiones con 100 km o más
 const DB_REFRESH_MS = 5 * 60 * 1000;
 
 // Período elegido como rango de días: un mes (hasta hoy si está en curso) o todo el historial.
@@ -1395,7 +1395,7 @@ function renderDashTable() {
     $("dashboard-snapshot").className = "status " + (info?.error ? "warning" : "neutral");
     table.replaceChildren();
     $("db-foot").textContent = info?.error ? "No se pudo cargar el período: " + info.error : "Cargando los camiones del período…";
-    for (const id of ["db-findings", "db-rank", "db-eff"]) $(id).replaceChildren();
+    for (const id of ["db-findings", "db-rank", "db-low"]) $(id).replaceChildren();
     return;
   }
   renderDashFilters(info);
@@ -1422,6 +1422,9 @@ function renderDashTable() {
     button.setAttribute("aria-pressed", String(active));
   }
   $("db-month-metric").hidden = dbState.view !== "meses";
+  $("db-csv-note").textContent = dbState.view === "meses"
+    ? `Una fila por camión y una columna por mes (${dbState.monthMetric === "km" ? "km" : "reportes"}), como la vista mes a mes`
+    : "Una fila por camión: nivel, reportes, km, días con datos, paradas, tiempo detenido y último dato";
   const head = el("tr");
   for (const column of columns) {
     const th = el("th", column.key === "patente" ? "fd-col-truck" : "fd-col-num");
@@ -1581,14 +1584,22 @@ function renderDashHighlights(info) {
   const max = Math.max(1, ...ranked.map(rank.value));
   dbBars($("db-rank"), ranked.map((truck) => ({patente: truck.patente, label: `${truck.patente} · ${truck.nombre || "Sin nombre"}`,
     show: rank.show(truck), detail: rank.detail(truck), width: rank.value(truck) / max * 100, color: rank.color})));
-  const rates = withKm.map((truck) => truck.por100).sort((a, b) => a - b);
-  const warning = rates[Math.floor(rates.length * 0.75)] ?? Infinity;
-  const efficiency = pick(withKm, (truck) => truck.por100, dbState.effOrder, dbState.effLimit);
-  const maxRate = Math.max(1, ...efficiency.map((truck) => truck.por100));
-  dbBars($("db-eff"), efficiency.map((truck) => ({patente: truck.patente, label: `${truck.patente} · ${truck.nombre || "Sin nombre"}`,
-    show: `${format(truck.por100, 0)} min / 100 km`, width: truck.por100 / maxRate * 100,
-    detail: `${format(truck.km, 1)} km · ${format(truck.dias)} días con datos · ${formatMinutes(truck.detenido)} detenido`,
-    color: truck.por100 >= warning ? "#d97941" : "#287a57"})));
+  // Menos reportes: incluye a los que no reportaron nada en el período (si alguna vez reportaron);
+  // la barra compara con la mediana de la flota (barra completa = lo normal).
+  const reporting = dbFiltered(info).filter((truck) => truck.ultimo_dia);
+  const sortedReports = reporting.map((truck) => truck.reportes).sort((a, b) => a - b);
+  const median = sortedReports.length ? sortedReports[Math.floor(sortedReports.length / 2)] : 0;
+  const low = pick(reporting, (truck) => truck.reportes, "asc", dbState.lowLimit);
+  $("db-low-title").textContent = `Camiones que menos reportaron en ${dbPeriodLabel(dbState.period)}`;
+  $("db-low-note").textContent = `Comparados con la mediana de la flota en el período (${format(median)} reportes): la barra completa es lo normal. En rojo, bajo la mitad.`;
+  dbBars($("db-low"), low.map((truck) => {
+    const share = median ? truck.reportes / median * 100 : 0;
+    return {patente: truck.patente, label: `${truck.patente} · ${truck.nombre || "Sin nombre"}`,
+      show: truck.reportes ? `${format(truck.reportes)} reportes · ${format(share, 0)} %` : "Sin reportes",
+      width: Math.min(100, share),
+      detail: `${format(truck.dias)} días con datos · último dato ${truck.ultimo_dia === dbState.data.hoy ? "hoy" : "el " + dbDay(truck.ultimo_dia)} · nivel ${truck.nivel}`,
+      color: share < 50 ? "#b84d3f" : "#d9a441"};
+  }));
 }
 
 async function loadDashTruck(patente) {
@@ -1778,7 +1789,7 @@ async function downloadDashDays() {
   const visible = new Set(dbTrucks(info).map((truck) => truck.patente));
   const months = dbState.period === "todos" ? dbState.data.meses : [dbState.period];
   button.disabled = true;
-  button.textContent = "Preparando…";
+  button.querySelector("strong").textContent = "Preparando el archivo…";
   try {
     const lines = [["Fecha", "Estado del día", "Patente", "Camión", "Reportes GPS", "Primer reporte (Chile)",
       "Último reporte (Chile)", "Km", "Paradas", "Minutos detenido"].map(csvValue).join(";")];
@@ -1797,7 +1808,7 @@ async function downloadDashDays() {
     $("db-note").textContent = "No se pudo preparar la descarga: " + error.message;
   } finally {
     button.disabled = false;
-    button.textContent = "↓ Día a día";
+    button.querySelector("strong").textContent = "↓ Detalle día por día";
   }
 }
 
@@ -1806,7 +1817,7 @@ $("db-search").addEventListener("input", (event) => { dbState.query = event.targ
 $("db-csv").addEventListener("click", downloadDashCsv);
 for (const [id, key, number] of [["db-min-days", "minDays", true], ["db-min-km", "minKm", true],
   ["db-rank-order", "rankOrder", false], ["db-rank-limit", "rankLimit", true],
-  ["db-eff-order", "effOrder", false], ["db-eff-limit", "effLimit", true]]) {
+  ["db-low-limit", "lowLimit", true]]) {
   $(id).addEventListener("change", (event) => {
     dbState[key] = number ? Number(event.target.value) : event.target.value;
     renderDashTable();
@@ -1823,8 +1834,9 @@ for (const button of document.querySelectorAll("[data-db-rank]")) {
 }
 for (const button of document.querySelectorAll("[data-db-sort]")) {
   button.addEventListener("click", () => {
+    dbState.view = "periodo";
     dbState.sort = button.dataset.dbSort;
-    dbState.dir = -1;
+    dbState.dir = Number(button.dataset.dbDir || -1);
     dbState.query = "";
     $("db-search").value = "";
     renderDashTable();
