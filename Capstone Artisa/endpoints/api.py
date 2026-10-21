@@ -579,6 +579,7 @@ class Handler(JsonHandler):
                                          "/api/reportes/camion?asset_id=X&fecha=YYYY-MM-DD",
                                          "/api/camiones/X?fecha=YYYY-MM-DD", "/api/dashboard/camion?patente=X",
                                          "/api/dashboard/niveles?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
+                                         "/api/alertas?desde=YYYY-MM-DD&hasta=YYYY-MM-DD",
                                          "POST /api/chat", *PENDING_RESPONSES]})
             return
         if path in BUILDERS:
@@ -607,6 +608,24 @@ class Handler(JsonHandler):
             try:
                 with connect_db(read_timeout=30) as connection, connection.cursor() as cursor:
                     result = dashboard_api.truck_days(cursor, patente)
+            except pymysql.MySQLError as error:
+                self.database_error(error)
+                return
+            self.respond(200, result)
+            return
+        if path == "/api/alertas":
+            try:
+                desde = date.fromisoformat(_param(parsed.query, "desde") or "")
+                hasta = date.fromisoformat(_param(parsed.query, "hasta") or "")
+            except ValueError:
+                self.respond(400, {"error": "Usa ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD"})
+                return
+            if desde > hasta or (hasta - desde).days >= vigilancia_api.MAX_DIAS_HISTORIAL:
+                self.respond(400, {"error": f"Rango inválido (máximo {vigilancia_api.MAX_DIAS_HISTORIAL} días)"})
+                return
+            try:
+                with connect_db(read_timeout=30) as connection, connection.cursor() as cursor:
+                    result = vigilancia_api.alertas_rango(cursor, desde, hasta)
             except pymysql.MySQLError as error:
                 self.database_error(error)
                 return

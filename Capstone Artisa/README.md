@@ -22,7 +22,7 @@ flowchart LR
 | Servicio | Qué hace |
 |---|---|
 | `telemetria` | Trae los reportes de la API de la empresa cada 30 s. Si se corta la red, recupera lo pendiente sin duplicar. |
-| `machine-diario` | Cada día a las 00:30 cierra el día anterior y reentrena el modelo de rutas. |
+| `machine-diario` | Cada día a las 00:30 cierra el día anterior y reentrena el modelo de rutas; cada minuto revisa y guarda las alertas. |
 | `mariadb` | Base de datos (volumen persistente). |
 | `endpoints` | API de solo lectura para la web (`/api/*`) y el asistente (`/api/chat`). |
 | `front` + `nginx` | La web; nginx es la única entrada (puerto 8080). |
@@ -59,13 +59,16 @@ ruta aprendida.
 
 **Alerta:** un camión en movimiento, fuera de las faenas, en N5 o N6 por 10 min o más y a 2 km o
 más de una ruta habitual (N1–N4). Es algo para revisar, no una falta comprobada.
+`machine-diario` las revisa cada minuto (Parte 8 del modelo) y las guarda en la tabla
+`alertas_ruta`: cuándo empezó y terminó cada una, cuánto duró, nivel, km recorridos y camino
+seguido. Así quedan como registro aunque el camión vuelva a su ruta.
 
 ## Web
 
 | Sección | Para qué sirve |
 |---|---|
 | Camiones en vivo | Dónde está cada camión y qué hizo cada día: recorrido, viajes, paradas, reportes y últimos 30 días. |
-| Rutas y alertas | Rutas previstas para los próximos 7 días con su nivel (N1–N5), camiones en vivo encima, alertas y tabla de niveles. Al final, plegado, "¿Cómo funciona el modelo?". |
+| Rutas y alertas | Rutas previstas para los próximos 7 días con su nivel (N1–N5), camiones en vivo encima, alertas y tabla de niveles. "Historial" muestra las alertas guardadas por día, 7 días o mes y las descarga en CSV (Excel). Al final, plegado, "¿Cómo funciona el modelo?". |
 | Datos históricos | Mapas de días pasados (hasta 14 días): calor, rutas por camión, uso de rutas y puntos. |
 | Dashboard | Indicadores de la flota e informes por mes y por camión (con el nivel de reporte A–D). |
 | Asistente | Chat abajo a la derecha que responde sobre la flota, las rutas y las alertas. |

@@ -1164,3 +1164,15 @@ td.fd-col-level{color:#b8c3c0}
 .lr-model-details summary small{margin-left:8px;color:var(--muted);font-size:10px}
 .lr-model-details .lr-model{margin-top:12px}
 .lr-model-details .lr-model strong{color:var(--ink)}
+
+/* Rutas y alertas: historial de alertas (registro guardado por Machine) */
+.vg-history{display:grid;gap:7px;margin:0 0 4px;padding:9px;border:1px solid var(--line);border-radius:8px;background:#f8faf7}
+.vg-history-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.vg-history input[type=date]{min-width:0;flex:1;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);font-size:11px}
+.vg-history-ranges{display:inline-flex;padding:2px;border-radius:7px;background:#e9efea}
+.vg-history-ranges button{padding:5px 8px;border:0;border-radius:5px;background:transparent;color:var(--muted);font-size:10px;font-weight:600}
+.vg-history-ranges button.is-active{background:#fff;color:var(--green);box-shadow:0 1px 3px rgba(20,45,40,.14)}
+.vg-history small{color:var(--muted);font-size:10px}
+.vg-history-csv{padding:6px 10px;border:1px solid var(--green);border-radius:6px;background:#fff;color:var(--green);font-size:10px;font-weight:700;white-space:nowrap}
+.vg-history-csv:hover{background:#edf5ee}
+.vg-history-csv:disabled{opacity:.45;cursor:default}

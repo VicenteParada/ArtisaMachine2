@@ -276,6 +276,7 @@ let truckLayer = null;
 let selectionLayer = null;
 const truckMarkers = new Map();
 var vg = {data: null, model: null, modelLoading: false, alerts: new Map(), vehicles: [],
+  history: {desde: null, hasta: null, alerts: new Map(), loading: false, error: null},
   tab: "alerts", alertFilter: "activa", zone: "all", layers: {usage: true, vehicles: true, trails: true},
   selected: null, fitted: false, loading: false, openPopup: null};
 
@@ -284,6 +285,11 @@ const vgTime = (iso) => iso ? new Intl.DateTimeFormat("es-CL", {
 const vgLocalDay = (iso) => new Intl.DateTimeFormat("en-CA", {timeZone: HISTORY_ZONE}).format(new Date(iso));
 const vgDuration = (minutes) => minutes < 60 ? `${format(minutes)} min`
   : `${format(Math.floor(minutes / 60))} h ${String(Math.round(minutes % 60)).padStart(2, "0")} min`;
+const vgClock = (iso) => new Intl.DateTimeFormat("es-CL", {hour: "2-digit", minute: "2-digit", timeZone: HISTORY_ZONE})
+  .format(new Date(iso));
+// Una alerta por su id, esté en las de hoy o en el historial cargado.
+const vgAlertById = (id) => vg.alerts.get(id) || vg.history.alerts.get(id);
+const vgAlertKey = (alert) => "a" + alert.id;
 
 function levelBadge(level) {
   const badge = el("b", "lr-badge lr-" + String(level || "N6").toLowerCase(), String(levelNumber(level)));
@@ -513,7 +519,7 @@ function vgApplyLayers() {
   show(trailLayer, vg.layers.trails && !vg.selected);
   show(truckLayer, vg.layers.vehicles || Boolean(vg.selected));
   const only = selected.kind === "vehicle" ? selected.id
-    : selected.kind === "alert" ? vg.alerts.get(selected.id)?.patente : null;
+    : selected.kind === "alert" ? vgAlertById(selected.id)?.patente : null;
   for (const [vehicleId, marker] of truckMarkers) {
     const visible = only ? vehicleId === only : vg.layers.vehicles;
     if (visible && !truckLayer.hasLayer(marker)) truckLayer.addLayer(marker);
@@ -593,7 +599,7 @@ function renderVigilance(data) {
     return;
   }
   vg.data = data;
-  vg.alerts = new Map(data.alertas.map((alert) => [alert.patente + "|" + alert.inicio, alert]));
+  vg.alerts = new Map(data.alertas.map((alert) => [vgAlertKey(alert), alert]));
   vg.vehicles = data.vehiculos;
   vgRenderScale();
   vgRenderStats(data);
@@ -613,6 +619,10 @@ function renderVigilance(data) {
     "volver a una ruta habitual o entrar a una faena; sin reportes por 30 min queda \"sin señal\". Es algo para revisar, " +
     "no una falta comprobada.";
   if (!vg.fitted && $("heatmap-map").offsetParent !== null) requestAnimationFrame(() => vgFit(false));
+  // El historial que incluye hoy se mantiene al día con cada actualización (sin parpadear).
+  if (vg.alertFilter === "historial" && vg.history.hasta === localToday() && !vg.history.loading) {
+    loadAlertHistory(vg.history.kind, true);
+  }
 }
 
 function vgRenderScale() {
@@ -699,7 +709,7 @@ function vgRenderStats(data) {
   const summary = data.resumen;
   $("vg-alerts").textContent = format(summary.activas);
   $("vg-alerts-card").classList.toggle("has-alerts", summary.activas > 0);
-  $("vg-alerts-d").textContent = `${format(summary.sin_senal)} sin señal · ${format(summary.terminadas)} esta semana`;
+  $("vg-alerts-d").textContent = `${format(summary.sin_senal)} sin señal · ${format(summary.terminadas)} terminadas hoy`;
   $("heatmap-source-status").textContent = summary.activas
     ? `${format(summary.activas)} ${summary.activas === 1 ? "alerta activa" : "alertas activas"}`
     : "En vivo · sin alertas";
@@ -767,7 +777,37 @@ function vgMatches(text) {
   return !query || text.toLocaleLowerCase("es").includes(query);
 }
 
-const VG_FILTERS = {activa: "Activas", sin_senal: "Sin señal", terminada: "En la semana"};
+const VG_FILTERS = {activa: "Activas", sin_senal: "Sin señal", historial: "Historial"};
+
+// Resumen de una alerta en una línea: cuándo, cuánto duró y cuánto anduvo así.
+function vgAlertWhen(alert, withDay) {
+  const start = withDay ? vgTime(alert.inicio) : vgClock(alert.inicio);
+  return alert.estado === "terminada" ? `${start} → ${vgClock(alert.fin)} · ${vgDuration(alert.minutos)}`
+    : `desde ${start} · ${vgDuration(alert.minutos)}`;
+}
+
+function vgAlertFacts(alert) {
+  const far = alert.km_al_corredor === null || alert.km_al_corredor === undefined ? "a más de 130 km"
+    : `hasta ${format(alert.km_al_corredor, 1)} km`;
+  return `${format(alert.km_recorridos, 1)} km recorridos · ${far} de una ruta habitual`;
+}
+
+function vgAlertItem(id, alert, withDay) {
+  const state = VG_STATES[alert.estado];
+  const item = el("li");
+  const button = el("button", "vg-alert " + state.className);
+  button.type = "button";
+  button.dataset.alertSelect = id;
+  const head = el("span", "vg-alert-head");
+  head.append(el("b", "vg-state " + state.className, state.label), el("small", "", vgAlertWhen(alert, withDay)));
+  const who = el("span", "vg-alert-who");
+  who.append(el("span", "plate-chip", alert.patente), el("strong", "", alert.nombre || "Sin nombre"));
+  button.append(head, who, vgWhere(alert), el("span", "vg-alert-facts", vgAlertFacts(alert)),
+    el("span", "vg-alert-driver", "Conductor: " + (alert.conductor || "no informado")));
+  button.addEventListener("click", () => vgSelect({kind: "alert", id}));
+  item.append(button);
+  return item;
+}
 
 function vgRenderAlertList() {
   const list = $("alert-list");
@@ -775,39 +815,85 @@ function vgRenderAlertList() {
   const count = (state) => alerts.filter(([, a]) => a.estado === state).length;
   $("alert-count").textContent = format(count("activa"));
   for (const button of document.querySelectorAll("[data-alert-filter]")) {
-    const state = button.dataset.alertFilter;
-    button.textContent = `${VG_FILTERS[state]} ${format(count(state))}`;
-    button.classList.toggle("is-active", vg.alertFilter === state);
+    const filter = button.dataset.alertFilter;
+    button.textContent = filter === "historial" ? VG_FILTERS.historial : `${VG_FILTERS[filter]} ${format(count(filter))}`;
+    button.classList.toggle("is-active", vg.alertFilter === filter);
+  }
+  const history = vg.alertFilter === "historial";
+  $("vg-history").hidden = !history || vg.tab !== "alerts";
+  if (history) {
+    vgRenderHistory();
+    return;
   }
   const visible = alerts.filter(([, a]) => a.estado === vg.alertFilter &&
     vgMatches(`${a.patente} ${a.nombre || ""} ${a.conductor || ""} ${a.ubicacion || ""}`));
-  list.replaceChildren(...visible.map(([id, alert]) => {
-    const state = VG_STATES[alert.estado];
-    const item = el("li");
-    const button = el("button", "vg-alert " + state.className);
-    button.type = "button";
-    button.dataset.alertSelect = id;
-    const head = el("span", "vg-alert-head");
-    head.append(el("b", "vg-state " + state.className, state.label),
-      el("small", "", `desde ${vgTime(alert.inicio)} · ${vgDuration(alert.minutos)}`));
-    const who = el("span", "vg-alert-who");
-    who.append(el("span", "plate-chip", alert.patente), el("strong", "", alert.nombre || "Sin nombre"));
-    const facts = el("span", "vg-alert-facts", (alert.km_al_corredor === null ? "a más de 130 km" : `a ${format(alert.km_al_corredor, 1)} km`) +
-      " de una ruta habitual (N1–N4)");
-    button.append(head, who, vgWhere(alert), el("span", "vg-alert-driver", "Conductor: " + (alert.conductor || "no informado")), facts);
-    button.addEventListener("click", () => vgSelect({kind: "alert", id}));
-    item.append(button);
-    return item;
-  }));
+  list.replaceChildren(...visible.map(([id, alert]) => vgAlertItem(id, alert, false)));
   if (!visible.length) {
-    const empty = {
-      activa: "Sin alertas en este momento.",
-      sin_senal: "Ningún camión dejó de reportar en una ruta mínima o fuera de ruta.",
-      terminada: "Sin alertas en los últimos 7 días."
-    }[vg.alertFilter];
-    list.append(el("li", "monitor-empty", alerts.length && vgMatches("") ? empty : "No hay alertas para esta búsqueda."));
+    const empty = {activa: "Sin alertas en este momento.", sin_senal: "Ningún camión en alerta dejó de reportar."}[vg.alertFilter];
+    list.append(el("li", "monitor-empty", alerts.length && !vgMatches("") ? "No hay alertas para esta búsqueda." : empty));
   }
   vgMarkSelection();
+}
+
+// --- Historial: el registro de alertas guardado por Machine (/api/alertas) ---
+function vgHistoryRange(kind) {
+  const end = $("vg-history-day").value || localToday();
+  const start = kind === "semana" ? shiftDay(end, -6) : kind === "mes" ? end.slice(0, 8) + "01" : end;
+  return [start, end];
+}
+
+async function loadAlertHistory(kind = "dia", quiet = false) {
+  const day = $("vg-history-day");
+  if (!day.value) day.value = localToday();
+  day.max = localToday();
+  const [desde, hasta] = vgHistoryRange(kind);
+  vg.history = {...vg.history, desde, hasta, kind, loading: !quiet, error: null};
+  if (!quiet) vgRenderHistory();
+  try {
+    const data = await api(`/api/alertas?desde=${desde}&hasta=${hasta}`, {timeoutMs: 60000});
+    vg.history.alerts = new Map(data.alertas.map((alert) => [vgAlertKey(alert), alert]));
+  } catch (error) {
+    vg.history.error = error.message;
+  }
+  vg.history.loading = false;
+  if (vg.alertFilter === "historial") vgRenderHistory();
+}
+
+function vgRenderHistory() {
+  const list = $("alert-list");
+  const history = vg.history;
+  if (!history.desde) { loadAlertHistory(); return; }
+  for (const button of document.querySelectorAll("[data-history-range]")) {
+    button.classList.toggle("is-active", button.dataset.historyRange === (history.kind || "dia"));
+  }
+  const total = history.alerts.size;
+  $("vg-history-csv").disabled = !total;
+  const range = history.desde === history.hasta ? dayLabel(history.desde, "long")
+    : `${dayLabel(history.desde, "short")} – ${dayLabel(history.hasta, "short")}`;
+  $("vg-history-note").textContent = history.loading ? "Cargando…" : history.error ? "No se pudo cargar: " + history.error
+    : `${format(total)} ${total === 1 ? "alerta" : "alertas"} · ${range}`;
+  if (history.loading || history.error) { list.replaceChildren(); return; }
+  const visible = [...history.alerts.entries()].filter(([, a]) =>
+    vgMatches(`${a.patente} ${a.nombre || ""} ${a.conductor || ""} ${a.ubicacion || ""}`));
+  list.replaceChildren(...visible.map(([id, alert]) => vgAlertItem(id, alert, history.desde !== history.hasta)));
+  if (!visible.length) list.append(el("li", "monitor-empty", total ? "No hay alertas para esta búsqueda." : "Sin alertas en estas fechas."));
+  vgMarkSelection();
+}
+
+// Una fila por alerta, para revisarlas en Excel.
+function downloadAlertHistory() {
+  const history = vg.history;
+  const header = ["Patente", "Camión", "Conductor", "Estado", "Inicio (hora Chile)", "Fin (hora Chile)", "Duración (min)",
+    "Nivel", "Ruta", "Km recorridos", "Km máximos a una ruta habitual", "Última ubicación", "Versión del modelo"];
+  const number = (value) => value === null || value === undefined ? "" : format(value, 1).replace(/\./g, "");
+  const lines = [header.map(csvValue).join(";")];
+  for (const alert of history.alerts.values()) {
+    lines.push([alert.patente, alert.nombre, alert.conductor, VG_STATES[alert.estado].label,
+      csvLocalDateTime(alert.inicio), csvLocalDateTime(alert.fin), alert.minutos,
+      alert.nivel === "N6" ? "N6 · fuera de ruta" : "N5 · ruta mínima", alert.ruta_label, number(alert.km_recorridos),
+      number(alert.km_al_corredor), alert.ubicacion, alert.version_modelo].map(csvValue).join(";"));
+  }
+  saveCsv(lines, `artisa-alertas-${history.desde}${history.hasta !== history.desde ? "-a-" + history.hasta : ""}.csv`);
 }
 
 function vgRenderVehicleList() {
@@ -850,6 +936,7 @@ function setMonitorTab(tab) {
   }
   for (const list of document.querySelectorAll("[data-monitor-list]")) list.hidden = list.dataset.monitorList !== vg.tab;
   $("vg-alert-filter").hidden = vg.tab !== "alerts";
+  $("vg-history").hidden = vg.tab !== "alerts" || vg.alertFilter !== "historial";
   vgRenderLists();
 }
 
@@ -860,7 +947,7 @@ function vgSelect(selection, focus = true) {
   if (usageLayer) vgDrawUsage();
   if (fleetMap) fleetMap.closePopup();
   if (selection.kind === "alert") {
-    const alert = vg.alerts.get(selection.id);
+    const alert = vgAlertById(selection.id);
     if (!alert) return vgReset(false);
     vgApplyLayers();
     vgShowAlert(alert, focus);
@@ -935,7 +1022,7 @@ function vgShowAlert(alert, focus) {
   const lines = [
     vgWhere(alert),
     el("p", "vg-card-line", "Conductor: " + (alert.conductor || "no informado")),
-    el("p", "vg-card-line", "Desde " + vgTime(alert.inicio) + (alert.estado === "terminada" ? " hasta " + vgTime(alert.fin) : "")),
+    el("p", "vg-card-line", vgAlertWhen(alert, true)),
     facts
   ];
   if (alert.ubicacion) lines.push(el("p", "vg-card-place", alert.ubicacion));
@@ -986,7 +1073,7 @@ function vgMarkSelection() {
 
 function vgRestoreSelection() {
   if (!vg.selected) return;
-  const exists = vg.selected.kind === "alert" ? vg.alerts.has(vg.selected.id)
+  const exists = vg.selected.kind === "alert" ? Boolean(vgAlertById(vg.selected.id))
     : vg.vehicles.some((v) => v.vehicle_id === vg.selected.id);
   if (exists) vgSelect(vg.selected, false); else vgReset(false);
 }
@@ -2769,6 +2856,11 @@ for (const button of document.querySelectorAll("[data-monitor-tab]")) {
 for (const button of document.querySelectorAll("[data-alert-filter]")) {
   button.addEventListener("click", () => { vg.alertFilter = button.dataset.alertFilter; vgRenderAlertList(); });
 }
+for (const button of document.querySelectorAll("[data-history-range]")) {
+  button.addEventListener("click", () => loadAlertHistory(button.dataset.historyRange));
+}
+$("vg-history-day").addEventListener("change", () => loadAlertHistory(vg.history.kind || "dia"));
+$("vg-history-csv").addEventListener("click", downloadAlertHistory);
 $("monitor-search").addEventListener("input", vgRenderLists);
 $("reset-map-view").addEventListener("click", () => vgReset(true));
 $("vg-alerts-card").addEventListener("click", () => {

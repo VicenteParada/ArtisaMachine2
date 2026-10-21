@@ -22,9 +22,12 @@ nivel las que se dejan de usar. Todo el modelo está en este archivo, dividido e
       docker compose exec machine-diario python -m machine_learning.modelo_rutas --ahora
       docker compose exec machine-diario python -m machine_learning.modelo_rutas --geojson > rutas.geojson
 
-Uso del modelo en vivo (no es entrenamiento, corre en la API): endpoints/vigilancia_api.py lee
-la versión activa, da a cada posición el nivel de la ruta que pasa a menos de ~1 km o
-"fuera de ruta" (N6), y genera alertas en N5 y N6.
+  PARTE 8 · Alertas           Cada minuto compara los camiones en vivo con las rutas aprendidas y
+                              guarda en alertas_ruta a los que andan en una ruta mínima (N5) o
+                              fuera de ruta (N6). Al terminar, cada alerta queda fija.
+
+El mapa de la web (endpoints/vigilancia_api.py) usa la misma versión activa y el mismo índice de
+rutas (common/rutas_mapa.py) para dar a cada camión su nivel en vivo, y lee las alertas guardadas.
 """
 
 from collections import Counter, defaultdict
@@ -38,6 +41,8 @@ import sys
 import time
 
 import numpy as np
+
+from common import rutas_mapa as rm
 
 
 # ==============================================================================================
@@ -870,6 +875,207 @@ def main(argv):
         print(f"  {lugar['clave']:<10} {lugar['nombre']:<28} {lugar['extremos']:>6}  "
               f"({lugar['latitud']}, {lugar['longitud']})")
     return 0
+
+
+
+# ==============================================================================================
+# PARTE 8 · ALERTAS EN VIVO
+# Cada minuto: los reportes de las últimas ALERTA_VENTANA_HORAS de cada camión del catálogo se
+# comparan con las rutas de la versión activa. Una alerta es un camión en movimiento, fuera de
+# las faenas, en una ruta mínima (N5) o fuera de ruta (N6) durante al menos ALERTA_REPORTES
+# reportes y ALERTA_MIN_MINUTOS minutos, que se aleja ALERTA_MIN_KM km o más de una ruta N1–N4.
+# Termina al volver a una ruta N1–N4 o entrar a una faena. Se guarda en alertas_ruta: mientras
+# sigue abierta se actualiza; al terminar queda fija (aunque el modelo aprenda después esa ruta).
+# ==============================================================================================
+
+
+ALERTA_REPORTES = int(os.environ.get("VIGILANCIA_REPORTES", "3"))
+ALERTA_MIN_MINUTOS = float(os.environ.get("VIGILANCIA_MIN_MINUTOS", "10"))
+ALERTA_MIN_KM = float(os.environ.get("VIGILANCIA_MIN_KM", "2"))
+ALERTA_ACTIVA_MIN = 30        # sin reportes nuevos en 30 min, la alerta queda "sin señal"
+ALERTA_CORTE_HORAS = 6        # más de 6 h sin reportes separa dos episodios
+ALERTA_VENTANA_HORAS = 24     # reportes que se revisan en cada pasada
+VEL_MOVIMIENTO_KMH = 5
+MAX_ESTELA = 160
+
+
+def _en_movimiento(punto, anterior):
+    if punto[3] is not None:
+        return punto[3] >= VEL_MOVIMIENTO_KMH
+    if anterior is None:
+        return False
+    horas = (punto[0] - anterior[0]).total_seconds() / 3600
+    return horas > 0 and rm.distancia_km(anterior[1], anterior[2], punto[1], punto[2]) / horas >= VEL_MOVIMIENTO_KMH
+
+
+def episodios(puntos, mapa, faenas):
+    """Tramos del camión fuera de las rutas N1–N4: [(puntos, cerrado, movimientos)]."""
+    resultado, actual, movimientos = [], None, 0
+    anterior = None
+    for punto in puntos:
+        if anterior is not None and actual and (punto[0] - anterior[0]).total_seconds() > ALERTA_CORTE_HORAS * 3600:
+            resultado.append((actual, True, movimientos))
+            actual, movimientos = None, 0
+        _, lat, lon, _ = punto
+        if rm.en_faena(faenas, lat, lon) or mapa.habitual(lat, lon):
+            if actual:
+                resultado.append((actual, True, movimientos))
+            actual, movimientos = None, 0
+        else:
+            moviendo = _en_movimiento(punto, anterior)
+            if actual is None and moviendo:
+                actual, movimientos = [], 0
+            if actual is not None:
+                actual.append(punto)
+                movimientos += moviendo
+        anterior = punto
+    if actual:
+        resultado.append((actual, False, movimientos))
+    return [(e, cerrado, n) for e, cerrado, n in resultado if n >= ALERTA_REPORTES]
+
+
+def _identidad(cursor, asset_id, hasta):
+    """Nombre, conductor y ubicación informada en el último reporte hasta ese momento."""
+    for tabla in ("telemetria_api", "raw_gps"):
+        try:
+            cursor.execute(
+                f"""SELECT asset_name, driver_name, driver_last_name, location FROM {tabla}
+                    WHERE asset_id=%s AND report_date <= %s ORDER BY report_date DESC LIMIT 1""",
+                (asset_id, hasta),
+            )
+        except Exception:  # tabla aún no creada
+            continue
+        fila = cursor.fetchone()
+        if fila:
+            conductor = " ".join(filter(None, (fila.get("driver_name"), fila.get("driver_last_name")))).strip()
+            return {"nombre": fila.get("asset_name"), "conductor": conductor or None, "ubicacion": fila.get("location")}
+    return {"nombre": None, "conductor": None, "ubicacion": None}
+
+
+def _estela(puntos):
+    paso = max(1, math.ceil(len(puntos) / MAX_ESTELA))
+    elegidos = puntos[::paso]
+    if elegidos[-1] is not puntos[-1]:
+        elegidos.append(puntos[-1])
+    return [[round(p[1], 5), round(p[2], 5)] for p in elegidos]
+
+
+def detectar_alertas(cursor, por_camion, mapa, etiquetas, faenas, ahora):
+    """Alertas de los reportes dados: [{asset_id, inicio, fin, estado, nivel, …}] (fechas UTC)."""
+    lista = []
+    for asset_id, puntos in por_camion.items():
+        for episodio, cerrado, _ in episodios(puntos, mapa, faenas):
+            inicio, fin = episodio[0][0], episodio[-1][0]
+            minutos = (fin - inicio).total_seconds() / 60
+            if minutos < ALERTA_MIN_MINUTOS:
+                continue  # desvío corto: no alcanza a ser alerta
+            muestra = episodio[::max(1, len(episodio) // 40)] + [episodio[-1]]
+            distancias = [mapa.distancia(p[1], p[2]) for p in muestra]
+            lejos = None if any(d is None for d in distancias) else max(distancias)
+            if lejos is not None and lejos < ALERTA_MIN_KM:
+                continue  # anduvo a menos de ALERTA_MIN_KM de una ruta N1–N4: no es un desvío real
+            if cerrado:
+                estado = "terminada"
+            else:
+                estado = "activa" if (ahora - fin).total_seconds() <= ALERTA_ACTIVA_MIN * 60 else "sin_senal"
+            ultimo = episodio[-1]
+            donde = [mapa.en(p[1], p[2]) for p in episodio]
+            minimas = Counter(ruta for numero, ruta in donde if numero == 5)
+            ruta = minimas.most_common(1)[0][0] if minimas else None
+            cercana = mapa.cercana(ultimo[1], ultimo[2])  # para dibujar la ruta habitual más cercana
+            alerta = {
+                "asset_id": asset_id, "inicio": inicio, "fin": fin, "estado": estado,
+                "nivel": "N6" if any(numero == rm.FUERA for numero, _ in donde) else "N5",
+                "route_id": ruta, "ruta_label": etiquetas.get(ruta),
+                "minutos": round(minutos), "reportes": len(episodio),
+                "km_recorridos": round(sum(rm.distancia_km(a[1], a[2], b[1], b[2])
+                                           for a, b in zip(episodio, episodio[1:])), 1),
+                "km_ruta_habitual": None if lejos is None else round(lejos, 1),
+                "velocidad": ultimo[3], "latitud": round(ultimo[1], 5), "longitud": round(ultimo[2], 5),
+                "corredor": cercana, "estela": _estela(episodio),
+            }
+            alerta.update(_identidad(cursor, asset_id, fin))
+            lista.append(alerta)
+    return lista
+
+
+def guardar_alertas(connection, alertas, ahora, version_id):
+    """Guarda las alertas detectadas. Una alerta es la misma si es del mismo camión y se cruza en
+    el tiempo con una guardada (así no se duplica aunque la ventana corte su inicio). Las
+    terminadas no se tocan más. Las abiertas que ya no aparecen se cierran.
+    Devuelve {"nuevas", "actualizadas", "cerradas"}."""
+    resultado = {"nuevas": 0, "actualizadas": 0, "cerradas": 0}
+    desde = ahora - timedelta(hours=ALERTA_VENTANA_HORAS + ALERTA_CORTE_HORAS)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """SELECT id, asset_id, inicio, fin, estado FROM alertas_ruta
+               WHERE estado IN ('activa', 'sin_senal') OR fin >= %s""", (desde,))
+        guardadas = defaultdict(list)
+        for fila in cursor.fetchall():
+            guardadas[fila["asset_id"]].append(fila)
+        vistas = set()
+        for a in alertas:
+            previa = next((g for g in guardadas[a["asset_id"]]
+                           if g["inicio"] <= a["fin"] and g["fin"] >= a["inicio"]), None)
+            corredor = a["corredor"]
+            valores = (a.get("nombre"), a.get("conductor"),
+                       a.get("ubicacion"), a["fin"], a["estado"], a["nivel"], a["route_id"],
+                       (a["ruta_label"] or "")[:255] or None, a["minutos"], a["reportes"], a["km_recorridos"],
+                       a["km_ruta_habitual"], a["velocidad"], a["latitud"], a["longitud"],
+                       corredor[1][0] if corredor else None, corredor[1][1] if corredor else None,
+                       round(corredor[0], 1) if corredor else None,
+                       json.dumps(a["estela"], separators=(",", ":")), version_id, ahora)
+            if previa:
+                vistas.add(previa["id"])
+                if previa["estado"] == "terminada":
+                    continue  # ya cerrada: queda tal como se registró
+                cursor.execute(
+                    """UPDATE alertas_ruta SET asset_name=%s, conductor=%s, ubicacion=%s, fin=%s, estado=%s,
+                       nivel=%s, route_id=%s, ruta_label=%s, minutos=%s, reportes=%s, km_recorridos=%s,
+                       km_ruta_habitual=%s, velocidad=%s, latitud=%s, longitud=%s, corredor_lat=%s,
+                       corredor_lon=%s, corredor_km=%s, estela=%s, version_modelo=%s, actualizada_en=%s
+                       WHERE id=%s""", (*valores, previa["id"]))
+                resultado["actualizadas"] += 1
+            else:
+                cursor.execute(
+                    """INSERT IGNORE INTO alertas_ruta (asset_name, conductor, ubicacion, fin, estado, nivel,
+                       route_id, ruta_label, minutos, reportes, km_recorridos, km_ruta_habitual, velocidad,
+                       latitud, longitud, corredor_lat, corredor_lon, corredor_km, estela, version_modelo,
+                       actualizada_en, asset_id, inicio, detectada_en)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (*valores, a["asset_id"], a["inicio"], ahora))
+                resultado["nuevas"] += 1
+        for filas in guardadas.values():
+            for g in filas:
+                if g["estado"] != "terminada" and g["id"] not in vistas:
+                    cursor.execute("UPDATE alertas_ruta SET estado='terminada', actualizada_en=%s WHERE id=%s",
+                                   (ahora, g["id"]))
+                    resultado["cerradas"] += 1
+    connection.commit()
+    return resultado
+
+
+_VIGILANCIA = {"version": None, "mapa": None, "etiquetas": {}}
+
+
+def vigilar(connection, ahora=None):
+    """Una pasada de alertas (la llama el servicio cada minuto). None si aún no hay modelo."""
+    ahora = ahora or datetime.now(timezone.utc).replace(tzinfo=None)
+    with connection.cursor() as cursor:
+        version = rm.version_activa(cursor)
+        if version is None:
+            connection.commit()
+            return None
+        if _VIGILANCIA["version"] != version:
+            rutas = rm.leer_rutas(cursor, version[0])
+            _VIGILANCIA.update(version=version, mapa=rm.MapaRutas(rutas),
+                               etiquetas={r["id"]: r["label"] for r in rutas})
+        por_camion = rm.leer_reportes(cursor, ahora - timedelta(hours=ALERTA_VENTANA_HORAS), ahora,
+                                      rm.catalogo(cursor))
+        alertas = detectar_alertas(cursor, por_camion, _VIGILANCIA["mapa"], _VIGILANCIA["etiquetas"],
+                                   rm.leer_faenas(cursor), ahora)
+    connection.commit()
+    return guardar_alertas(connection, alertas, ahora, version[0])
 
 
 if __name__ == "__main__":

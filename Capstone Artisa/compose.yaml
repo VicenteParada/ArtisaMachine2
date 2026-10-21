@@ -135,6 +135,11 @@ services:
       RUTAS_CADA_DIAS: ${RUTAS_CADA_DIAS:-1}
       RUTAS_HORIZONTE_DIAS: ${RUTAS_HORIZONTE_DIAS:-7}
       RUTAS_MAX_CAMIONES_MINIMA: ${RUTAS_MAX_CAMIONES_MINIMA:-2}
+      # Alertas (Parte 8 del modelo): en N5 o N6 al menos estos reportes, minutos y km de
+      # distancia de una ruta N1–N4. Machine las guarda cada minuto en alertas_ruta.
+      VIGILANCIA_REPORTES: ${VIGILANCIA_REPORTES:-3}
+      VIGILANCIA_MIN_MINUTOS: ${VIGILANCIA_MIN_MINUTOS:-10}
+      VIGILANCIA_MIN_KM: ${VIGILANCIA_MIN_KM:-2}
     depends_on:
       mariadb:
         condition: service_healthy
@@ -155,9 +160,7 @@ services:
       ETL_HISTORICO: ${ETL_HISTORICO:-1}
       RUTAS_CADA_DIAS: ${RUTAS_CADA_DIAS:-1}
       RUTAS_HORIZONTE_DIAS: ${RUTAS_HORIZONTE_DIAS:-7}
-      # Alerta: en una ruta mínima (N5) o fuera de ruta (N6) al menos estos reportes, minutos y
-      # km de distancia de una ruta N1–N4.
-      VIGILANCIA_REPORTES: ${VIGILANCIA_REPORTES:-3}
+      # Solo para mostrar la regla de las alertas en la web (las detecta machine-diario).
       VIGILANCIA_MIN_MINUTOS: ${VIGILANCIA_MIN_MINUTOS:-10}
       VIGILANCIA_MIN_KM: ${VIGILANCIA_MIN_KM:-2}
       # Asistente (Gemini). La clave va solo en .env (GEMINI_API_KEY); sin clave, el chat avisa

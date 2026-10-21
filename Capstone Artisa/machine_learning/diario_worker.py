@@ -227,6 +227,22 @@ def ejecucion_completa(connection, utc_now):
     return total
 
 
+def publicar_alertas(connection, utc_now):
+    """Alertas de ruta en vivo (Parte 8 del modelo). Un fallo aquí no detiene el cierre diario."""
+    try:
+        resultado = modelo_rutas.vigilar(connection, utc_now)
+        STATE["alertas"] = resultado or {"estado": "sin modelo de rutas"}
+        if resultado and (resultado["nuevas"] or resultado["cerradas"]):
+            print(f"Alertas: {resultado['nuevas']} nuevas, {resultado['cerradas']} cerradas", flush=True)
+    except Exception as error:
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+        STATE["alertas"] = {"error": f"{type(error).__name__}: {error}"[:255]}
+        print(f"Alertas: no se pudieron revisar ({STATE['alertas']['error']})", flush=True)
+
+
 def _con_bloqueo(connection, funcion, espera=0):
     """Evita que el servicio y una ejecución manual procesen a la vez.
 
@@ -285,6 +301,8 @@ def loop():
                     if not hecho and time.monotonic() - RUTAS_REVISADAS["value"] >= 900:
                         RUTAS_REVISADAS["value"] = time.monotonic()
                         _con_bloqueo(connection, lambda: publicar_rutas(connection, final=True))
+                # Cada minuto, haya o no trabajo programado: alertas de ruta en vivo.
+                publicar_alertas(connection, _utc_now())
             STATE.update(estado="ok", error=None, ultimo_ciclo=_utc_now().isoformat() + "Z")
         except Exception as error:  # MariaDB caída u otro fallo: se reintenta en el próximo ciclo
             STATE.update(estado="error", error=f"{type(error).__name__}: {error}"[:255])

@@ -113,6 +113,7 @@ python3 scripts/artisa.py rutas
 |---|---|---|
 | Telemetría | Cada 30 s | Trae los reportes nuevos de la API. Si se corta la red, reintenta y recupera lo pendiente. |
 | Día en curso | Cada 10 min | Actualiza las cifras de hoy. |
+| Alertas | Cada minuto | Revisa si algún camión salió de las rutas habituales y lo guarda en la tabla `alertas_ruta`. |
 | Cierre diario | 00:30 | Cierra el día anterior, recalcula días con reportes atrasados y reentrena el modelo de rutas (previsión de los próximos 7 días). |
 | Respaldo | 03:00 | Guarda la base en `respaldos/` y conserva los últimos 3 días. |
 
@@ -160,7 +161,17 @@ Se cambian en `.env` y se aplican con `python3 scripts/artisa.py iniciar`.
 | `ARTISA_PORT` | `8080` | Puerto de la web |
 | `GEMINI_API_KEY` | vacío | Clave del asistente |
 
-## 6. Respaldos
+## 6. Registro de alertas para la empresa
+
+Cada alerta queda guardada en la tabla `alertas_ruta` (inicio, fin, duración, nivel, km
+recorridos, distancia a la ruta habitual y camino seguido). Una alerta terminada ya no cambia.
+
+- **En la web:** Rutas y alertas → Alertas → **Historial**. Se elige un día y el período
+  (Día, 7 días o Mes, hasta 92 días) y **↓ Descargar** genera un CSV que abre en Excel.
+- **Por la API:** `GET /api/alertas?desde=AAAA-MM-DD&hasta=AAAA-MM-DD` (con sesión iniciada).
+- La tabla se crea sola al iniciar; entra en el respaldo diario junto con el resto de la base.
+
+## 7. Respaldos
 
 Cada día a las 03:00 se guarda `respaldos/artisa_AAAA-MM-DD.sql.gz`. Para restaurar uno:
 
@@ -171,13 +182,14 @@ gunzip -c respaldos/artisa_AAAA-MM-DD.sql.gz | docker compose exec -T mariadb \
 
 Conviene copiar la carpeta `respaldos/` a otro equipo de vez en cuando.
 
-## 7. Si algo falla
+## 8. Si algo falla
 
 | Síntoma | Qué hacer |
 |---|---|
 | La web no abre | `python3 scripts/artisa.py estado` y luego `python3 scripts/artisa.py iniciar` |
 | "Sin conexión con la API" | Revisa que el servidor esté en la red de la empresa; se recupera solo al volver |
 | "La API rechazó las credenciales" (403) | `docker compose restart telemetria`; si sigue, revisa la IP con el equipo y vuelve a `conectar-api` |
+| El historial de alertas está vacío | Las alertas se guardan desde que `machine-diario` corre con esta versión; revisa `python3 scripts/artisa.py logs machine-diario` |
 | Rutas y alertas dice "Modelo pendiente" | Falta el primer día cerrado; o entrena ya con `python3 scripts/artisa.py rutas` |
 | El asistente dice que no está configurado | Falta `GEMINI_API_KEY` en `.env` (ver 1.6) |
 | Olvidé la contraseña | `python3 scripts/artisa.py contrasena` |
@@ -187,7 +199,7 @@ Conviene copiar la carpeta `respaldos/` a otro equipo de vez en cuando.
 
 ---
 
-## 8. Solo desarrollo: cargar el JSON histórico
+## 9. Solo desarrollo: cargar el JSON histórico
 
 El servidor de la empresa no lo necesita (trae el historial desde la API con `--desde`). En un
 equipo de desarrollo, para cargar el histórico de abril a septiembre:

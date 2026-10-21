@@ -228,3 +228,39 @@ ALTER TABLE telemetria_api ADD COLUMN IF NOT EXISTS location VARCHAR(255) NULL;
 
 -- La antigua predicción por día (LightGBM: tablas actividad_* y prediccion_*) se retiró. En
 -- bases existentes esas tablas pueden seguir: no se usan ni se borran.
+
+-- Registro de alertas de ruta (machine_learning/modelo_rutas.py, Parte 8). Machine revisa cada
+-- minuto los camiones en vivo contra las rutas aprendidas y guarda cada alerta: un camión en
+-- movimiento, fuera de faenas, en una ruta mínima (N5) o fuera de ruta (N6). Mientras sigue
+-- abierta se actualiza. Al terminar queda fija, aunque después el modelo aprenda esa ruta.
+CREATE TABLE IF NOT EXISTS alertas_ruta (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    asset_id VARCHAR(16) NOT NULL,
+    asset_name VARCHAR(128) NULL,
+    conductor VARCHAR(255) NULL,
+    ubicacion VARCHAR(255) NULL,
+    inicio DATETIME(6) NOT NULL,
+    fin DATETIME(6) NOT NULL,
+    estado VARCHAR(16) NOT NULL,
+    nivel VARCHAR(4) NOT NULL,
+    route_id VARCHAR(16) NULL,
+    ruta_label VARCHAR(255) NULL,
+    minutos INT UNSIGNED NOT NULL,
+    reportes INT UNSIGNED NOT NULL,
+    km_recorridos DOUBLE NOT NULL,
+    km_ruta_habitual DOUBLE NULL,
+    velocidad DOUBLE NULL,
+    latitud DOUBLE NOT NULL,
+    longitud DOUBLE NOT NULL,
+    corredor_lat DOUBLE NULL,
+    corredor_lon DOUBLE NULL,
+    corredor_km DOUBLE NULL,
+    estela MEDIUMTEXT NOT NULL,
+    version_modelo INT UNSIGNED NULL,
+    detectada_en DATETIME(6) NOT NULL,
+    actualizada_en DATETIME(6) NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_alertas_ruta_camion_inicio (asset_id, inicio),
+    INDEX idx_alertas_ruta_inicio (inicio),
+    INDEX idx_alertas_ruta_estado (estado, fin)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
