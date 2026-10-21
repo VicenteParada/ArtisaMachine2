@@ -21,7 +21,7 @@ flowchart LR
 | Servicio | Qué hace |
 |---|---|
 | `telemetria` | Trae los reportes de la API de la empresa cada 30 s. Sobrevive a cortes de red y recupera lo pendiente sin duplicar. |
-| `machine-diario` | Cierra cada día (00:30), extrae viajes y reentrena el modelo de rutas con cada semana de datos nuevos. |
+| `machine-diario` | Cierra cada día (00:30), extrae viajes y reentrena el modelo de rutas con el día recién cerrado. |
 | `mariadb` | Base de datos (volumen persistente). |
 | `endpoints` | API de solo lectura para la web (`/api/*`) y el asistente (`/api/chat`). |
 | `front` + `nginx` | Interfaz web; nginx es la única entrada (puerto 8080). |
@@ -41,7 +41,7 @@ flowchart LR
   3. **Lugares — DBSCAN:** las paradas dentro de una faena son esa faena; las demás se agrupan si hay 3 o más a menos de 500 m.
   4. **Rutas — clustering jerárquico aglomerativo:** por par de lugares (ida y vuelta juntas), los viajes que siguen el mismo camino (a menos de 750 m en promedio) son una ruta. Su línea es el **medoide**: un viaje real, nunca un promedio inventado.
   5. **Niveles — cortes naturales de Jenks:** según los camiones distintos que usaron cada ruta. **N5 mínima** = 1 o 2 camiones (`RUTAS_MAX_CAMIONES_MINIMA`); el resto se reparte en hasta 4 grupos que aprende el modelo: **N1 troncal**, **N2 muy usada**, **N3 uso medio**, **N4 poco usada**.
-  6. **Entrenamiento:** se reaprende desde cero con cada 7 días cerrados nuevos (`RUTAS_CADA_DIAS`) o si cambia el método; cada versión se guarda con sus cortes y métricas.
+  6. **Entrenamiento diario y previsión de 7 días:** se reaprende desde cero cada día con el día recién cerrado (`RUTAS_CADA_DIAS=1`) o si cambia el método. Lo aprendido es la previsión de por dónde andará la flota los próximos 7 días (`RUTAS_HORIZONTE_DIAS`); cada madrugada esa ventana avanza un día. Cada versión se guarda con sus cortes y métricas.
   7. **Validación:** `python3 scripts/artisa.py rutas` reentrena y muestra la tabla de clasificación con los datos reales.
 - **En vivo:** cada camión toma el nivel de la ruta aprendida que pasa a menos de ~1 km; si ninguna pasa cerca está **fuera de ruta (N6)**. **Alerta** cuando un camión en movimiento, fuera de las faenas, anda en N5 o N6 por 10 min o más y a 2 km o más de una ruta N1–N4 (`VIGILANCIA_MIN_MINUTOS`, `VIGILANCIA_MIN_KM`, `VIGILANCIA_REPORTES`).
 - **Camiones:** solo los del catálogo `DB/vehiculos_data.sql`. La patente y el conductor vienen del GPS (no se guarda el RUT).

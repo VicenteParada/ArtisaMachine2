@@ -2,7 +2,7 @@
 
 Nadie le dice al modelo cuáles son las rutas: las descubre en los viajes reales de los
 camiones (aprendizaje no supervisado) y las clasifica según cuántos camiones las usan. Se
-reaprende solo con cada semana de datos nuevos, así aparecen las rutas nuevas y bajan de
+reaprende solo cada día con el día recién cerrado, así aparecen las rutas nuevas y bajan de
 nivel las que se dejan de usar. Todo el modelo está en este archivo, dividido en partes:
 
   PARTE 1 · Viajes            Detecta paradas y viajes en los reportes GPS de cada camión.
@@ -15,7 +15,7 @@ nivel las que se dejan de usar. Todo el modelo está en este archivo, dividido e
                               de cada viaje; la línea de cada ruta es su medoide (un viaje real).
   PARTE 5 · Niveles           Cortes naturales de Jenks (k-means exacto en 1D) sobre los camiones
                               distintos de cada ruta: N1 troncal … N4 poco usada; N5 mínima.
-  PARTE 6 · Entrenamiento     Cuándo reaprender (cada RUTAS_CADA_DIAS días de datos nuevos), y
+  PARTE 6 · Entrenamiento     Cuándo reaprender (cada día cerrado, RUTAS_CADA_DIAS), y
                               cómo se guarda y activa cada versión (rutas_version / _clasificadas).
   PARTE 7 · Validación        Revisión del modelo con los datos reales, desde la terminal:
       docker compose exec machine-diario python -m machine_learning.modelo_rutas
@@ -264,7 +264,10 @@ class ViajeRuta:
 
 
 VENTANA_DIAS = int(os.environ.get("RUTAS_VENTANA_DIAS", "90"))
-CADA_DIAS = int(os.environ.get("RUTAS_CADA_DIAS", "7"))  # se reaprende con cada semana de datos nuevos
+CADA_DIAS = int(os.environ.get("RUTAS_CADA_DIAS", "1"))  # se reaprende con cada día cerrado nuevo
+# Lo aprendido es la previsión de por dónde andará la flota los próximos HORIZONTE_DIAS días; como
+# se reaprende cada día, esa ventana avanza un día cada madrugada.
+HORIZONTE_DIAS = int(os.environ.get("RUTAS_HORIZONTE_DIAS", "7"))
 CONSERVAR_VERSIONES = 3
 
 
@@ -521,7 +524,7 @@ MIN_RECORRIDOS = int(os.environ.get("RUTAS_MIN_RECORRIDOS", "1"))
 MIN_VEHICULOS = int(os.environ.get("RUTAS_MIN_VEHICULOS", "1"))
 MAX_CAMIONES_MINIMA = int(os.environ.get("RUTAS_MAX_CAMIONES_MINIMA", "2"))
 GRUPOS_APRENDIDOS = 4  # N1..N4
-METODO = "camiones-jenks-v1"  # si cambia, se reaprende sin esperar la semana
+METODO = "camiones-jenks-v1"  # si cambia, se reaprende sin esperar el próximo cierre
 NIVELES = {
     "N1": ("Troncal", "#14532d"),
     "N2": ("Muy usada", "#3f9d4a"),
@@ -590,7 +593,7 @@ def clasificar_niveles(camiones):
 
 # ==============================================================================================
 # PARTE 6 · ENTRENAMIENTO SEMANAL Y VERSIONES
-# construir_rutas junta las Partes 3 a 5. Se reaprende desde cero con cada CADA_DIAS días cerrados nuevos (o si cambia METODO). Cada
+# construir_rutas junta las Partes 3 a 5. Se reaprende desde cero con cada día cerrado nuevo (CADA_DIAS) o si cambia METODO. Cada
 # versión se guarda y activa en una sola transacción; se conservan CONSERVAR_VERSIONES.
 # ==============================================================================================
 
@@ -795,8 +798,8 @@ def necesita_recalculo(cursor, horas_minimas=2):
     nuevos desde los datos de la versión activa (y pasó el mínimo de horas entre versiones).
 
     Se cuenta en días de datos y no en días de calendario: durante la recuperación del
-    histórico se reaprende cada vez que entra una semana más, y en la operación normal
-    queda una versión nueva por semana."""
+    histórico se reaprende a medida que entran días (con un mínimo de horas entre versiones),
+    y en la operación normal queda una versión nueva por cada día cerrado."""
     cursor.execute("SELECT MAX(fecha) AS hasta FROM reporte_diario_estado WHERE estado='cerrado'")
     ultimo = (cursor.fetchone() or {}).get("hasta")
     if ultimo is None:

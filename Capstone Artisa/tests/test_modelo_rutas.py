@@ -236,10 +236,10 @@ class RelearnTests(unittest.TestCase):
         return {"creado_en": datetime(2026, 10, 1), "hasta": hasta,
                 "metricas_json": json.dumps({"parametros": {"metodo": metodo or modelo_rutas.METODO}})}
 
-    def test_relearns_with_each_new_week_of_data(self):
+    def test_relearns_with_each_new_closed_day(self):
         self.assertTrue(self.necesita(None))
-        self.assertFalse(self.necesita(self.version(datetime(2026, 10, 13).date())))   # 6 días nuevos
-        self.assertTrue(self.necesita(self.version(datetime(2026, 10, 12).date())))    # 7 días nuevos
+        self.assertFalse(self.necesita(self.version(datetime(2026, 10, 19).date())))   # ya aprendió el último día
+        self.assertTrue(self.necesita(self.version(datetime(2026, 10, 18).date())))    # se cerró un día nuevo
         # Cambió el método (por ejemplo, al actualizar Artisa): se reaprende sin esperar.
         self.assertTrue(self.necesita(self.version(datetime(2026, 10, 19).date(), metodo="antiguo")))
 

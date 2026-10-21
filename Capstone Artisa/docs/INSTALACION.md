@@ -77,7 +77,7 @@ y, al volver a la red, recupera lo que faltaba sin duplicar nada.
 |---|---|---|
 | Telemetría | cada 30 s | Trae los reportes nuevos de la API. Si se corta la red, reintenta y recupera lo pendiente. |
 | Resumen de hoy | cada 10 min | Actualiza el día en curso en **Reportes**. |
-| Cierre diario | 00:30 (`DIARIO_HORA`) | Cierra el día anterior (00:00 a 00:00 hora de Chile), recalcula días con reportes atrasados y reentrena el modelo de rutas cuando hay una semana de datos nuevos. |
+| Cierre diario | 00:30 (`DIARIO_HORA`) | Cierra el día anterior (00:00 a 00:00 hora de Chile), recalcula días con reportes atrasados y reentrena el modelo de rutas con ese día (previsión de los próximos 7 días). |
 | Respaldo | 03:00 (`RESPALDO_HORA`) | Guarda la base en `respaldos/` y conserva los últimos 3 días (`RESPALDO_DIAS`). |
 
 Si el equipo se reinicia, Docker vuelve a levantar todo.

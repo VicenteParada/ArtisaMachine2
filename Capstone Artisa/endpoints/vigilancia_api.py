@@ -3,7 +3,8 @@ y los camiones en vivo sobre ellas, con alertas.
 
 Rutas aprendidas (machine_learning/modelo_rutas.py, versión activa): el modelo agrupa los viajes
 reales en rutas y las clasifica por cuántos camiones distintos las usaron, de N1 (troncal)
-a N5 (mínima: 1 o 2 camiones). Se reaprende con cada semana de datos nuevos.
+a N5 (mínima: 1 o 2 camiones). Se reaprende cada día con el día recién cerrado, y lo aprendido es
+la previsión de por dónde andará la flota los próximos RUTAS_HORIZONTE_DIAS días.
 
 En vivo: cada posición toma el nivel de la ruta aprendida que pasa por su celda de ~500 m o
 una vecina (~1 km). Si ninguna pasa cerca, el camión está "fuera de ruta" (nivel 6).
@@ -296,12 +297,16 @@ def leer_modelo(cursor):
                         "recorridos": sum(r["recorridos"] for r in rutas if r["nivel"] == nivel),
                         "alerta": _numero(nivel) > HABITUAL})
     parametros = metricas.get("parametros") or {}
-    cada = int(os.environ.get("RUTAS_CADA_DIAS", "7"))
+    cada = int(os.environ.get("RUTAS_CADA_DIAS", "1"))
+    horizonte = int(os.environ.get("RUTAS_HORIZONTE_DIAS", "7"))
     modelo = {
         "version": version["id"], "creado_en": _iso(version["creado_en"]),
         "datos_desde": version["desde"].isoformat(), "datos_hasta": version["hasta"].isoformat(),
         "proxima_con_datos_hasta": (version["hasta"] + timedelta(days=cada)).isoformat(),
         "cada_dias": cada,
+        # Previsión: desde el día siguiente al último dato aprendido, por `horizonte` días.
+        "prevision_desde": (version["hasta"] + timedelta(days=1)).isoformat(),
+        "prevision_hasta": (version["hasta"] + timedelta(days=horizonte)).isoformat(),
         "viajes": metricas.get("viajes_clasificados", 0), "camiones": metricas.get("camiones", 0),
         "lugares": metricas.get("lugares", 0), "total_rutas": len(rutas),
         "parametros": parametros, "niveles": niveles,

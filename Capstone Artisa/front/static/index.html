@@ -6,13 +6,13 @@
   <title>Artisa · Transporte inteligente</title>
   <link rel="icon" type="image/svg+xml" sizes="any" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23163035'/%3E%3Cg transform='translate(7,7)scale(.1)'%3E%3Cpath d='M251,0C112,0,0,112,0,251c0,31,5,60,16,88L251,56l235,283c11-28,16-57,16-88C502,112,390,0,251,0Z' fill='%237ca727'/%3E%3Cpath d='M251,181L108,468Q251,536,394,468Z' fill='white'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
-  <link rel="stylesheet" href="/mapa-base.css?v=20261021-red">
-  <link rel="stylesheet" href="/style.css?v=20261021-red">
+  <link rel="stylesheet" href="/mapa-base.css?v=20261021-diario">
+  <link rel="stylesheet" href="/style.css?v=20261021-diario">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
   <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js" defer></script>
-  <script src="/mapa-base.js?v=20261021-red" defer></script>
-  <script src="/map-data.js?v=20261021-red" defer></script>
-  <script src="/app.js?v=20261021-red" defer></script>
+  <script src="/mapa-base.js?v=20261021-diario" defer></script>
+  <script src="/map-data.js?v=20261021-diario" defer></script>
+  <script src="/app.js?v=20261021-diario" defer></script>
 </head>
 <body>
   <noscript>Activa JavaScript para iniciar sesión en Artisa.</noscript>
@@ -97,7 +97,7 @@
         <article class="node front" data-service="front"><span class="node-number">05</span><h3>Frontend</h3><p>Visualiza y explora</p><span class="node-status">Consultando…</span></article>
         <div class="machine-link">↕ <span>Lee datos · guarda resultados</span></div>
         <article class="node machine" data-service="machine"><span class="node-number">03</span><h3>Machine Learning</h3><p>Cierre diario y modelo que aprende las rutas</p><span class="node-status">Consultando…</span></article>
-        <div class="flow-explanation"><strong>Servicios conectados.</strong><p>El ETL trae la telemetría de la API de la empresa a MariaDB. Machine cierra cada día y reaprende las rutas cada semana, y los endpoints entregan los resultados a esta pantalla.</p></div>
+        <div class="flow-explanation"><strong>Servicios conectados.</strong><p>El ETL trae la telemetría de la API de la empresa a MariaDB. Machine cierra cada día y reaprende las rutas con ese día, y los endpoints entregan los resultados a esta pantalla.</p></div>
       </div>
       <div class="pipeline-footer"><span id="last-sync">Esperando la primera carga…</span><span>Revisión automática cada minuto</span></div>
     </section>
@@ -420,11 +420,11 @@
     <div id="prediccion" class="dataset-space" data-dataset-view="prediction" hidden>
       <section class="panel heatmap-panel atlas learned-panel" aria-labelledby="atlas-title">
         <div class="atlas-head">
-          <div><span class="eyebrow">MACHINE LEARNING · RUTAS APRENDIDAS</span><h2 id="atlas-title">Predicción de rutas</h2><p id="heatmap-intro" class="atlas-lede">Las rutas que el modelo aprendió de los viajes reales, de la más concurrida (N1) a la menos (N5), con los camiones en vivo encima. Se reaprende cada semana y hay alerta cuando un camión anda por una ruta mínima o fuera de toda ruta.</p></div>
+          <div><span class="eyebrow">MACHINE LEARNING · RUTAS APRENDIDAS</span><h2 id="atlas-title">Predicción de rutas</h2><p id="heatmap-intro" class="atlas-lede">Las rutas que el modelo aprendió de los viajes reales, de la más concurrida (N1) a la menos (N5), con los camiones en vivo encima. Se reaprende cada día y prevé las rutas de los próximos 7 días; hay alerta cuando un camión anda por una ruta mínima o fuera de toda ruta.</p></div>
           <span id="heatmap-source-status" class="status info">Cargando…</span>
         </div>
         <div class="atlas-stats vg-stats" id="atlas-stats" aria-label="Resumen del modelo y de la flota en vivo">
-          <div class="atlas-stat"><span>Modelo vigente</span><strong id="vg-model">—</strong><small id="vg-model-d">—</small></div>
+          <div class="atlas-stat"><span>Previsión del modelo</span><strong id="vg-model">—</strong><small id="vg-model-d">—</small></div>
           <div class="atlas-stat"><span>Rutas aprendidas</span><strong id="vg-routes">—</strong><small id="vg-routes-d">—</small></div>
           <div class="atlas-stat"><span>En movimiento ahora</span><strong id="vg-moving">—</strong><small id="vg-moving-d">Con dato de los últimos 15 min</small></div>
           <div class="atlas-stat"><span>Último dato recibido</span><strong id="vg-last">—</strong><small id="vg-last-d">—</small></div>

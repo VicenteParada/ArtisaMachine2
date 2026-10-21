@@ -2,7 +2,7 @@
 
 Trabajo pesado una vez al día a la hora DIARIO_HORA (Chile, por defecto 00:30): cierra
 los días pendientes, recalcula los que recibieron reportes atrasados y reentrena el modelo
-de rutas (machine_learning/modelo_rutas.py) cuando hay una semana de datos nuevos. Se puede lanzar a mano con --ahora. Entre medio, cada minuto
+de rutas (machine_learning/modelo_rutas.py) con el día recién cerrado. Se puede lanzar a mano con --ahora. Entre medio, cada minuto
 solo actualiza el resumen "en curso" de hoy (liviano).
 
 1. Hoy: recalcula el resumen "en curso" cada DIARIO_HOY_CADA_MINUTOS.
@@ -280,7 +280,7 @@ def loop():
                 else:
                     hecho = _con_bloqueo(connection, lambda: ciclo(connection, ahora, completo=False)) or []
                     STATE["dias_procesados"] += len(hecho)
-                    # Primer modelo de rutas, semana de datos nueva o método nuevo, sin esperar la
+                    # Primer modelo de rutas, día cerrado nuevo o método nuevo, sin esperar la
                     # hora programada (necesita_recalculo es una consulta liviana).
                     if not hecho and time.monotonic() - RUTAS_REVISADAS["value"] >= 900:
                         RUTAS_REVISADAS["value"] = time.monotonic()

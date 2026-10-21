@@ -248,7 +248,7 @@ function syncDatasetView() {
 // --- Predicción: rutas aprendidas por el modelo, camiones en vivo y alertas ---------------------
 // El modelo (machine_learning/modelo_rutas.py) aprende las rutas de los viajes reales y las clasifica
 // por cuántos camiones distintos las usan: N1 troncal … N5 mínima (1 o 2 camiones). Se reaprende
-// con cada semana de datos nuevos. Las líneas llegan de /api/rutas-aprendidas (solo cambian con
+// cada día y lo aprendido es la previsión de los próximos 7 días. Las líneas llegan de /api/rutas-aprendidas (solo cambian con
 // una versión nueva); camiones y alertas de /api/vigilancia cada minuto. Un camión que no está en
 // ninguna ruta aprendida queda "fuera de ruta" (N6). Hay alerta en N5 y N6.
 const ROUTE_LEVELS = {
@@ -690,10 +690,11 @@ function vgRenderModel() {
     step("4. Nivel de uso", "Cortes naturales de Jenks (k-means exacto en 1D)",
       `Con ${format(params.max_camiones_minima || 2)} camiones o menos la ruta es mínima (N5). El resto se reparte en ` +
       "hasta 4 grupos que aprende el modelo sobre el logaritmo de los camiones de cada ruta (N1 a N4)."),
-    step("Reentrenamiento", `Versión ${format(model.version)} · ${vgTime(model.creado_en)}`,
-      `Se reaprende desde cero con cada ${format(model.cada_dias)} días de datos nuevos, con los últimos ` +
-      `${format((Date.parse(model.datos_hasta) - Date.parse(model.datos_desde)) / 86400000 + 1)} días: la ` +
-      `próxima versión usará datos hasta el ${formatDataDay(model.proxima_con_datos_hasta)}. Las rutas nuevas aparecen ` +
+    step("Reentrenamiento diario y previsión de 7 días", `Versión ${format(model.version)} · ${vgTime(model.creado_en)}`,
+      `Se reaprende desde cero ${model.cada_dias === 1 ? "cada día, con el día recién cerrado" : `cada ${format(model.cada_dias)} días`} ` +
+      `y los últimos ${format((Date.parse(model.datos_hasta) - Date.parse(model.datos_desde)) / 86400000 + 1)} días. ` +
+      `Lo aprendido es la previsión de por dónde andará la flota del ${formatDataDay(model.prevision_desde)} al ` +
+      `${formatDataDay(model.prevision_hasta)}; cada madrugada esa ventana avanza un día. Las rutas nuevas aparecen ` +
       "y las que se dejan de usar bajan de nivel."),
     step("Uso en vivo", "Clasificación de cada posición",
       "Cada camión toma el nivel de la ruta aprendida que pasa a menos de ~1 km; si no hay ninguna está fuera de ruta (N6). " +
@@ -703,9 +704,9 @@ function vgRenderModel() {
 
 function vgRenderStats(data) {
   const model = vg.model;
-  $("vg-model").textContent = "Versión " + format(model.version);
-  $("vg-model-d").textContent = `Aprendió con viajes del ${formatDataDay(model.datos_desde)} al ${formatDataDay(model.datos_hasta)} · ` +
-    `se reaprende con datos hasta el ${formatDataDay(model.proxima_con_datos_hasta)}`;
+  $("vg-model").textContent = `Rutas previstas del ${dayLabel(model.prevision_desde, "short")} al ${dayLabel(model.prevision_hasta, "short")}`;
+  $("vg-model-d").textContent = `Versión ${format(model.version)} · aprendió con viajes del ${formatDataDay(model.datos_desde)} ` +
+    `al ${formatDataDay(model.datos_hasta)} · ${model.cada_dias === 1 ? "se reaprende cada día" : `se reaprende cada ${format(model.cada_dias)} días`}`;
   const alertRoutes = model.niveles.filter((row) => row.nivel === "N5").reduce((total, row) => total + row.rutas, 0);
   $("vg-routes").textContent = format(model.total_rutas);
   $("vg-routes-d").textContent = `${format(model.total_rutas - alertRoutes)} habituales (N1–N4) · ${format(alertRoutes)} mínimas (N5)`;

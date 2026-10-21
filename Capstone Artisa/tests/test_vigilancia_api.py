@@ -77,7 +77,8 @@ class ModeloTests(unittest.TestCase):
         self.assertEqual(list(tabla), ["N1", "N2", "N5", "N6"])   # N3/N4: el modelo aprendió 2 grupos
         self.assertEqual((tabla["N1"]["desde"], tabla["N1"]["hasta"], tabla["N1"]["rutas"]), (15, 20, 1))
         self.assertEqual([n["nivel"] for n in data["niveles"] if n["alerta"]], ["N5", "N6"])
-        self.assertEqual((data["datos_hasta"], data["proxima_con_datos_hasta"]), ("2026-10-09", "2026-10-16"))
+        self.assertEqual((data["datos_hasta"], data["proxima_con_datos_hasta"]), ("2026-10-09", "2026-10-10"))
+        self.assertEqual((data["prevision_desde"], data["prevision_hasta"]), ("2026-10-10", "2026-10-16"))
 
     def test_shared_roads_are_drawn_once_with_the_best_level(self):
         # Una ruta mínima que va por la misma carretera que la troncal no agrega otra línea: cada

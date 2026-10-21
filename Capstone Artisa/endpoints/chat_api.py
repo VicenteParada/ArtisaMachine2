@@ -194,6 +194,8 @@ def learned_routes_summary(data):
         "version": data.get("version"), "aprendio_con_viajes": {"desde": data.get("datos_desde"),
                                                                 "hasta": data.get("datos_hasta")},
         "se_reaprende_con_datos_hasta": data.get("proxima_con_datos_hasta"),
+        "prevision_de_rutas": {"desde": data.get("prevision_desde"), "hasta": data.get("prevision_hasta"),
+                               "nota": "se reaprende cada día; vale para los próximos 7 días"},
         "viajes": data.get("viajes"), "camiones": data.get("camiones"), "rutas": data.get("total_rutas"),
         "metodo": "DBSCAN (lugares), clustering jerárquico (rutas), medoide (línea) y cortes de Jenks (niveles)",
         "tabla_de_niveles": [{"nivel": NIVELES.get(n.get("nivel"), n.get("nivel")),
