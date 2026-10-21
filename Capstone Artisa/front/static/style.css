@@ -1178,12 +1178,20 @@ td.fd-col-level{color:#b8c3c0}
 .vg-history-csv:disabled{opacity:.45;cursor:default}
 
 /* Cortes de señal en la lista y la ficha de una alerta */
-.vg-alert-cut{font-size:9px;font-weight:600;color:#5d5470}
+.vg-alert-cut{font-size:9px;font-weight:600;color:#5f6f86}
 .vg-alert-cut.is-frozen{color:#8a2f86}
-.vg-cuts{display:grid;gap:6px;padding:8px;border-radius:7px;background:#f4f2f7}
-.vg-cuts-title{margin:0;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#5d5470}
-.vg-cut{display:grid;gap:2px;padding-left:8px;border-left:3px solid #9a91ad}
-.vg-cut.is-frozen{border-left-color:#8a2f86}
-.vg-cut-head{display:flex;justify-content:space-between;gap:8px;margin:0;font-size:10px;color:var(--ink)}
-.vg-cut-head span{color:var(--muted);white-space:nowrap}
-.vg-cut-text{margin:0;font-size:9px;line-height:1.45;color:var(--muted)}
+.vg-cuts{display:grid;gap:4px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#fafbfa}
+.vg-cuts-title{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:0 0 2px;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink)}
+.vg-cuts-title small{font-size:10px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--muted)}
+.vg-cut{display:grid;gap:1px;width:100%;padding:5px 6px;border:0;border-radius:6px;background:transparent;text-align:left;cursor:pointer;font:inherit}
+.vg-cut:hover{background:#eef2ef}
+.vg-cut-main{display:grid;grid-template-columns:18px minmax(0,1fr) auto auto;align-items:center;gap:7px;font-size:10px;color:var(--ink)}
+.vg-cut-n{display:grid;place-items:center;width:16px;height:16px;border-radius:50%;background:var(--cut);color:#fff;font-size:9px}
+.vg-cut-kind{font-weight:700;color:var(--cut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vg-cut-when{color:var(--muted);white-space:nowrap}
+.vg-cut-min{min-width:48px;text-align:right;white-space:nowrap}
+.vg-cut-extra{padding-left:25px;font-size:9px;color:var(--muted)}
+.vg-cuts-more summary{padding:3px 6px;font-size:10px;font-weight:600;color:var(--green);cursor:pointer}
+.vg-cuts-legend{margin:3px 0 0;padding-top:6px;border-top:1px solid var(--line);font-size:9px;line-height:1.45;color:var(--muted)}
+.vg-cut-pin{background:none;border:0}
+.vg-cut-pin span{display:grid;place-items:center;width:20px;height:20px;border:2px solid #fff;border-radius:50%;color:#fff;font:700 10px/1 system-ui,sans-serif;box-shadow:0 1px 4px rgba(20,40,42,.35)}

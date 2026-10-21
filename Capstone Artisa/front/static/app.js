@@ -289,9 +289,16 @@ const vgClock = (iso) => new Intl.DateTimeFormat("es-CL", {hour: "2-digit", minu
   .format(new Date(iso));
 // Cortes de señal (Machine, Parte 9): un camión fuera de las rutas habituales sin posición nueva.
 const VG_CUTS = {
-  gps_congelado: {label: "GPS sin posición nueva", note: "El equipo siguió transmitiendo, pero repitiendo la misma posición"},
-  sin_datos: {label: "Sin datos", note: "No llegó ningún reporte: sin cobertura, equipo apagado o sin energía"}
+  gps_congelado: {label: "GPS sin posición nueva", short: "GPS sin posición", color: "#8a2f86",
+    note: "el equipo transmitía, pero repitiendo la misma posición"},
+  sin_datos: {label: "Sin datos", short: "Sin datos", color: "#5f6f86",
+    note: "no llegó ningún reporte (sin cobertura, apagado o sin energía)"}
 };
+const VG_CUTS_SHOWN = 4;
+
+// Marcador numerado del lugar donde se perdió la posición (el número es el de la lista de la ficha).
+const vgCutIcon = (number, cut) => L.divIcon({className: "vg-cut-pin", iconSize: [20, 20], iconAnchor: [10, 10],
+  html: `<span style="background:${VG_CUTS[cut.tipo].color}">${number}</span>`});
 const vgCutsMinutes = (alert) => (alert.cortes || []).reduce((total, cut) => total + cut.minutos, 0);
 function vgCutText(cut) {
   const end = cut.hasta ? `${vgClock(cut.hasta)}` : "sigue";
@@ -1034,20 +1041,20 @@ function vgShowAlert(alert, focus) {
       .bindTooltip(`Ruta habitual más cercana · ${format(alert.corredor.km, 1)} km`, {permanent: true, direction: "auto", className: "vg-tag"})
       .addTo(selectionLayer);
   }
-  // Cortes de señal: dónde se perdió la posición y dónde reapareció (sin dibujar un camino).
-  for (const cut of alert.cortes || []) {
-    const label = VG_CUTS[cut.tipo].label;
+  // Cortes de señal: número donde se perdió la posición, punto hueco donde reapareció y una
+  // línea punteada tenue entre ambos (no es un camino recorrido).
+  (alert.cortes || []).forEach((cut, k) => {
+    const color = VG_CUTS[cut.tipo].color;
     if (cut.despues) {
-      L.polyline([cut.antes, cut.despues], {renderer: selectionRenderer, color: "#7a6f8f", weight: 2, dashArray: "1 7",
-        lineCap: "round", opacity: 0.9}).bindTooltip(`${label} · ${vgDuration(cut.minutos)} · ${format(cut.km_linea, 1)} km en línea recta`,
-        {sticky: true, className: "vg-tag"}).addTo(selectionLayer);
-      L.circleMarker(cut.despues, {renderer: selectionRenderer, radius: 5, color: "#7a6f8f", weight: 3, fillColor: "#fff", fillOpacity: 1})
-        .bindTooltip(`Reapareció · ${vgClock(cut.hasta)}`, {direction: "top", className: "vg-tag"}).addTo(selectionLayer);
+      L.polyline([cut.antes, cut.despues], {renderer: selectionRenderer, color, weight: 1.5, dashArray: "2 6",
+        lineCap: "round", opacity: 0.55, interactive: false}).addTo(selectionLayer);
+      L.circleMarker(cut.despues, {renderer: selectionRenderer, radius: 4, color, weight: 2, fillColor: "#fff", fillOpacity: 1})
+        .bindTooltip(`Corte ${k + 1} · reapareció ${vgClock(cut.hasta)}`, {direction: "top", className: "vg-tag"}).addTo(selectionLayer);
     }
-    L.circleMarker(cut.antes, {renderer: selectionRenderer, radius: 6, color: "#fff", weight: 2, fillColor: "#7a6f8f", fillOpacity: 1})
-      .bindTooltip(`Última posición antes del corte · ${vgClock(cut.desde)}${cut.hasta ? "" : " · sigue sin posición"}`,
-        {direction: "top", className: "vg-tag"}).addTo(selectionLayer);
-  }
+    L.marker(cut.antes, {icon: vgCutIcon(k + 1, cut), pane: "selectionPane", zIndexOffset: 500})
+      .bindTooltip(`Corte ${k + 1} · ${VG_CUTS[cut.tipo].short} desde ${vgClock(cut.desde)}`, {direction: "top", className: "vg-tag"})
+      .addTo(selectionLayer);
+  });
   if (!truckMarkers.has(alert.patente)) {
     L.circleMarker(alert.posicion, {renderer: selectionRenderer, radius: 8, color: "#fff", weight: 3, fillColor: "#d7301f", fillOpacity: 1})
       .bindTooltip("Último dato · " + vgTime(alert.fin), {direction: "top", className: "vg-tag"}).addTo(selectionLayer);
@@ -1084,26 +1091,47 @@ function vgShowAlert(alert, focus) {
   }
 }
 
+function vgCutRow(cut, number) {
+  const kind = VG_CUTS[cut.tipo];
+  const row = el("button", "vg-cut");
+  row.type = "button";
+  row.style.setProperty("--cut", kind.color);
+  const extra = [];
+  if (cut.velocidad_antes !== null && cut.velocidad_antes !== undefined) extra.push(`iba a ${format(cut.velocidad_antes, 0)} km/h`);
+  if (cut.hasta && cut.km_linea !== null) extra.push(`reapareció a ${format(cut.km_linea, 1)} km`);
+  if (!cut.hasta && cut.tipo === "gps_congelado" && cut.ultima_copia) extra.push(`última transmisión ${vgClock(cut.ultima_copia)}`);
+  row.title = [`${kind.label}: ${kind.note}.`, cut.evento_antes ? `Último evento: ${cut.evento_antes}.` : "",
+    cut.kmh_necesaria ? `Promedio necesario: ${format(cut.kmh_necesaria, 0)} km/h.` : ""].filter(Boolean).join(" ");
+  const main = el("span", "vg-cut-main");
+  main.append(el("b", "vg-cut-n", String(number)), el("span", "vg-cut-kind", kind.short),
+    el("span", "vg-cut-when", `${vgClock(cut.desde)} → ${cut.hasta ? vgClock(cut.hasta) : "sigue"}`),
+    el("strong", "vg-cut-min", vgDuration(cut.minutos)));
+  row.append(main);
+  if (extra.length) row.append(el("span", "vg-cut-extra", extra.join(" · ")));
+  row.addEventListener("click", () => {
+    const bounds = L.latLngBounds([cut.antes, cut.despues || cut.antes]);
+    fleetMap.fitBounds(bounds.pad(0.6), {maxZoom: 13});
+  });
+  return row;
+}
+
 function vgCutsBlock(cuts) {
   const block = el("div", "vg-cuts");
-  block.append(el("p", "vg-cuts-title", cuts.length === 1 ? "Corte de señal" : `${format(cuts.length)} cortes de señal`));
-  for (const cut of cuts) {
-    const kind = VG_CUTS[cut.tipo];
-    const row = el("div", "vg-cut" + (cut.tipo === "gps_congelado" ? " is-frozen" : ""));
-    const head = el("p", "vg-cut-head");
-    head.append(el("b", "", kind.label), el("span", "", `${vgClock(cut.desde)} → ${cut.hasta ? vgClock(cut.hasta) : "sigue"} · ${vgDuration(cut.minutos)}`));
-    const details = [kind.note + "."];
-    details.push(`Antes: ${cut.velocidad_antes === null ? "—" : format(cut.velocidad_antes, 0) + " km/h"}`
-      + (cut.encendido_antes === null ? "" : cut.encendido_antes ? ", motor encendido" : ", motor apagado")
-      + (cut.evento_antes ? ` (${cut.evento_antes})` : "") + ".");
-    if (cut.hasta) {
-      details.push(`Reapareció a ${format(cut.km_linea, 1)} km en línea recta (${format(cut.kmh_necesaria, 0)} km/h de promedio).`);
-    } else if (cut.ultima_copia && cut.tipo === "gps_congelado") {
-      details.push(`Última transmisión del equipo: ${vgClock(cut.ultima_copia)}.`);
-    }
-    row.append(head, el("p", "vg-cut-text", details.join(" ")));
-    block.append(row);
+  const total = cuts.reduce((sum, cut) => sum + cut.minutos, 0);
+  const head = el("p", "vg-cuts-title");
+  head.append(el("span", "", cuts.length === 1 ? "Corte de señal" : `${format(cuts.length)} cortes de señal`),
+    el("small", "", `${vgDuration(total)} sin posición`));
+  block.append(head);
+  const rows = cuts.map((cut, k) => vgCutRow(cut, k + 1));
+  block.append(...rows.slice(0, VG_CUTS_SHOWN));
+  if (rows.length > VG_CUTS_SHOWN) {
+    const more = el("details", "vg-cuts-more");
+    more.append(el("summary", "", `Ver ${format(rows.length - VG_CUTS_SHOWN)} más`), ...rows.slice(VG_CUTS_SHOWN));
+    block.append(more);
   }
+  const kinds = [...new Set(cuts.map((cut) => cut.tipo))];
+  block.append(el("p", "vg-cuts-legend", kinds.map((kind) => `${VG_CUTS[kind].short}: ${VG_CUTS[kind].note}`).join(" · ")
+    + ". Toca un corte para verlo en el mapa."));
   return block;
 }
 
