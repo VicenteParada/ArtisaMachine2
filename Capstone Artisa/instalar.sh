@@ -82,9 +82,9 @@ paso 3 "Base de datos"
 NUEVA=0
 [ -f .env ] || NUEVA=1
 CLAVE=$(python3 scripts/prepare_env.py | grep -i "contras" || true)
-docker compose up --detach --wait mariadb
+docker-compose up -d
 sql() {
-    docker compose exec -T mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N "$MARIADB_DATABASE"' \
+    docker-compose exec -T mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N "$MARIADB_DATABASE"' \
         <<<"$1" 2>/dev/null | tr -d '[:space:]'
 }
 # ¿Ya hay reportes? (las tablas existen desde el primer arranque; importa si tienen filas)
@@ -93,7 +93,7 @@ if [ "${DATOS:-0}" = "1" ]; then
     info "La base ya tiene reportes: se conserva tal cual (no se pisa nada)."
 elif [ -n "$RESPALDO" ]; then
     info "Base vacía: restaurando $(basename "$RESPALDO") (puede tardar varios minutos)..."
-    gunzip -c "$RESPALDO" | docker compose exec -T mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
+    gunzip -c "$RESPALDO" | docker-compose exec -T mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
     info "Respaldo restaurado."
     DATOS=1
 else
