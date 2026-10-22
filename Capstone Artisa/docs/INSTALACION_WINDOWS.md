@@ -7,6 +7,25 @@ en empresas grandes). **Ningún comando de esta guía borra datos.**
 Requisitos: Windows 10 (22H2) / 11 o Windows Server 2022 o más nuevo, virtualización activada
 en la BIOS, 8 GB de RAM o más, 30 GB libres, acceso a internet y a la red de la API de la empresa.
 
+## Forma rápida: un solo comando
+
+1. Descarga el proyecto en el equipo Windows: en GitHub, **Code → Download ZIP** (rama `main`), y
+   descomprímelo, por ejemplo en `C:\Artisa`.
+2. (Opcional, para traer los datos de otro equipo) copia en la carpeta `Capstone Artisa`:
+   - su `.env` (mismas claves y la misma contraseña de `admin`), y
+   - su respaldo más reciente `artisa_AAAA-MM-DD.sql.gz` dentro de `Capstone Artisa\respaldos`.
+3. Doble clic en **`Capstone Artisa\INSTALAR_ARTISA.bat`** (o ejecútalo en una terminal) y acepta
+   el aviso de administrador.
+
+El instalador hace todo lo de esta guía: activa WSL2 (si Windows pide reiniciar, al volver a
+iniciar sesión sigue solo), instala Ubuntu y Docker, trae el proyecto, levanta Artisa, carga los
+datos (restaura el respaldo, o conecta la API desde el día que indiques, o carga el JSON
+histórico), abre el acceso desde la red, deja el arranque automático y abre la web. Solo pregunta
+la URL de la API y desde qué día traer datos. Se puede volver a ejecutar: no borra nada y sirve
+para actualizar. Registro: `C:\ProgramData\Artisa\instalacion.log`.
+
+Los pasos de abajo son lo mismo, a mano, por si algo falla.
+
 En cada paso se indica dónde se escribe: **PowerShell (Administrador)** o **Ubuntu**.
 
 ---
