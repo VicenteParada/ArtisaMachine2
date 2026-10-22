@@ -400,18 +400,24 @@ function vgDrawUsage() {
   if (!red) return;
   const focus = Boolean(vg.selected);
   const onlyMinimal = vg.zone === "rare" && !focus;
+  // Con "Solo caminos raros" se resaltan los tramos mínimos que van a 2 km o más de toda ruta
+  // habitual (aparte = 1): los que siguen la misma carretera que una habitual no son un desvío.
+  // El resto queda con sus colores, tenue, para no perder la referencia.
   const groups = {};
-  for (const [a, b, level] of red.tramos) (groups[level] ||= []).push([red.nodos[a], red.nodos[b]]);
-  // De la menos usada a la troncal: las troncales quedan encima.
-  for (const number of [5, 4, 3, 2, 1]) {
-    const segments = groups[number];
+  for (const [a, b, level, , , apart] of red.tramos) {
+    const key = onlyMinimal && level === 5 && apart ? "raro" : level;
+    (groups[key] ||= []).push([red.nodos[a], red.nodos[b]]);
+  }
+  // De la menos usada a la troncal: las troncales quedan encima; lo raro, encima de todo.
+  for (const key of [5, 4, 3, 2, 1, "raro"]) {
+    const segments = groups[key];
     if (!segments) continue;
-    const style = ROUTE_LEVELS["N" + number];
-    const muted = focus || (onlyMinimal && number !== 5);
+    const style = ROUTE_LEVELS["N" + (key === "raro" ? 5 : key)];
+    const faded = !focus && onlyMinimal && key !== "raro";
     L.polyline(segments, {renderer: usageRenderer, lineCap: "round", lineJoin: "round", interactive: false,
-      color: muted ? "#93a29e" : style.color,
-      weight: focus ? Math.max(1.5, style.weight / 3) : muted ? 2 : (onlyMinimal ? 4.5 : style.weight),
-      opacity: focus ? 0.4 : muted ? 0.45 : 0.9}).addTo(usageLayer);
+      color: focus ? "#93a29e" : style.color,
+      weight: focus ? Math.max(1.5, style.weight / 3) : key === "raro" ? 5 : faded ? Math.max(1.5, style.weight * 0.6) : style.weight,
+      opacity: focus ? 0.4 : faded ? 0.28 : 0.9}).addTo(usageLayer);
   }
   if (focus) return;
   // Franja invisible más ancha encima: tocar un camino muestra su nivel y qué rutas pasan.
