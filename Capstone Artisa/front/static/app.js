@@ -330,22 +330,6 @@ function openExplorer() {
   frame?.contentWindow?.postMessage("artisa:show-map", location.origin);
 }
 
-function setSelectionDetail(kind, title, description, metadata) {
-  const detail = $("map-selection-detail");
-  const type = document.createElement("span");
-  type.textContent = kind;
-  const heading = document.createElement("strong");
-  heading.textContent = title;
-  const copy = document.createElement("p");
-  copy.textContent = description;
-  detail.replaceChildren(type, heading, copy);
-  if (metadata) {
-    const extra = document.createElement("small");
-    extra.textContent = metadata;
-    detail.append(extra);
-  }
-}
-
 // --- Camiones ---
 function vehicleDriver(vehicle) {
   const structured = [vehicle.driver_name, vehicle.driver_last_name]
@@ -996,13 +980,34 @@ function vgFact(value, label) {
   return box;
 }
 
+// La ficha flota sobre el mapa (en celular va debajo) y se cierra con ✕ o con Esc. Reemplaza al
+// globo del camión: no se abren los dos con lo mismo.
 function vgCard(kind, state, title, extra) {
   const detail = $("map-selection-detail");
   detail.classList.add("vg-card");
   const head = el("div", "vg-card-head");
   head.append(el("span", "vg-card-kind", kind));
   if (state) head.append(state);
+  const close = el("button", "vg-card-close", "✕");
+  close.type = "button";
+  close.title = "Cerrar";
+  close.setAttribute("aria-label", "Cerrar la ficha");
+  close.addEventListener("click", () => vgReset(false));
+  head.append(close);
   detail.replaceChildren(head, title, ...extra);
+  detail.hidden = false;
+  detail.scrollTop = 0;
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && vg.selected && !$("map-selection-detail").hidden) vgReset(false);
+});
+
+// Márgenes para centrar algo en el mapa sin que lo tape la ficha flotante.
+function vgFocusPadding() {
+  const card = $("map-selection-detail");
+  const floating = !card.hidden && getComputedStyle(card).position === "absolute";
+  return {paddingTopLeft: [50, 70], paddingBottomRight: [floating ? card.offsetWidth + 40 : 50, 70]};
 }
 
 // Dónde anda: en qué ruta mínima o si está fuera de toda ruta aprendida.
@@ -1083,7 +1088,7 @@ function vgShowAlert(alert, focus) {
     const bounds = L.latLngBounds(alert.estela.flat());
     for (const cut of alert.cortes || []) { bounds.extend(cut.antes); if (cut.despues) bounds.extend(cut.despues); }
     if (alert.corredor) bounds.extend(alert.corredor.punto);
-    fleetMap.fitBounds(bounds, {padding: [60, 60], maxZoom: 13});
+    fleetMap.fitBounds(bounds, {...vgFocusPadding(), maxZoom: 13});
   }
 }
 
@@ -1106,7 +1111,7 @@ function vgCutRow(cut, number) {
   if (extra.length) row.append(el("span", "vg-cut-extra", extra.join(" · ")));
   row.addEventListener("click", () => {
     const bounds = L.latLngBounds([cut.antes, cut.despues || cut.antes]);
-    fleetMap.fitBounds(bounds.pad(0.6), {maxZoom: 13});
+    fleetMap.fitBounds(bounds.pad(0.6), {...vgFocusPadding(), maxZoom: 13});
   });
   return row;
 }
@@ -1150,8 +1155,8 @@ function vgShowVehicle(vehicle, focus) {
     facts, link]);
   const marker = truckMarkers.get(vehicle.vehicle_id);
   if (marker && focus) {
-    fleetMap.setView(marker.getLatLng(), Math.max(fleetMap.getZoom(), 11));
-    marker.openPopup();
+    const point = marker.getLatLng();
+    fleetMap.fitBounds(L.latLngBounds([point, point]), {...vgFocusPadding(), maxZoom: Math.max(fleetMap.getZoom(), 11)});
   }
 }
 
@@ -1177,9 +1182,8 @@ function vgReset(fit = true) {
   if (selectionLayer) selectionLayer.clearLayers();
   if (usageLayer) vgDrawUsage();
   if (fleetMap) fleetMap.closePopup();
-  $("map-selection-detail").classList.remove("vg-card");
-  setSelectionDetail("Selección", "Elige una alerta o un camión",
-    "El mapa mostrará solo lo suyo.");
+  $("map-selection-detail").hidden = true;
+  $("map-selection-detail").replaceChildren();
   vgApplyLayers();
   vgMarkSelection();
   if (fit) vgFit(true);
