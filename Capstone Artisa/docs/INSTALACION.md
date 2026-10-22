@@ -26,12 +26,15 @@ cd "Artisa/Capstone Artisa"
 bash instalar.sh
 ```
 
-`instalar.sh` hace todo lo de la sección 1: instala Git, Python y Docker, levanta Artisa, carga
-los datos (restaura un respaldo, conecta la API desde el día que indiques o carga el JSON
-histórico), abre el acceso desde la red y deja todo arrancando solo al encender el equipo. Solo
-pregunta la URL de la API, desde qué día traer datos y si se entra desde la red. Al final muestra
-la contraseña de `admin`. Para llevarse los datos de otro equipo, antes de ejecutarlo copia su
-`.env` en `Capstone Artisa/` y su respaldo `artisa_AAAA-MM-DD.sql.gz` en `Capstone Artisa/respaldos/`.
+`instalar.sh` hace todo lo de la sección 1 sin preguntar nada: instala Git, Python y Docker,
+levanta Artisa, conecta la API de la empresa (su URL viene incluida) y, si la base está vacía,
+trae los reportes desde el 1 de abril de 2026; abre el acceso desde la red y deja todo arrancando
+solo al encender el equipo. Al final muestra la contraseña de `admin`. La primera carga desde
+abril tarda horas y sigue sola por detrás (`python3 scripts/artisa.py logs telemetria`); si la API
+no responde, reintenta sola. Opcional: `ARTISA_DESDE=AAAA-MM-DD`, `ARTISA_API_URL=...`,
+`ARTISA_RED=no` o `ARTISA_JSON=carpeta` delante de `bash instalar.sh`. Si hay un respaldo
+`artisa_AAAA-MM-DD.sql.gz` en `Capstone Artisa/respaldos/` y la base está vacía, se restaura en
+vez de descargar desde la API. El repositorio debe seguir siendo privado: incluye la URL de la API.
 Se puede repetir sin borrar nada. Registro: `Capstone Artisa/instalacion.log`.
 
 La sección 1 es lo mismo paso a paso, por si algo falla.

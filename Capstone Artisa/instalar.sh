@@ -3,32 +3,30 @@
 #
 #   bash instalar.sh                       (desde la carpeta "Capstone Artisa")
 #
-# Instala Git, Python y Docker; levanta Artisa; carga los datos (restaura un respaldo, conecta la
-# API de la empresa desde el día que indiques o carga el JSON histórico); abre el acceso desde la
-# red y deja todo arrancando solo al encender el equipo. Solo pregunta lo necesario.
+# Sin preguntas, de cero: instala Git, Python y Docker; levanta Artisa; conecta la API de la
+# empresa y, si la base está vacía, trae sus reportes desde el 1 de abril de 2026; abre el acceso
+# desde la red y deja todo arrancando solo al encender el equipo.
 #
-# Para traer los datos de otro equipo, antes de ejecutarlo copia en esta carpeta su .env (mismas
-# claves y contraseña de admin) y su respaldo artisa_AAAA-MM-DD.sql.gz en respaldos/.
+# Opcional (variables de entorno, por ejemplo: ARTISA_DESDE=2026-05-01 bash instalar.sh):
+#   ARTISA_API_URL   otra URL de la API (por defecto la de la empresa, abajo)
+#   ARTISA_DESDE     primer día a traer de la API en una base vacía (por defecto 2026-04-01)
+#   ARTISA_RED=no    web solo desde este equipo (por defecto se permite desde la red)
+#   ARTISA_JSON      carpeta con el JSON histórico (solo desarrollo)
+# Si hay un respaldo artisa_AAAA-MM-DD.sql.gz en respaldos/ y la base está vacía, se restaura
+# en vez de descargar todo desde la API (más rápido; trae también su .env para la misma clave).
 #
 # Se puede volver a ejecutar cuando se quiera: lo que ya está hecho se salta y NUNCA se borran
-# datos ni volúmenes. Un respaldo solo se restaura si la base está vacía.
+# datos ni volúmenes.
 set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
 REGISTRO="$PWD/instalacion.log"
 PUERTO=8080
+# API de la empresa (recibe SQL sin token): por eso el repositorio debe seguir siendo PRIVADO.
+API_EMPRESA="http://172.93.54.128:3003/sql"
 
 paso() { printf '\n\033[1;36m[%s/6] %s\033[0m\n' "$1" "$2"; }
 info() { printf '   %s\n' "$*"; }
-preguntar() {  # preguntar "texto" "valor por defecto" -> respuesta en $RESPUESTA
-    local sufijo=""
-    [ -n "${2:-}" ] && sufijo=" [$2]"
-    RESPUESTA=""
-    if { : </dev/tty; } 2>/dev/null; then   # sin terminal (por ejemplo, automatizado): valores por defecto
-        read -r -p "   $1$sufijo: " RESPUESTA </dev/tty || RESPUESTA=""
-    fi
-    RESPUESTA="${RESPUESTA:-${2:-}}"
-}
 env_valor() { [ -f .env ] && sed -n "s/^$1=//p" .env | tail -n1 || true; }
 sudo_() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi; }
 
@@ -68,59 +66,47 @@ if [ "${ARTISA_FASE:-}" != "2" ]; then
     fi
 fi
 
-# --- 2. Datos: qué cargar --------------------------------------------------------------------
-paso 2 "Datos"
-RESPALDO=""
-ultimo=$(ls -1 respaldos/artisa_*.sql.gz 2>/dev/null | sort | tail -n1 || true)
-if [ -n "$ultimo" ]; then
-    preguntar "Hay un respaldo de la base ($(basename "$ultimo")). ¿Restaurarlo? Es lo más rápido (S/N)" "S"
-    [[ "$RESPUESTA" =~ ^[sS] ]] && RESPALDO="$ultimo"
-else
-    info "(Para traer los datos de otro equipo: su respaldo en respaldos/ y su .env en esta carpeta.)"
-fi
+# --- 2. Configuración --------------------------------------------------------------------------
+paso 2 "Configuración"
 URL_ACTUAL=$(env_valor COMPANY_API_URL)
-preguntar "URL de la API de la empresa, ej. http://10.0.0.5:3003 (Enter = omitir)" "$URL_ACTUAL"
-URL="$RESPUESTA"
-DESDE=""
-if [ -n "$URL" ] && [ "$URL" != "$URL_ACTUAL" ] && [ -z "$RESPALDO" ]; then
-    preguntar "Desde qué día traer el historial de la API (AAAA-MM-DD)" "2026-04-01"
-    DESDE="$RESPUESTA"
-fi
-preguntar "Carpeta con el JSON histórico, solo desarrollo (Enter = omitir)" ""
-HISTORICO="$RESPUESTA"
-preguntar "¿Permitir entrar a la web desde otros equipos de la red? (S/N)" "S"
-RED="$RESPUESTA"
+URL="${ARTISA_API_URL:-${URL_ACTUAL:-$API_EMPRESA}}"
+DESDE="${ARTISA_DESDE:-2026-04-01}"
+RED="${ARTISA_RED:-si}"
+HISTORICO="${ARTISA_JSON:-}"
+RESPALDO=$(ls -1 respaldos/artisa_*.sql.gz 2>/dev/null | sort | tail -n1 || true)
+info "API de la empresa: $URL"
+[ -n "$RESPALDO" ] && info "Respaldo disponible: $(basename "$RESPALDO")"
 
 # --- 3. Base de datos ------------------------------------------------------------------------
 paso 3 "Base de datos"
 NUEVA=0
 [ -f .env ] || NUEVA=1
 CLAVE=$(python3 scripts/prepare_env.py | grep -i "contras" || true)
-if [ -n "$RESPALDO" ]; then
-    docker compose up --detach --wait mariadb
-    tablas=$(docker compose exec -T mariadb sh -c \
-        'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=\"$MARIADB_DATABASE\" AND table_name=\"reporte_diario\""' \
-        2>/dev/null | tr -d '[:space:]')
-    if [ "${tablas:-0}" = "0" ]; then
-        info "Restaurando $(basename "$RESPALDO") (puede tardar varios minutos)..."
-        gunzip -c "$RESPALDO" | docker compose exec -T mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
-        info "Respaldo restaurado."
-    else
-        info "La base ya tiene datos: no se restaura el respaldo (no se pisa nada)."
-    fi
+docker compose up --detach --wait mariadb
+sql() {
+    docker compose exec -T mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -N "$MARIADB_DATABASE"' \
+        <<<"$1" 2>/dev/null | tr -d '[:space:]'
+}
+# ¿Ya hay reportes? (las tablas existen desde el primer arranque; importa si tienen filas)
+DATOS=$(sql "SELECT EXISTS(SELECT 1 FROM telemetria_api) OR EXISTS(SELECT 1 FROM raw_gps);")
+if [ "${DATOS:-0}" = "1" ]; then
+    info "La base ya tiene reportes: se conserva tal cual (no se pisa nada)."
+elif [ -n "$RESPALDO" ]; then
+    info "Base vacía: restaurando $(basename "$RESPALDO") (puede tardar varios minutos)..."
+    gunzip -c "$RESPALDO" | docker compose exec -T mariadb sh -c 'mariadb -uroot -p"$MARIADB_ROOT_PASSWORD"'
+    info "Respaldo restaurado."
+    DATOS=1
 else
-    info "Base nueva o existente: se conserva tal cual."
+    info "Base vacía: se traerán los reportes de la API desde el $DESDE."
 fi
 
 # --- 4. Levantar y cargar ----------------------------------------------------------------------
 paso 4 "Levantando Artisa (la primera vez tarda varios minutos)"
 python3 scripts/artisa.py iniciar
-if [ -n "$URL" ] && { [ "$URL" != "$URL_ACTUAL" ] || [ -n "$DESDE" ]; }; then
-    if [ -n "$DESDE" ]; then
-        python3 scripts/artisa.py conectar-api "$URL" --desde "$DESDE"
-    else
-        python3 scripts/artisa.py conectar-api "$URL"
-    fi
+if [ "${DATOS:-0}" != "1" ]; then
+    python3 scripts/artisa.py conectar-api "$URL" --desde "$DESDE"
+elif [ "$URL" != "$URL_ACTUAL" ]; then
+    python3 scripts/artisa.py conectar-api "$URL"
 fi
 if [ -n "$HISTORICO" ]; then
     if grep -q '^ETL_HISTORICO=' .env; then
@@ -135,13 +121,13 @@ fi
 # --- 5. Acceso desde la red -----------------------------------------------------------------
 paso 5 "Acceso desde la red"
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-if [[ "$RED" =~ ^[sS] ]]; then
+if [ "$RED" != "no" ]; then
     python3 scripts/artisa.py acceso-red si
     if command -v ufw >/dev/null 2>&1 && sudo_ ufw status | grep -q "Status: active"; then
         sudo_ ufw allow "$PUERTO/tcp" >/dev/null && info "Firewall: puerto $PUERTO abierto."
     fi
 else
-    info "Solo desde este equipo (se cambia con: python3 scripts/artisa.py acceso-red si)."
+    info "Solo desde este equipo (ARTISA_RED=no; se cambia con: python3 scripts/artisa.py acceso-red si)."
 fi
 
 # --- 6. Listo --------------------------------------------------------------------------------
@@ -149,12 +135,13 @@ paso 6 "Listo"
 python3 scripts/artisa.py estado || true
 printf '\n\033[1;32m=== Artisa instalado ===\033[0m\n'
 echo "Web en este equipo: http://localhost:$PUERTO   (usuario: admin)"
-[[ "$RED" =~ ^[sS] ]] && [ -n "$IP" ] && echo "Web desde la red:   http://$IP:$PUERTO"
+[ "$RED" != "no" ] && [ -n "$IP" ] && echo "Web desde la red:   http://$IP:$PUERTO"
 if [ "$NUEVA" = 1 ] && [ -n "$CLAVE" ]; then
     printf '\033[1;33m>>> %s\033[0m\n' "$CLAVE"
     echo ">>> Guárdala ahora: no se vuelve a mostrar (se cambia con: python3 scripts/artisa.py contrasena)."
 elif [ "$NUEVA" = 0 ]; then
     echo "Se usó el .env existente: la contraseña de admin es la misma de antes."
 fi
-echo "Los días se procesan solos por detrás; con muchos meses de datos puede tardar unas horas."
+echo "Los reportes desde abril se descargan y procesan solos por detrás: la primera carga tarda horas."
+echo "Avance: python3 scripts/artisa.py logs telemetria   (si la API no responde, reintenta sola)."
 echo "Al reiniciar el equipo, Artisa vuelve a arrancar solo. Registro: $REGISTRO"
