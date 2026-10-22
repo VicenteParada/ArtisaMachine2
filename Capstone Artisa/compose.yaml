@@ -1,5 +1,3 @@
-name: artisa
-
 x-db-environment: &db-environment
   DB_HOST: mariadb
   DB_NAME: ${MARIADB_DATABASE:?Ejecuta python3 scripts/prepare_env.py}
