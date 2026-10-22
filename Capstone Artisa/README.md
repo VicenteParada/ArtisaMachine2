@@ -5,6 +5,7 @@ cada día, qué rutas usa la flota (aprendidas por machine learning) y alertas c
 sale de ellas.
 
 - **Instalar en el servidor y operar:** [docs/INSTALACION.md](docs/INSTALACION.md)
+- **Servidor Windows (WSL2):** [docs/INSTALACION_WINDOWS.md](docs/INSTALACION_WINDOWS.md)
 - **Web:** http://localhost:8080 (o `http://IP-DEL-SERVIDOR:8080` desde la red), usuario `admin`
 - **Comandos:** `python3 scripts/artisa.py --help`
 

@@ -1,6 +1,7 @@
 # Instalación y operación de Artisa
 
 Guía paso a paso para dejar Artisa funcionando en el servidor de la empresa y operarlo.
+¿El servidor es Windows? Sigue [INSTALACION_WINDOWS.md](INSTALACION_WINDOWS.md).
 Todos los comandos se escriben en una terminal Linux (Ubuntu, o Ubuntu/WSL en Windows).
 **Ningún comando de esta guía borra datos.**
 
